@@ -363,3 +363,13 @@ test('Google: alg none/HS256 tokens and off-site return URLs are refused (QA)', 
     assert.ok(payload.x === '/' || (payload.x.startsWith('/') && !payload.x.startsWith('//') && !/[\r\n\\]/.test(payload.x)), next + ' -> ' + payload.x);
   }
 });
+
+// QA round 2: society names were hidden only when written exactly as in the newest post.
+test('public view hides society names in any case and from every shown post (QA)', () => {
+  const l = { society: 'Sobha Elite Apartments', posts: [
+    { id: 'a', text: '2BHK at Sobha Elite Apartments, rent 30k. SOBHA ELITE  APARTMENTS gate 2' },
+    { id: 'b', text: 'Same owner also has a 3BHK at Prestige Lakeside Habitat, rent 45k' }] };
+  const p = publicListing(l, { maxPosts: 15 });
+  const all = p.posts.map(x => x.text).join(' ');
+  assert.doesNotMatch(all, /sobha|prestige lakeside/i, all);
+});

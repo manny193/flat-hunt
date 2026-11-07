@@ -4,6 +4,8 @@
 
 // Phones in public post text become this token (no digits at all); the UI renders it as the hatched
 // "number hidden" pill (docs/DESIGN.md).
+import { societyOf } from './core/logic.js';
+
 export const PHONE_TOKEN = '[[phone]]';
 // Indian mobiles, optionally +91 / 91 / 0 prefixed, digits optionally split by up to 3 separator
 // characters (spaces, newlines, dots, dashes, slashes, underscores, brackets, zero-width characters),
@@ -42,7 +44,8 @@ const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
 /** Text safe for the public view: links and emails removed, phone numbers replaced by PHONE_TOKEN. */
 export function publicText(s, hide = []) {
   let t = String(s ?? '');
-  for (const h of hide) if (h && h.length >= 4) t = t.split(h).join('[society]');
+  // Case-insensitive: posts often repeat the name in capitals ("PRESTIGE LAKESIDE HABITAT").
+  for (const h of hide) if (h && h.length >= 4) t = t.replace(new RegExp(h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'), 'gi'), '[society]');
   return maskPhones(t
     .replace(LINK, '[link]').replace(TEL, '[link]').replace(BARE_LINK, '[link]').replace(EMAIL, '[email]'));
 }
@@ -63,7 +66,8 @@ export function publicListing(l, { maxPosts = 1 } = {}) {
   out.groups = (Array.isArray(l.groups) ? l.groups : []).slice(0, 10).map(g => publicText(g));
   out.rentHistory = (Array.isArray(l.rentHistory) ? l.rentHistory : []).map(h => ({ rent: h.rent, at: h.at }));
   const posts = Array.isArray(l.posts) ? l.posts : [];
-  const hide = typeof l.society === 'string' ? [l.society] : [];
+  // Hide the listing's society and any society named in the posts shown (merged posts can name another).
+  const hide = [...new Set([l.society, ...posts.slice(0, maxPosts).map(p => societyOf(p.text))].filter(x => typeof x === 'string'))];
   out.postCount = posts.length;
   out.posts = posts.slice(0, maxPosts).map(p => ({
     id: p.id, group: publicText(p.group || ''), text: publicText(p.text || '', hide), postedAt: p.postedAt ?? null, timeText: p.timeText || '',

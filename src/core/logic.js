@@ -75,6 +75,9 @@ export function moneyMentions(text) {
   return out;
 }
 
+export const SOCIETY_RE = /\b([A-Z][A-Za-z0-9&']+(?:\s+[A-Z][A-Za-z0-9&']+){0,3})\s+(Apartments?|Residency|Residences|Enclave|Towers?|Heights|Homes|Nest|Gardens?|Meadows|Elite|Palms|Society|Habitat|Greens|Villas?|Woods|Springs|Manor)\b/;
+/** Society/building name written in a post (null when none). */
+export const societyOf = text => (String(text || '').match(SOCIETY_RE) || [null])[0];
 export function extract(text) {
   const t = String(text || ''); const lo = t.toLowerCase(); const ex = {};
   // Phone numbers written with spaces ("98765 43210") must not be read as money.
@@ -105,7 +108,7 @@ export function extract(text) {
   ex.availableFrom = av ? av[1].trim() : (/\bimmediate(ly)?\b/i.test(t) ? 'Immediate' : null);
   ex.phones = [...new Set([...t.matchAll(PHONE_RE)].map(x => x[1].replace(/\D/g, '')))];
   ex.mapLinks = [...new Set([...t.matchAll(/https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|(?:www\.)?google\.[a-z.]+\/maps|maps\.google\.[a-z.]+)[^\s)\]]*/gi)].map(x => x[0]))];
-  const soc = t.match(/\b([A-Z][A-Za-z0-9&']+(?:\s+[A-Z][A-Za-z0-9&']+){0,3})\s+(Apartments?|Residency|Enclave|Towers?|Heights|Homes|Nest|Gardens?|Meadows|Elite|Palms|Society)\b/);
+  const soc = t.match(SOCIETY_RE);
   ex.society = soc ? soc[0] : null;
   return ex;
 }
