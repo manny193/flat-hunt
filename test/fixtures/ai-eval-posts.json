@@ -1,0 +1,231 @@
+{
+  "about": "SYNTHETIC posts for evaluating AI extraction (docs/AI-EXTRACTION.md). Not real listings: every phone number is a fake 90000xxxxx number and every society name is invented. Labelling rules are in docs/AI-EXTRACTION.md, 'Labelling rules'. Each expected object lists every scored field; null means 'not stated in the post' and a model that fills it is counted as a hallucination. summary is not scored for exact match (only: present, at most 12 words). phones are extracted locally by regex and never sent to the model; they are listed so the regex baseline can be scored too.",
+  "version": 1,
+  "fields": ["isRental", "kind", "type", "bhk", "rent", "deposit", "depositMonths", "maintenance", "brokerage", "brokerageAmount", "furnishing", "gender", "availableFrom", "society", "locality", "otherUnits", "phones"],
+  "posts": [
+    {
+      "id": "e01",
+      "postedAt": "2026-11-05",
+      "tags": ["classic", "abbreviations"],
+      "text": "2bhk semi furnished 32k + 2.5k maint, deposit 2L, no brokerage, avail 1st dec, call 9000012345. Green Glen Layout, Bellandur",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "2", "rent": 32000, "deposit": 200000, "depositMonths": null, "maintenance": 2500, "brokerage": "no", "brokerageAmount": null, "furnishing": "semi", "gender": null, "availableFrom": "2026-12-01", "society": null, "locality": "Green Glen Layout, Bellandur", "otherUnits": [], "phones": ["9000012345"] }
+    },
+    {
+      "id": "e02",
+      "postedAt": "2026-11-04",
+      "tags": ["flatmate", "female", "maintenance-included", "looking-for-but-offer"],
+      "text": "Looking for a female flatmate to replace me in a 3BHK at Lakeview Enclave, Green Glen Layout. Private room with attached washroom. Rent 16,500 per person, maintenance included. Deposit 1 month. Fully furnished with cook and maid. Available from 15th November. DM or WhatsApp 90000 23456",
+      "expected": { "isRental": true, "kind": "offer", "type": "flatmate", "bhk": "3", "rent": 16500, "deposit": null, "depositMonths": 1, "maintenance": 0, "brokerage": null, "brokerageAmount": null, "furnishing": "fully", "gender": "female", "availableFrom": "2026-11-15", "society": "Lakeview Enclave", "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000023456"] }
+    },
+    {
+      "id": "e03",
+      "postedAt": "2026-11-06",
+      "tags": ["seeking", "budget"],
+      "text": "Hi all, I'm looking for a 1BHK or studio near Green Glen Layout / Bellandur, budget up to 22k. Moving in by Dec 1st week. Working at an office nearby, vegetarian, no pets. Please ping 9000034567",
+      "expected": { "isRental": true, "kind": "seeking", "type": "flat", "bhk": "1", "rent": 22000, "deposit": null, "depositMonths": null, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": null, "gender": null, "availableFrom": "2026-12-01", "society": null, "locality": "Green Glen Layout, Bellandur", "otherUnits": [], "phones": ["9000034567"] }
+    },
+    {
+      "id": "e04",
+      "postedAt": "2026-11-03",
+      "tags": ["hinglish", "owner-direct", "deposit-months"],
+      "text": "Bhai log 2bhk khali hai green glen mein, owner direct, rent 28k maintenance alag 3k, deposit 3 mahine ka. Family ya bachelors dono chalega. Contact 9000045678",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "2", "rent": 28000, "deposit": null, "depositMonths": 3, "maintenance": 3000, "brokerage": "no", "brokerageAmount": null, "furnishing": null, "gender": null, "availableFrom": "immediate", "society": null, "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000045678"] }
+    },
+    {
+      "id": "e05",
+      "postedAt": "2026-11-02",
+      "tags": ["pg", "multi-price", "two-phones"],
+      "text": "Sri Sai Luxury PG for Gents, near Green Glen Layout Bellandur. Single sharing 14,000, double sharing 9,500, triple 7,500. Food (3 times), wifi, housekeeping, washing machine included. Advance 1 month rent. Contact 9000056789 / 9000056790",
+      "expected": { "isRental": true, "kind": "offer", "type": "pg", "bhk": null, "rent": 14000, "deposit": null, "depositMonths": 1, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": null, "gender": "male", "availableFrom": null, "society": "Sri Sai Luxury PG", "locality": "Green Glen Layout, Bellandur", "otherUnits": [ { "label": "double sharing", "bhk": null, "rent": 9500 }, { "label": "triple sharing", "bhk": null, "rent": 7500 } ], "phones": ["9000056789", "9000056790"] }
+    },
+    {
+      "id": "e06",
+      "postedAt": "2026-11-06",
+      "tags": ["broker", "multi-flat", "emoji"],
+      "text": "Flats available in Bellandur & Green Glen Layout ✅ 1BHK – 18k ✅ 2BHK semi furnished – 30k ✅ 3BHK fully furnished at Maple Heights – 52k. Brokerage 1 month rent. Call Ravi (agent) 9000067890",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "1", "rent": 18000, "deposit": null, "depositMonths": null, "maintenance": null, "brokerage": "yes", "brokerageAmount": null, "furnishing": null, "gender": null, "availableFrom": null, "society": null, "locality": "Bellandur, Green Glen Layout", "otherUnits": [ { "label": "2BHK semi furnished", "bhk": "2", "rent": 30000 }, { "label": "3BHK fully furnished, Maple Heights", "bhk": "3", "rent": 52000 } ], "phones": ["9000067890"] }
+    },
+    {
+      "id": "e07",
+      "postedAt": "2026-11-05",
+      "tags": ["flatmate", "replacement", "male"],
+      "text": "Flatmate replacement needed!! 2bhk in Sunrise Meadows Green Glen, 1 room available for a guy from Dec 1. Rent 17k + electricity, deposit 35k. Semi furnished, common area has sofa, fridge, WM. Text 9000078901",
+      "expected": { "isRental": true, "kind": "offer", "type": "flatmate", "bhk": "2", "rent": 17000, "deposit": 35000, "depositMonths": null, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": "semi", "gender": "male", "availableFrom": "2026-12-01", "society": "Sunrise Meadows", "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000078901"] }
+    },
+    {
+      "id": "e08",
+      "postedAt": "2026-11-01",
+      "tags": ["to-let", "indian-number-format", "no-brokers"],
+      "text": "TO-LET: 3 BHK unfurnished independent floor, 5th Cross, Green Glen Layout. Rent Rs. 45,000/- Maintenance Rs. 4,000/- Security deposit Rs. 2,50,000/-. Only family preferred. No brokers please. Contact owner: 9000089012",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "3", "rent": 45000, "deposit": 250000, "depositMonths": null, "maintenance": 4000, "brokerage": "no", "brokerageAmount": null, "furnishing": "unfurnished", "gender": null, "availableFrom": null, "society": null, "locality": "5th Cross, Green Glen Layout", "otherUnits": [], "phones": ["9000089012"] }
+    },
+    {
+      "id": "e09",
+      "postedAt": "2026-11-07",
+      "tags": ["seeking", "flatmate", "female", "budget-range", "no-phone"],
+      "text": "Female, 26, working at a fintech in Green Glen Layout. Searching for a room in a shared flat with other girls, budget 12-15k. Need it from 1st Dec. Pls DM.",
+      "expected": { "isRental": true, "kind": "seeking", "type": "flatmate", "bhk": null, "rent": 15000, "deposit": null, "depositMonths": null, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": null, "gender": "female", "availableFrom": "2026-12-01", "society": null, "locality": "Green Glen Layout", "otherUnits": [], "phones": [] }
+    },
+    {
+      "id": "e10",
+      "postedAt": "2026-11-04",
+      "tags": ["1rk", "immediate", "unlabelled-rent"],
+      "text": "1RK available immediately near Bellandur lake / Green Glen Layout, rent 9500, deposit 30000, suitable for single working person. Call 9000090123",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "1RK", "rent": 9500, "deposit": 30000, "depositMonths": null, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": null, "gender": null, "availableFrom": "immediate", "society": null, "locality": "Bellandur, Green Glen Layout", "otherUnits": [], "phones": ["9000090123"] }
+    },
+    {
+      "id": "e11",
+      "postedAt": "2026-11-03",
+      "tags": ["not-rental", "furniture-sale", "trap"],
+      "text": "Selling my 3 seater sofa and queen bed, moving out of Green Glen Layout. Sofa 12k, bed 8k. Pickup from Silver Oak Apartments. 9000001234",
+      "expected": { "isRental": false, "kind": "offer", "type": null, "bhk": null, "rent": null, "deposit": null, "depositMonths": null, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": null, "gender": null, "availableFrom": null, "society": "Silver Oak Apartments", "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000001234"] }
+    },
+    {
+      "id": "e12",
+      "postedAt": "2026-11-06",
+      "tags": ["hinglish", "flatmate", "female"],
+      "text": "Ek room khali hai 3bhk mein, Green glen layout, sirf ladkiyon ke liye. Rent 14k per head, maintenance 1500, deposit 30k. Fully furnished, AC wala room. 10 Dec se available. WhatsApp karo 9000011122",
+      "expected": { "isRental": true, "kind": "offer", "type": "flatmate", "bhk": "3", "rent": 14000, "deposit": 30000, "depositMonths": null, "maintenance": 1500, "brokerage": null, "brokerageAmount": null, "furnishing": "fully", "gender": "female", "availableFrom": "2026-12-10", "society": null, "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000011122"] }
+    },
+    {
+      "id": "e13",
+      "postedAt": "2026-11-05",
+      "tags": ["pipe-separated", "2.5bhk", "next-year"],
+      "text": "Zero brokerage | 2.5 BHK | Orchid Palms, Green Glen Layout | Rent 38k | Maintenance 3.2k | Deposit 4 months | Semi-furnished (wardrobes, modular kitchen, geyser) | Available 1 Jan 2027 | Bachelors allowed | 9000022233",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "2.5", "rent": 38000, "deposit": null, "depositMonths": 4, "maintenance": 3200, "brokerage": "no", "brokerageAmount": null, "furnishing": "semi", "gender": null, "availableFrom": "2027-01-01", "society": "Orchid Palms", "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000022233"] }
+    },
+    {
+      "id": "e14",
+      "postedAt": "2026-11-02",
+      "tags": ["broker", "brokerage-in-days", "lakh-commas"],
+      "text": "Premium 3BHK fully furnished at Shanti Nest, Bellandur, rent 65,000, maintenance 6,000, deposit 3,00,000. Brokerage 15 days rent. Contact Property Point 9000033344, 9000033345",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "3", "rent": 65000, "deposit": 300000, "depositMonths": null, "maintenance": 6000, "brokerage": "yes", "brokerageAmount": null, "furnishing": "fully", "gender": null, "availableFrom": null, "society": "Shanti Nest", "locality": "Bellandur", "otherUnits": [], "phones": ["9000033344", "9000033345"] }
+    },
+    {
+      "id": "e15",
+      "postedAt": "2026-11-07",
+      "tags": ["broker", "brokerage-amount", "ready-to-move"],
+      "text": "2BHK for rent near Green Glen Layout, rent 26k, deposit 1.5 lakh, broker charges ₹13,000 one-time. Semi furnished. Ready to move. 9000044455",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "2", "rent": 26000, "deposit": 150000, "depositMonths": null, "maintenance": null, "brokerage": "yes", "brokerageAmount": 13000, "furnishing": "semi", "gender": null, "availableFrom": "immediate", "society": null, "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000044455"] }
+    },
+    {
+      "id": "e16",
+      "postedAt": "2026-11-06",
+      "tags": ["seeking", "couple", "budget-range", "mid-month"],
+      "text": "Hey folks! My wife and I are looking for a 2BHK in Green Glen Layout or nearby Bellandur, semi or fully furnished, budget 30-35k incl maintenance, from mid-December. Prefer direct owner, no brokerage. Call 9000055566",
+      "expected": { "isRental": true, "kind": "seeking", "type": "flat", "bhk": "2", "rent": 35000, "deposit": null, "depositMonths": null, "maintenance": null, "brokerage": "no", "brokerageAmount": null, "furnishing": null, "gender": null, "availableFrom": "2026-12-15", "society": null, "locality": "Green Glen Layout, Bellandur", "otherUnits": [], "phones": ["9000055566"] }
+    },
+    {
+      "id": "e17",
+      "postedAt": "2026-11-04",
+      "tags": ["terse", "unlabelled-rent", "owner-here"],
+      "text": "Green Glen Layout, 1BHK, 15000, 50000 deposit, avail now, owner here 9000066677",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "1", "rent": 15000, "deposit": 50000, "depositMonths": null, "maintenance": null, "brokerage": "no", "brokerageAmount": null, "furnishing": null, "gender": null, "availableFrom": "immediate", "society": null, "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000066677"] }
+    },
+    {
+      "id": "e18",
+      "postedAt": "2026-11-03",
+      "tags": ["emoji", "long", "flatmate", "any-gender", "approx-maintenance"],
+      "text": "🏠🏠 FLATMATE WANTED 🏠🏠 Hello everyone!! We are 2 working professionals (1M, 1F) staying in a spacious 3BHK at Green Glen Residency, Green Glen Layout, Bellandur. Looking for a third flatmate (any gender) for the master bedroom with balcony. 🛏️ Rent: ₹21,000 💰 Deposit: ₹42,000 🧹 Maintenance + maid + cook split ~₹3k 📅 Move-in: 20th Nov. Gated society with gym & pool. Non-smokers preferred. DM me or call 9000077788 🙂",
+      "expected": { "isRental": true, "kind": "offer", "type": "flatmate", "bhk": "3", "rent": 21000, "deposit": 42000, "depositMonths": null, "maintenance": 3000, "brokerage": null, "brokerageAmount": null, "furnishing": null, "gender": "any", "availableFrom": "2026-11-20", "society": "Green Glen Residency", "locality": "Green Glen Layout, Bellandur", "otherUnits": [], "phones": ["9000077788"] }
+    },
+    {
+      "id": "e19",
+      "postedAt": "2026-11-05",
+      "tags": ["other-locality", "furnished"],
+      "text": "2BHK available in HSR Layout Sector 2, 10 mins from Green Glen Layout. Rent 33k, deposit 2 lakh. Furnished. 9000088899",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "2", "rent": 33000, "deposit": 200000, "depositMonths": null, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": "fully", "gender": null, "availableFrom": null, "society": null, "locality": "HSR Layout Sector 2", "otherUnits": [], "phones": ["9000088899"] }
+    },
+    {
+      "id": "e20",
+      "postedAt": "2026-11-06",
+      "tags": ["pg", "co-living", "female", "all-inclusive"],
+      "text": "Girls co-living space in Green Glen Layout. Private rooms from ₹18,000/month all inclusive (food, wifi, housekeeping, electricity). Security deposit ₹18,000. No lock-in. Book a visit: 9000099900",
+      "expected": { "isRental": true, "kind": "offer", "type": "pg", "bhk": null, "rent": 18000, "deposit": 18000, "depositMonths": null, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": null, "gender": "female", "availableFrom": null, "society": null, "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000099900"] }
+    },
+    {
+      "id": "e21",
+      "postedAt": "2026-11-07",
+      "tags": ["flatmate", "two-rooms", "male", "villa"],
+      "text": "Two rooms available in our 4BHK villa at Green Glen Layout: room 1 with attached bath ₹19k, room 2 common bath ₹15k. Deposit 2 months rent. Only boys. From 1st December. 9000010101",
+      "expected": { "isRental": true, "kind": "offer", "type": "flatmate", "bhk": "4", "rent": 19000, "deposit": null, "depositMonths": 2, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": null, "gender": "male", "availableFrom": "2026-12-01", "society": null, "locality": "Green Glen Layout", "otherUnits": [ { "label": "room 2, common bath", "bhk": null, "rent": 15000 } ], "phones": ["9000010101"] }
+    },
+    {
+      "id": "e22",
+      "postedAt": "2026-11-05",
+      "tags": ["pm", "numeric-date", "maintenance-included"],
+      "text": "Semi-furnished 1 BHK in Green Glen Layout near the bus stop, 19k pm incl. maintenance, 2 months deposit, no brokerage, available 25/11. Couples welcome. 9000020202",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "1", "rent": 19000, "deposit": null, "depositMonths": 2, "maintenance": 0, "brokerage": "no", "brokerageAmount": null, "furnishing": "semi", "gender": null, "availableFrom": "2026-11-25", "society": null, "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000020202"] }
+    },
+    {
+      "id": "e23",
+      "postedAt": "2026-11-04",
+      "tags": ["flatmate", "ladies", "month-first-date"],
+      "text": "Ladies only - 2BHK flat share at Silver Oak Apartments, Green Glen Layout. One room vacant from Dec 5th. Rent 13,500 + utilities. Deposit 27k. Furnished room (bed, wardrobe, study table). Call/WA 9000030303",
+      "expected": { "isRental": true, "kind": "offer", "type": "flatmate", "bhk": "2", "rent": 13500, "deposit": 27000, "depositMonths": null, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": "fully", "gender": "female", "availableFrom": "2026-12-05", "society": "Silver Oak Apartments", "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000030303"] }
+    },
+    {
+      "id": "e24",
+      "postedAt": "2026-11-02",
+      "tags": ["hinglish", "seeking", "male", "month-only"],
+      "text": "Koi 2bhk ya 3bhk flat batao green glen layout ke paas, hum 3 ladke hain, budget 40k tak, brokerage nahi denge. Jan se chahiye. 9000040404",
+      "expected": { "isRental": true, "kind": "seeking", "type": "flat", "bhk": "2", "rent": 40000, "deposit": null, "depositMonths": null, "maintenance": null, "brokerage": "no", "brokerageAmount": null, "furnishing": null, "gender": "male", "availableFrom": "2027-01", "society": null, "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000040404"] }
+    },
+    {
+      "id": "e25",
+      "postedAt": "2026-11-06",
+      "tags": ["1rk", "studio", "plus91-spaced-phone", "inclusive"],
+      "text": "Fully furnished studio (1RK) at Maple Heights, Green Glen Layout. ₹16k inclusive of maintenance & wifi. Deposit ₹50k. Available from 1 Dec. Contact +91 90000 50505",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "1RK", "rent": 16000, "deposit": 50000, "depositMonths": null, "maintenance": 0, "brokerage": null, "brokerageAmount": null, "furnishing": "fully", "gender": null, "availableFrom": "2026-12-01", "society": "Maple Heights", "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000050505"] }
+    },
+    {
+      "id": "e26",
+      "postedAt": "2026-11-07",
+      "tags": ["price-drop", "old-rent-trap", "repost"],
+      "text": "PRICE DROPPED 🔻 2BHK at Lakeview Enclave, Green Glen Layout now 29k (earlier 31k). Maintenance 2.8k. Deposit 1.5L. Semi furnished. No brokerage. Available immediately. 9000060606",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "2", "rent": 29000, "deposit": 150000, "depositMonths": null, "maintenance": 2800, "brokerage": "no", "brokerageAmount": null, "furnishing": "semi", "gender": null, "availableFrom": "immediate", "society": "Lakeview Enclave", "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000060606"] }
+    },
+    {
+      "id": "e27",
+      "postedAt": "2026-11-05",
+      "tags": ["lease-takeover", "advance", "furniture-price-trap"],
+      "text": "Leaving Bangalore, need someone to take over my 1BHK lease at Sunrise Meadows, Green Glen Layout. Rent 21,500, advance 1,00,000 (will be transferred). Fully furnished, can leave the furniture for ₹25k. Move in by 30th Nov. Ping 9000070707",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "1", "rent": 21500, "deposit": 100000, "depositMonths": null, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": "fully", "gender": null, "availableFrom": "2026-11-30", "society": "Sunrise Meadows", "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000070707"] }
+    },
+    {
+      "id": "e28",
+      "postedAt": "2026-11-03",
+      "tags": ["disguised-broker", "service-charge", "trap"],
+      "text": "Owner flat 2BHK Green Glen Layout 27k rent. Small service charge of ₹5,000 applicable. Deposit 1.5L. Call 9000080808",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "2", "rent": 27000, "deposit": 150000, "depositMonths": null, "maintenance": null, "brokerage": "yes", "brokerageAmount": 5000, "furnishing": null, "gender": null, "availableFrom": null, "society": null, "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000080808"] }
+    },
+    {
+      "id": "e29",
+      "postedAt": "2026-11-06",
+      "tags": ["vague", "no-numbers", "next-month"],
+      "text": "Anyone looking for a flat in Green Glen Layout? We have one 2BHK coming vacant next month in our building. DM for details.",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "2", "rent": null, "deposit": null, "depositMonths": null, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": null, "gender": null, "availableFrom": "2026-12", "society": null, "locality": "Green Glen Layout", "otherUnits": [], "phones": [] }
+    },
+    {
+      "id": "e30",
+      "postedAt": "2026-11-04",
+      "tags": ["seeking", "flatmate", "male", "looking-for-flatmate-trap"],
+      "text": "Looking for flatmate? I'm a guy (28, SDE) searching for a room in an existing flat in Green Glen / Bellandur. Budget 15k max. Need from 15 Nov. Non-smoker, clean. Ping 9000090909",
+      "expected": { "isRental": true, "kind": "seeking", "type": "flatmate", "bhk": null, "rent": 15000, "deposit": null, "depositMonths": null, "maintenance": null, "brokerage": null, "brokerageAmount": null, "furnishing": null, "gender": "male", "availableFrom": "2026-11-15", "society": null, "locality": "Green Glen Layout, Bellandur", "otherUnits": [], "phones": ["9000090909"] }
+    },
+    {
+      "id": "e31",
+      "postedAt": "2026-11-01",
+      "tags": ["sqft-trap", "year-trap", "deposit-months"],
+      "text": "Spacious 1450 sq ft 3BHK in Orchid Palms, built 2021, Green Glen Layout. Rent 48000, maintenance 4500, deposit 6 months. Pet friendly. Unfurnished. Available Dec 1. 9000012121",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "3", "rent": 48000, "deposit": null, "depositMonths": 6, "maintenance": 4500, "brokerage": null, "brokerageAmount": null, "furnishing": "unfurnished", "gender": null, "availableFrom": "2026-12-01", "society": "Orchid Palms", "locality": "Green Glen Layout", "otherUnits": [], "phones": ["9000012121"] }
+    },
+    {
+      "id": "e32",
+      "postedAt": "2026-11-02",
+      "tags": ["number-before-label", "lowercase", "owner"],
+      "text": "25k rent 1L deposit 2bhk green glen layout bellandur, family only, avail from 1st jan. Owner: 9000013131",
+      "expected": { "isRental": true, "kind": "offer", "type": "flat", "bhk": "2", "rent": 25000, "deposit": 100000, "depositMonths": null, "maintenance": null, "brokerage": "no", "brokerageAmount": null, "furnishing": null, "gender": null, "availableFrom": "2027-01-01", "society": null, "locality": "Green Glen Layout, Bellandur", "otherUnits": [], "phones": ["9000013131"] }
+    }
+  ]
+}
