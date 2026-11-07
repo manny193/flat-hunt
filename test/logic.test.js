@@ -141,3 +141,13 @@ test('money parsing: adjacent labels and spaced phone numbers (QA)', () => {
   const e = extract('call 98765 43210 for 2bhk, 30k');
   assert.equal(e.rent, 30000); assert.deepEqual(e.phones, ['9876543210']);
 });
+
+// QA regression: with every area paused the keyword filter switched itself off and every
+// scraped post (all of Bangalore) went to Review.
+test('all areas paused: posts are skipped, not all kept (QA)', () => {
+  const paused = makeContext([{ id: 1, ...GREEN_GLEN, active: false }], { keywordFilter: true });
+  const r = processItems(SAMPLES, 'scraper', [], paused);
+  assert.equal(r.report.newListings, 0); assert.equal(r.report.offTopic, SAMPLES.length);
+  const none = makeContext([], { keywordFilter: true });
+  assert.ok(processItems(SAMPLES, 'scraper', [], none).report.newListings > 0, 'no areas at all: nothing to filter by, keep posts');
+});

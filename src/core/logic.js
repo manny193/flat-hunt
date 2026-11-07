@@ -376,7 +376,8 @@ export function screenItem(raw, source, ctx, report, now) {
   const text = String(pick(obj, TEXT_KEYS) || '').trim();
   if (text.length < 15) { report.noText++; return null; }
   const areas = matchAreas(text + ' ' + asName(pick(obj, GROUP_KEYS)), ctx.areas);
-  if (ctx.keywordFilter !== false && ctx.areas.length && !areas.length) { report.offTopic++; return null; }
+  // Filter whenever the user has any area: pausing every area must not let every post through.
+  if (ctx.keywordFilter !== false && (ctx.areas.length || ctx.hasAreas) && !areas.length) { report.offTopic++; return null; }
   const p = normalizeRaw(obj, source, now);
   p.areas = areas;
   let known = isKnownGroup(p.group, p.groupUrl, ctx.watched); if (known == null && typeof p.groupKnownHint === 'boolean') known = p.groupKnownHint;
@@ -393,6 +394,7 @@ export function makeContext(areas, settings) {
   return {
     areas: active.map(a => ({ id: a.id, kws: keywordList(a.keywords) })).filter(a => a.kws.length),
     areaNames: new Map((areas || []).map(a => [a.id, a.name])),
+    hasAreas: (areas || []).length > 0,
     watched: watchedGroups(settings?.groups),
     keywordFilter: settings?.keywordFilter,
   };
