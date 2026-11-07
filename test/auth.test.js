@@ -5,7 +5,7 @@ import { createApp } from '../src/app.js';
 import { createSession, verifySession, COOKIE, verifyAccessJwt, resetAccessCache, LOGIN_MAX_FAILS } from '../src/auth.js';
 import { memoryDb } from './helpers.js';
 
-const BASE = 'https://radar.test';
+const BASE = 'https://hunt.test';
 const PW = 'correct horse battery staple';
 const SECRET = 'test-session-secret-0123456789abcdef0123';
 const assets = async req => ['/', '/app.css', '/manifest.webmanifest'].includes(new URL(req.url).pathname) ? new Response('asset', { headers: { 'content-type': 'text/plain' } }) : null;
@@ -97,6 +97,10 @@ test('Origin check on state-changing API calls', async () => {
   assert.equal(bad.status, 403);
   assert.equal((await call('POST', '/api/areas', { body: { name: 'Green Glen' }, headers: { origin: BASE } })).status, 201);
   assert.equal((await call('POST', '/api/login', { body: { password: 'x' }, headers: { origin: 'https://evil.example' } })).status, 403);
+  // Sec-Fetch-Site wins when present (Origin is "null" on same-origin form posts under no-referrer)
+  assert.equal((await call('POST', '/api/areas', { body: { name: 'HSR' }, headers: { origin: 'null', 'sec-fetch-site': 'same-origin' } })).status, 201);
+  assert.equal((await call('POST', '/api/areas', { body: { name: 'BTM' }, headers: { origin: BASE, 'sec-fetch-site': 'cross-site' } })).status, 403);
+  assert.equal((await call('POST', '/api/areas', { body: { name: 'BTM' }, headers: { 'sec-fetch-site': 'same-site' } })).status, 403);
 });
 
 // ---------- Cloudflare Access ----------

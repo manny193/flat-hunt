@@ -3,7 +3,7 @@
 
 import { parseCookies, clientIp } from './http.js';
 
-export const COOKIE = '__Host-fr_session';
+export const COOKIE = '__Host-flat-hunt-session';
 export const SESSION_DAYS = 30;
 export const LOGIN_WINDOW_MS = 15 * 60e3;
 export const LOGIN_MAX_FAILS = 5;

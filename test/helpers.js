@@ -1,6 +1,7 @@
 // Shared test helpers: in-memory node:sqlite with migrations applied.
 import { readFileSync } from 'node:fs';
-import { openSqlite, sqliteDriver, migrateSqlite } from '../src/db/drivers.js';
+import { sqliteDriver } from '../src/db/drivers.js';
+import { openSqlite, migrateSqlite } from '../src/db/node-sqlite.js';
 import { loadMigrations } from '../src/db/fs-migrations.js';
 import { createRepo } from '../src/db/repo.js';
 

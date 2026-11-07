@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
 import { memoryDb, SAMPLES } from './helpers.js';
 
-const BASE = 'https://radar.test';
+const BASE = 'https://hunt.test';
 async function harness(envOver = {}) {
   const t = await memoryDb();
   const app = createApp({ repo: () => t.repo, assets: async req => new URL(req.url).pathname === '/' || new URL(req.url).pathname === '/app.css' ? new Response('<!doctype html>ok', { headers: { 'content-type': 'text/html' } }) : null });
@@ -107,7 +107,7 @@ test('security headers on every response, unknown routes 404, export download', 
   }
   assert.equal((await call('GET', '/api/nope')).status, 404);
   const ex = await call('GET', '/api/export');
-  assert.match(ex.headers.get('content-disposition'), /attachment; filename="flat-radar-/);
+  assert.match(ex.headers.get('content-disposition'), /attachment; filename="flat-hunt-/);
   assert.deepEqual(ex.data.listings, []);
 });
 

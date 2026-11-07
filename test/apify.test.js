@@ -5,9 +5,9 @@ import { createApp } from '../src/app.js';
 import { buildInput, webhookParam, OFFICIAL_ACTOR, DEFAULT_ACTOR, DATASET_FIELDS } from '../src/apify.js';
 import { memoryDb, GREEN_GLEN } from './helpers.js';
 
-const BASE = 'https://radar.test';
+const BASE = 'https://hunt.test';
 const SECRET = 'ingest-secret-0123456789abcdef0123456789';
-const ENV = { RUNTIME: 'worker', APP_PASSWORD: 'pw-pw-pw-pw-pw-pw', SESSION_SECRET: 'session-secret-0123456789abcdef0123', INGEST_SECRET: SECRET, APIFY_TOKEN: 'apify_api_TOKEN', PUBLIC_BASE_URL: 'https://radar.test/' };
+const ENV = { RUNTIME: 'worker', APP_PASSWORD: 'pw-pw-pw-pw-pw-pw', SESSION_SECRET: 'session-secret-0123456789abcdef0123', INGEST_SECRET: SECRET, APIFY_TOKEN: 'apify_api_TOKEN', PUBLIC_BASE_URL: 'https://hunt.test/' };
 
 const post = (i, area = 'Green Glen') => ({ type: 'post', groupId: '111', text: `${1 + (i % 3)}BHK available in ${area}, rent ${20000 + i * 1000}. ${['tower', 'villa', 'corner', 'garden', 'lake', 'metro', 'school', 'market', 'temple', 'park'].map(w => w + 'x' + i).join(' ')}. Call 90000${String(10000 + i)}`, url: `https://www.facebook.com/groups/111/posts/${i}/`, createdAt: new Date(Date.UTC(2026, 10, 7) - i * 60e3).toISOString() });
 const DATASET = [{ type: 'group', id: '111', name: 'Bellandur Flats', url: 'https://www.facebook.com/groups/111', privacy: 'public' }, ...Array.from({ length: 24 }, (_, i) => post(i))];
@@ -109,7 +109,7 @@ test('scheduled: budget check, input from watched groups, cutoff = last successf
   assert.deepEqual(JSON.parse(start.init.body), { groups: ['https://www.facebook.com/groups/111'], resultsPerGroup: 25, sortOrder: 'new', postsPublishedAfter: new Date(lastStart - 36e5).toISOString(), includeGroupInfo: true });
   const hooks = JSON.parse(atob(start.url.searchParams.get('webhooks')));
   assert.deepEqual(hooks[0].eventTypes, ['ACTOR.RUN.SUCCEEDED']);
-  assert.equal(hooks[0].requestUrl, 'https://radar.test/api/ingest/apify');
+  assert.equal(hooks[0].requestUrl, 'https://hunt.test/api/ingest/apify');
   assert.deepEqual(JSON.parse(hooks[0].headersTemplate), { 'X-Ingest-Secret': SECRET });
   const s = await repo.getSettings();
   assert.equal(s.apifyUsage.usedUsd, 1.2); assert.equal(s.apifyUsage.limitUsd, 5); assert.equal(s.scheduler.action, 'started');

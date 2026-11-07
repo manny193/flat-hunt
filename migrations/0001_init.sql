@@ -1,4 +1,4 @@
--- Flat Radar schema (SQLite dialect: runs on Cloudflare D1 and node:sqlite).
+-- Flat Hunt schema (SQLite dialect: runs on Cloudflare D1 and node:sqlite).
 -- Times are epoch milliseconds (INTEGER). JSON is stored as TEXT.
 
 -- Areas the user is hunting in. keywords = JSON array of lowercase variants.

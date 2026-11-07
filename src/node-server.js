@@ -1,5 +1,5 @@
 // Node entry: node:http -> the same Fetch handler as the Worker, node:sqlite storage, web/ served statically.
-//   PORT (8787), HOST (0.0.0.0), DB_PATH (./data/flat-radar.db), CRON_ENABLED=1 + APIFY_TOKEN for the in-process
+//   PORT (8787), HOST (0.0.0.0), DB_PATH (./data/flat-hunt.db), CRON_ENABLED=1 + APIFY_TOKEN for the in-process
 //   4-hourly job (CRON_INTERVAL_MINUTES, default 240), TRUST_PROXY=1 behind a reverse proxy, AUTH_DISABLED=1 for local dev.
 import http from 'node:http';
 import { Readable } from 'node:stream';
@@ -8,7 +8,8 @@ import { mkdirSync } from 'node:fs';
 import { normalize, extname, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
-import { openSqlite, sqliteDriver, migrateSqlite } from './db/drivers.js';
+import { sqliteDriver } from './db/drivers.js';
+import { openSqlite, migrateSqlite } from './db/node-sqlite.js';
 import { loadMigrations } from './db/fs-migrations.js';
 import { createRepo } from './db/repo.js';
 
@@ -65,7 +66,7 @@ async function send(res, response) {
 /** Start the server. Returns {server, url, repo, close}. Used by `npm start`, tests and the e2e script. */
 export async function startServer(opts = {}) {
   const env = { ...process.env, ...(opts.env || {}), RUNTIME: 'node' };
-  const dbPath = opts.dbPath ?? env.DB_PATH ?? './data/flat-radar.db';
+  const dbPath = opts.dbPath ?? env.DB_PATH ?? './data/flat-hunt.db';
   if (dbPath !== ':memory:') mkdirSync(dirname(resolve(dbPath)), { recursive: true });
   const raw = await openSqlite(dbPath);
   const applied = migrateSqlite(raw, loadMigrations());
@@ -101,7 +102,7 @@ const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(imp
 if (isMain) {
   const s = await startServer();
   const mode = s.env.APP_PASSWORD && s.env.SESSION_SECRET ? 'password login' : s.env.AUTH_DISABLED === '1' ? 'AUTH DISABLED (local dev only)' : 'login NOT configured: API returns 503';
-  console.log(`Flat Radar on ${s.url} (${mode})`);
+  console.log(`Flat Hunt on ${s.url} (${mode})`);
   let stopping = false;
   const stop = sig => { if (stopping) return; stopping = true; console.log(`${sig}: shutting down`); const force = setTimeout(() => process.exit(1), 8000); force.unref(); s.close().then(() => process.exit(0)); };
   process.on('SIGTERM', () => stop('SIGTERM')); process.on('SIGINT', () => stop('SIGINT'));

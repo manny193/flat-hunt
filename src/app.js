@@ -86,11 +86,16 @@ async function route(request, env, ctx, deps, fetchFn) {
 const redirect = (to, status = 302) => new Response(null, { status, headers: { location: to } });
 const safeNext = n => (typeof n === 'string' && /^\/(?!\/)[^\s\\]*$/.test(n) && !n.startsWith('/login')) ? n : '/';
 /** State-changing requests must come from our own pages (CSRF defence on top of SameSite=Lax). */
+// Prefers Sec-Fetch-Site (all current browsers): with Referrer-Policy: no-referrer a same-origin
+// form POST carries `Origin: null`, so Origin alone can't tell friend from foe.
 function checkOrigin(request) {
+  const refuse = () => { throw new HttpError(403, 'bad_origin', 'Cross-site request refused.'); };
+  const site = request.headers.get('sec-fetch-site');
+  if (site) { if (site !== 'same-origin' && site !== 'none') refuse(); return; }
   const origin = request.headers.get('origin');
-  if (!origin) return; // non-browser clients; browsers always send Origin on POST/PATCH/DELETE
+  if (!origin || origin === 'null') return; // non-browser client or opaque origin; SameSite=Lax still applies
   let host; try { host = new URL(origin).host; } catch { host = ''; }
-  if (host !== new URL(request.url).host) throw new HttpError(403, 'bad_origin', 'Cross-site request refused.');
+  if (host !== new URL(request.url).host) refuse();
 }
 const int = v => (v != null && /^\d{1,15}$/.test(String(v)) ? Number(v) : null);
 const str = (v, max) => typeof v === 'string' ? v.slice(0, max) : null;
@@ -154,9 +159,9 @@ function loginPage(mode, error, next) {
         <button class="btn primary" type="submit">Log in</button>
       </form>`;
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Log in · Flat Radar</title><meta name="robots" content="noindex"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="manifest" href="/manifest.webmanifest">
+<title>Log in · Flat Hunt</title><meta name="robots" content="noindex"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#D0312D"><link rel="stylesheet" href="/app.css"></head>
-<body class="login-page"><main class="login-card"><div class="board"><span class="plate">TO-LET</span><span class="rentbig">Flat Radar</span><div class="kind">Your flat hunt, sorted</div></div>${body}</main></body></html>`;
+<body class="login-page"><main class="login-card"><div class="board"><span class="plate">TO-LET</span><span class="rentbig">Flat Hunt</span><div class="kind">Your flat hunt, sorted</div></div>${body}</main></body></html>`;
   return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
 }
 
@@ -242,7 +247,7 @@ async function api(request, env, method, path, url, repo, fetchFn) {
   if (res === 'export' && !id && method === 'GET') {
     const [listings, areas, settings] = await Promise.all([repo.listListings(), repo.listAreas(), repo.getSettings()]);
     return new Response(JSON.stringify({ exportedAt: new Date(now).toISOString(), areas, settings: { groups: settings.groups || [], keywordFilter: settings.keywordFilter !== false }, listings }, null, 1), {
-      headers: { 'content-type': 'application/json; charset=utf-8', 'content-disposition': `attachment; filename="flat-radar-${new Date(now).toISOString().slice(0, 10)}.json"` },
+      headers: { 'content-type': 'application/json; charset=utf-8', 'content-disposition': `attachment; filename="flat-hunt-${new Date(now).toISOString().slice(0, 10)}.json"` },
     });
   }
   return errorJson(404, 'not_found', 'No such API route.');
