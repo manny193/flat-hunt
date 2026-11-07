@@ -196,3 +196,17 @@ test('timing: 300 posts against 2,000 existing listings', async () => {
   assert.ok(worst.timings.totalMs < 3000, 'generous ceiling so slow CI does not flake');
   assert.ok(typ.timings.jsMs < 40, `typical batch JS time ${typ.timings.jsMs.toFixed(1)} ms (target ~10 ms; ceiling is loose for shared CI runners)`);
 });
+
+test('timing: 300-post scrape batch (10 % in area) on a small tracker, JS time per batch', async () => {
+  const { repo } = await setup();
+  const areas = await repo.listAreas(), settings = await repo.getSettings();
+  const r = rng(7); const js = [];
+  for (let k = 0; k < 5; k++) {
+    const batch = Array.from({ length: 300 }, (_, i) => synthPost(r, 50000 + k * 1000 + i, i % 10 ? 'Whitefield' : 'Green Glen'));
+    js.push((await ingestItems(repo, batch, { source: 'apify', now: NOW + k, areas, settings })).timings.jsMs);
+  }
+  const warm = js.slice(1).sort((a, b) => a - b); const median = (warm[1] + warm[2]) / 2;
+  console.log(`# ingest timing, 300-post batch on a small tracker: JS median ${median.toFixed(1)} ms warm (first, cold-JIT batch ${js[0].toFixed(1)} ms)`);
+  // Target is ~5 ms on a developer machine; the ceiling is looser so shared CI runners don't flake.
+  assert.ok(median < 10, `median JS time ${median.toFixed(1)} ms`);
+});
