@@ -362,14 +362,14 @@ export function emptyReport(source, now, total) {
 export function mergeReports(a, b) {
   if (!a) return structuredClone(b);
   for (const k of ['total', 'noText', 'offTopic', 'seeking', 'dupes', 'newListings', 'merged', 'known', 'outside']) a[k] = (a[k] || 0) + (b[k] || 0);
-  for (const k of ['outsideGroups', 'knownGroups', 'byArea']) { a[k] = a[k] || {}; for (const [g, n] of Object.entries(b[k] || {})) a[k][g] = (a[k][g] || 0) + n; }
+  for (const k of ['outsideGroups', 'knownGroups', 'byArea', 'fetchedByGroup', 'matchedByGroup']) { if (!a[k] && !b[k]) continue; a[k] = a[k] || {}; for (const [g, n] of Object.entries(b[k] || {})) a[k][g] = (a[k][g] || 0) + n; }
   const seen = new Set((a.unscrapable || []).map(u => u.url || u.name));
   a.unscrapable = [...(a.unscrapable || []), ...(b.unscrapable || []).filter(u => !seen.has(u.url || u.name))];
   return a;
 }
 /** Normalise, area-filter and classify one raw item. Returns null (and counts it) when skipped. */
 const TEXT_KEYS = ['text', 'postText', 'post_text', 'message', 'content', 'body', 'caption', 'description'];
-const GROUP_KEYS = ['groupTitle', 'groupName', 'group_name', 'group', 'pageName', 'groupTitleText'];
+export const GROUP_KEYS = ['groupTitle', 'groupName', 'group_name', 'group', 'pageName', 'groupTitleText'];
 export function screenItem(raw, source, ctx, report, now) {
   // Cheap checks first: most scraped posts are about other areas, so skip full normalisation for them.
   const obj = typeof raw === 'string' ? { text: raw } : (raw && typeof raw === 'object' ? raw : {});

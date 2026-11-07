@@ -6,8 +6,9 @@
 //   4. one atomic batch write
 // A full ingest is ~4 queries regardless of batch size.
 
-import { prepareItems, emptyReport, screenItem, makeContext, tokens, compatible, scoreCandidate, applyPost, newListing, newId, fingerprint, sameAreas, mergeReports, sketches, postSketch, plausible, MATCH_THRESHOLD, RENT_WINDOW } from './core/logic.js';
+import { pick, asName, GROUP_KEYS, prepareItems, emptyReport, screenItem, makeContext, tokens, compatible, scoreCandidate, applyPost, newListing, newId, fingerprint, sameAreas, mergeReports, sketches, postSketch, plausible, MATCH_THRESHOLD, RENT_WINDOW } from './core/logic.js';
 import { bhkKey } from './db/repo.js';
+import { enrich } from './ai.js';
 
 const DAY = 864e5;
 export const CANDIDATE_DAYS = 60;
@@ -24,7 +25,7 @@ const keysOf = p => {
 /**
  * @param repo   createRepo() instance
  * @param raw    array of raw items (Apify rows, phone scan posts, pasted posts)
- * @param opts   {source, now?, datasetId?, sample?, areas?, settings?, idFn?,
+ * @param opts   {source, now?, datasetId?, sample?, areas?, settings?, idFn?, env? (AI hook),
  *                 groups? (group rows from earlier pages), run? {status, report, progress} for paged dataset ingest}
  * @returns {report (this batch), runReport (accumulated), groups, changed: listing ids, timings}
  * timings.jsMs is time outside DB calls: on Workers+D1 that is roughly the CPU the invocation is billed for.
@@ -40,9 +41,15 @@ export async function ingestItems(repo, raw, opts) {
   const report = emptyReport(source, now, prepared.items.length);
   report.unscrapable = prepared.unscrapable;
 
-  // 1. screen
-  const posts = [];
-  for (const r of prepared.items) { const s = screenItem(r, source, ctx, report, now); if (s) posts.push(s); }
+  // 1. screen. Per-group counts (posts fetched, posts in one of our areas) feed the admin stats.
+  const posts = []; const fetchedByGroup = {}, matchedByGroup = {};
+  const groupOf = r => (r && typeof r === 'object' ? asName(pick(r, GROUP_KEYS)) : '') || 'Group not detected';
+  for (const r of prepared.items) {
+    const g = groupOf(r); fetchedByGroup[g] = (fetchedByGroup[g] || 0) + 1;
+    const s = screenItem(r, source, ctx, report, now);
+    if (s) { posts.push(s); matchedByGroup[g] = (matchedByGroup[g] || 0) + 1; }
+  }
+  report.fetchedByGroup = fetchedByGroup; report.matchedByGroup = matchedByGroup;
 
   const tScreen = performance.now();
   // 2. exact keys (one query)
@@ -128,6 +135,14 @@ export async function ingestItems(repo, raw, opts) {
   const loaded = await db(() => repo.loadListings([...new Set(dbMerges.map(m => m[0]))]));
   for (const [id, s] of dbMerges) { const l = loaded.get(id); if (l) applyPost(l, s.p, s.ex, now); }
   const changed = [...local.values(), ...loaded.values()];
+  // Optional AI enrichment (src/ai.js): a no-op unless env.AI_PROVIDER is set.
+  if (opts.env?.AI_PROVIDER && changed.length) {
+    const byId = new Map(changed.map(l => [l.id, l]));
+    for (const u of await enrich(changed, opts.env)) {
+      const l = byId.get(u?.id); if (!l) continue;
+      Object.assign(l, u.fields || {}); l.aiStatus = u.status || 'done'; l.aiConfidence = u.confidence ?? null;
+    }
+  }
   const tDecide = performance.now();
 
   // 4. write (one batch), together with the run log / page progress so a resume never double-counts
@@ -135,7 +150,7 @@ export async function ingestItems(repo, raw, opts) {
   if (opts.datasetId) runReport.datasetId = opts.datasetId;
   const progress = typeof opts.run?.progress === 'function' ? opts.run.progress(prepared.groups) : opts.run?.progress;
   if (progress) runReport.progress = progress; else delete runReport.progress;
-  await db(() => repo.saveIngest({ listings: changed, keys: newKeys, run: { source, datasetId: opts.datasetId, status: opts.run?.status || 'done', report: runReport }, now }));
+  await db(() => repo.saveIngest({ listings: changed, keys: newKeys, mergedIds: [...loaded.keys()], run: { source, datasetId: opts.datasetId, status: opts.run?.status || 'done', report: runReport }, now }));
   const t1 = performance.now();
   return {
     report, runReport, groups: prepared.groups, changed: changed.map(l => l.id),
