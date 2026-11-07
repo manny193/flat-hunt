@@ -24,11 +24,14 @@ function assert(cond, msg) { if (!cond) throw new Error('Assertion failed: ' + m
 async function phoneLayout(page, selectors) {
   const [sw, iw] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
   assert(sw <= iw, `no horizontal scroll (${sw} > ${iw})`);
-  for (const sel of selectors) for (const el of await page.locator(sel).all()) {
-    if (!(await el.isVisible())) continue;
-    const b = await el.boundingBox();
-    assert(b.width >= 44 && b.height >= 44, `${sel} is ${Math.round(b.width)}x${Math.round(b.height)}, want 44x44`);
-  }
+  // Measure in one pass inside the page: the UI may re-render between Playwright calls,
+  // which detaches handles (boundingBox() then returns null).
+  await page.waitForTimeout(300);
+  const boxes = await page.evaluate(sels => sels.flatMap(sel => [...document.querySelectorAll(sel)].map(el => {
+    const r = el.getBoundingClientRect(); const cs = getComputedStyle(el);
+    return { sel, w: r.width, h: r.height, shown: r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' };
+  })), selectors);
+  for (const b of boxes) if (b.shown) assert(b.w >= 44 && b.h >= 44, `${b.sel} is ${Math.round(b.w)}x${Math.round(b.h)}, want 44x44`);
 }
 
 async function runViewport(browser, vp) {
