@@ -1,0 +1,16 @@
+{
+  "name": "flat-radar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal flat-hunting tracker: Apify scrapes public Facebook groups, listings land in a swipe-to-review app.",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/node-server.js",
+    "dev": "AUTH_DISABLED=1 node --disable-warning=ExperimentalWarning --watch src/node-server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\"",
+    "e2e": "node --disable-warning=ExperimentalWarning scripts/e2e-smoke.js",
+    "migrate": "node --disable-warning=ExperimentalWarning scripts/migrate.js",
+    "icons": "node scripts/make-icons.js"
+  }
+}
