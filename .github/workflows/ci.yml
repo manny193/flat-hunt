@@ -1,0 +1,110 @@
+# Tests on every pull request; also called by deploy.yml before each production deploy.
+name: CI
+
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: "22"
+  # Keep in sync with the Playwright used locally (zero-dependency repo: installed --no-save).
+  PLAYWRIGHT_VERSION: "1.63.0"
+  WRANGLER_VERSION: "4.156.2"
+
+jobs:
+  test:
+    name: Unit + e2e tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install Playwright + Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund "playwright@${PLAYWRIGHT_VERSION}"
+          npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run e2e
+
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-artifacts
+          path: |
+            test-results/
+            test/e2e/artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  worker-build:
+    name: Worker config + bundle (dry run, no credentials)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: wrangler deploy --dry-run
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: npx --yes "wrangler@${WRANGLER_VERSION}" deploy --dry-run --outdir dist
+
+  docker:
+    name: Docker image builds and passes healthcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          push: false
+          tags: flat-radar:ci
+      - name: Run container and wait for healthy
+        run: |
+          docker run -d --name fr --init -p 127.0.0.1:8787:8787 \
+            -e APP_PASSWORD=ci-only-password-123456 -e SESSION_SECRET=ci-only-session-secret-0123456789abcdef \
+            flat-radar:ci
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' fr)
+            echo "health: $status"
+            [ "$status" = "healthy" ] && break
+            [ "$status" = "unhealthy" ] && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8787/healthz
+          # The listings API must not be public.
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/api/listings)
+          echo "unauthenticated /api/listings -> $code"
+          [ "$code" = "401" ] || { echo "::error::/api/listings should return 401 without login"; exit 1; }
+          [ "$(docker inspect -f '{{.State.Health.Status}}' fr)" = "healthy" ]
+          # Runs as non-root.
+          [ "$(docker exec fr id -u)" != "0" ]
+      - name: Container logs
+        if: always()
+        run: docker logs fr || true

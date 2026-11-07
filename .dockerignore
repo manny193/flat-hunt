@@ -1,0 +1,25 @@
+# Only package.json, src/, web/ and migrations/ belong in the image.
+.git
+.github
+.wrangler
+.dev.vars*
+.env*
+node_modules
+dist
+docs
+infra
+test
+scripts
+test-results
+playwright-report
+coverage
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sql.gz*
+*.log
+Dockerfile
+.dockerignore
+wrangler.jsonc
+README.md

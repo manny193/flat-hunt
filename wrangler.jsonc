@@ -1,0 +1,58 @@
+// Cloudflare Workers config for Flat Radar (owned by SRE, see docs/OWNERS.md).
+// Deployed only from GitHub Actions (.github/workflows/deploy.yml).
+// The two placeholders below are filled in at deploy time by
+// .github/scripts/prepare-wrangler-config.mjs, so the founder never edits this file:
+//   - database_id 00000000-... -> the real D1 id (found by name, created on first deploy)
+//   - PUBLIC_BASE_URL ""       -> https://flat-radar.<account-subdomain>.workers.dev (or repo variable)
+{
+  "name": "flat-radar",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-01",
+
+  // Served at https://flat-radar.<your-subdomain>.workers.dev
+  "workers_dev": true,
+  // Per-version preview URLs would be extra public hostnames; keep them off.
+  "preview_urls": false,
+
+  // Static UI. run_worker_first = true means EVERY request (including HTML/JS/CSS)
+  // goes through src/worker.js first, so the login check runs before any asset is served.
+  // Without it, Cloudflare would serve web/ files publicly before the Worker runs.
+  "assets": {
+    "directory": "./web",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "flat-radar",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Every 4 hours at :30 UTC = 06:00, 10:00, 14:00, 18:00, 22:00, 02:00 IST.
+  // The scheduled() handler starts the Apify run and sweeps for missed webhooks (docs/APIFY.md).
+  // Free plan: 5 cron triggers per account, 10 ms CPU per invocation.
+  "triggers": {
+    "crons": ["30 */4 * * *"]
+  },
+
+  // Non-secret config. Secrets (APIFY_TOKEN, INGEST_SECRET, APP_PASSWORD, SESSION_SECRET)
+  // are pushed from GitHub Actions secrets with `wrangler deploy --secrets-file`.
+  "vars": {
+    "APIFY_ACTOR": "automly~facebook-public-group-posts-scraper",
+    "PUBLIC_BASE_URL": ""
+  },
+
+  // Workers Logs: free plan = 200,000 events/day, 3 days retention.
+  "observability": {
+    "enabled": true
+  }
+
+  // Optional edge rate limiter for /api/login. Not enabled by default because the docs
+  // do not state Free-plan availability; the app also keeps a D1-backed attempt counter.
+  // To try it, add:
+  // "ratelimits": [{ "name": "LOGIN_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }]
+}

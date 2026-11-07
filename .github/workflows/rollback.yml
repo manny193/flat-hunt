@@ -1,0 +1,88 @@
+# Manual rollback from the GitHub UI or phone app: Actions > Rollback > Run workflow.
+#  - Worker code: leave version_id blank to go back one version, or paste an id from the
+#    "List versions" step output of a previous run.
+#  - Database (optional, destructive): set d1_restore_timestamp (RFC3339, within 7 days on
+#    the free plan) AND type RESTORE in confirm_db_restore.
+# A rollback is temporary: the next push to main deploys main again, so also `git revert`.
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_id:
+        description: "Worker version id (blank = previous version)"
+        required: false
+        default: ""
+      reason:
+        description: "Why (shown in Cloudflare deployment history)"
+        required: true
+        default: "manual rollback"
+      d1_restore_timestamp:
+        description: "Optional D1 Time Travel restore point, e.g. 2026-11-07T10:00:00+05:30"
+        required: false
+        default: ""
+      confirm_db_restore:
+        description: "Type RESTORE to allow the database restore"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  WRANGLER_VERSION: "4.156.2"
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Resolve D1 id
+        env:
+          D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+          PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+        run: node .github/scripts/prepare-wrangler-config.mjs wrangler.jsonc
+
+      - name: List versions (before)
+        run: npx --yes "wrangler@${WRANGLER_VERSION}" versions list
+
+      - name: Roll back Worker
+        env:
+          VERSION_ID: ${{ inputs.version_id }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          if [ -n "$VERSION_ID" ]; then
+            npx --yes "wrangler@${WRANGLER_VERSION}" rollback "$VERSION_ID" --message "$REASON"
+          else
+            npx --yes "wrangler@${WRANGLER_VERSION}" rollback --message "$REASON"
+          fi
+
+      - name: Restore D1 (Time Travel)
+        if: inputs.d1_restore_timestamp != ''
+        env:
+          TS: ${{ inputs.d1_restore_timestamp }}
+          CONFIRM: ${{ inputs.confirm_db_restore }}
+        run: |
+          [ "$CONFIRM" = "RESTORE" ] || { echo "::error::Type RESTORE in confirm_db_restore to restore the database"; exit 1; }
+          npx --yes "wrangler@${WRANGLER_VERSION}" d1 time-travel info flat-radar --timestamp "$TS"
+          npx --yes "wrangler@${WRANGLER_VERSION}" d1 time-travel restore flat-radar --timestamp "$TS"
+
+      - name: Deployments (after)
+        run: npx --yes "wrangler@${WRANGLER_VERSION}" deployments list
