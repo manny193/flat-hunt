@@ -199,14 +199,20 @@ export function createRepo(db) {
         ON CONFLICT(dataset_id) DO UPDATE SET status = 'ingesting', at = excluded.at,
           run_id = coalesce(runs.run_id, excluded.run_id), started_at = coalesce(runs.started_at, excluded.started_at)
         WHERE runs.status IN ('running', 'failed') OR (runs.status = 'ingesting' AND runs.at < ?)`,
-      [datasetId, runId ?? null, startedAt ?? null, now, now - 15 * 60e3]);
+      [datasetId, runId ?? null, startedAt ?? null, now, now - 5 * 60e3]);
       return r.changes > 0;
     },
-    async failRun(datasetId, error, now) {
-      await db.run(`UPDATE runs SET status = 'failed', at = ?, report = ? WHERE dataset_id = ?`, [now, JSON.stringify({ error: String(error).slice(0, 300) }), datasetId]);
+    /** Mark a dataset ingest failed but keep its saved page progress so the next attempt resumes. */
+    async failRunKeepProgress(datasetId, error, now) {
+      await db.run(`UPDATE runs SET status = 'failed', at = ?, report = json_set(CASE WHEN json_valid(report) THEN report ELSE '{}' END, '$.error', ?) WHERE dataset_id = ?`, [now, String(error).slice(0, 300), datasetId]);
     },
-    async finishRunEmpty(datasetId, report, now) {
-      await db.run(`UPDATE runs SET status = 'done', at = ?, report = ? WHERE dataset_id = ?`, [now, JSON.stringify(report), datasetId]);
+    async getRunByDataset(datasetId) {
+      const r = await db.first('SELECT * FROM runs WHERE dataset_id = ?', [datasetId]);
+      return r ? { id: r.id, source: r.source, datasetId: r.dataset_id, runId: r.run_id, status: r.status, startedAt: r.started_at, at: r.at, report: J(r.report) || {} } : null;
+    },
+    async lastIngestAt() {
+      const r = await db.first(`SELECT max(at) AS t FROM runs WHERE source = 'apify' AND status = 'done'`);
+      return r?.t ?? null;
     },
     async runStatuses(datasetIds) {
       const m = new Map(); if (!datasetIds.length) return m;

@@ -5,3 +5,6 @@ data/
 *.db-wal
 *.db-shm
 test-results/
+.dev.vars*
+.env*
+.wrangler/
