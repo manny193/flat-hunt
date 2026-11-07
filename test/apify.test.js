@@ -212,3 +212,18 @@ test('default dataset page size is small enough for the 10 ms CPU budget (QA)', 
   const { pageSize } = await import('../src/apify.js');
   assert.equal(pageSize({}), 25);
 });
+
+test('invocation killed mid-dataset (CPU limit): lock expires after 5 min and the next attempt resumes exactly (QA)', async () => {
+  const { ingestDataset } = await import('../src/apify.js');
+  let failed = false;
+  const api = fakeApify({ failOn: u => u.pathname.includes('/datasets/') && u.searchParams.get('offset') === '10' && !failed && (failed = true) });
+  const { repo, db, env } = await harness(api, { INGEST_PAGE_SIZE: '10' });
+  const T0 = Date.now();
+  await assert.rejects(ingestDataset(repo, env, { datasetId: 'dsKILL00001' }, { fetchFn: api.fn, now: T0 }));
+  // A killed isolate never reaches the catch block: the row stays 'ingesting' with its page-1 progress.
+  await db.run(`UPDATE runs SET status = 'ingesting', at = ? WHERE dataset_id = ?`, [T0, 'dsKILL00001']);
+  assert.deepEqual(await ingestDataset(repo, env, { datasetId: 'dsKILL00001' }, { fetchFn: api.fn, now: T0 + 60e3 }), { status: 'skipped', reason: 'in progress' });
+  const r = await ingestDataset(repo, env, { datasetId: 'dsKILL00001' }, { fetchFn: api.fn, now: T0 + 6 * 60e3 });
+  assert.equal(r.status, 'done'); assert.equal(r.report.total, 24); assert.equal(r.report.newListings, 24);
+  assert.equal((await repo.listListings()).length, 24);
+});

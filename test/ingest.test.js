@@ -187,12 +187,12 @@ test('timing: 300 posts against 2,000 existing listings', async () => {
   const typical = Array.from({ length: 300 }, (_, i) => synthPost(r, 20000 + i, i % 10 === 0 ? 'Green Glen' : 'Whitefield'));
   const typ = await ingestItems(repo, typical, { source: 'scraper', now: NOW + 1000 });
   const f = t => `total ${t.totalMs.toFixed(1)} ms = JS ${t.jsMs.toFixed(1)} ms + SQLite ${t.dbMs.toFixed(1)} ms; ${t.candidates} candidate rows`;
-  // One dataset page (INGEST_PAGE_SIZE = 100), ~10 % in area: what one Worker invocation step costs.
-  const page = Array.from({ length: 100 }, (_, i) => synthPost(r, 30000 + i, i % 10 === 0 ? 'Green Glen' : 'Whitefield'));
+  // One dataset page at the default INGEST_PAGE_SIZE (25), all in area: the worst case for one resumable step.
+  const page = Array.from({ length: 25 }, (_, i) => synthPost(r, 30000 + i, i % 2 ? 'Green Glen' : 'HSR layout'));
   const pg = await ingestItems(repo, page, { source: 'scraper', now: NOW + 2000 });
   console.log(`# ingest timing, worst case 300/300 in area: ${f(worst.timings)}`);
   console.log(`# ingest timing, typical 30/300 in area:    ${f(typ.timings)}`);
-  console.log(`# ingest timing, one page 10/100 in area:   ${f(pg.timings)}`);
+  console.log(`# ingest timing, one page 25/25 in area:    ${f(pg.timings)}`);
   assert.ok(worst.timings.totalMs < 3000, 'generous ceiling so slow CI does not flake');
   assert.ok(typ.timings.jsMs < 40, `typical batch JS time ${typ.timings.jsMs.toFixed(1)} ms (target ~10 ms; ceiling is loose for shared CI runners)`);
 });
