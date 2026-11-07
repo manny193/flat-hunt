@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Flat Hunt</title>
+  <rect width="512" height="512" rx="112" fill="#D0312D"/>
+  <rect x="76" y="132" width="360" height="232" rx="22" fill="#FFFFFF"/>
+  <rect x="96" y="152" width="320" height="192" rx="10" fill="none" stroke="#D0312D" stroke-width="10"/>
+  <text x="256" y="286" text-anchor="middle" font-family="Arial Narrow, Arial, sans-serif" font-weight="800" font-size="88" textLength="264" lengthAdjust="spacingAndGlyphs" fill="#D0312D">TO-LET</text>
+  <path d="M176 364v52M336 364v52" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round"/>
+</svg>

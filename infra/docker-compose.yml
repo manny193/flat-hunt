@@ -1,0 +1,29 @@
+# Local dev / self-host fallback. Run from the repo root:
+#   docker compose -f infra/docker-compose.yml up --build
+# Then open http://localhost:8787 . Data persists in the "flat-hunt-data" volume.
+# Put secrets in a repo-root .env file (git-ignored): APP_PASSWORD, SESSION_SECRET,
+# and optionally APIFY_TOKEN, INGEST_SECRET, PUBLIC_BASE_URL, CRON_ENABLED=1.
+services:
+  flat-hunt:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: flat-hunt:local
+    init: true                    # forwards SIGTERM to node, reaps zombies
+    ports:
+      - "127.0.0.1:8787:8787"     # loopback only; never expose the raw port publicly
+    env_file:
+      - path: ../.env
+        required: false
+    volumes:
+      - flat-hunt-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  flat-hunt-data:
