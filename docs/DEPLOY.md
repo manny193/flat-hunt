@@ -48,8 +48,8 @@ signed-in, approved user; `/api/admin/*` needs an admin.
    Publish the app (otherwise only listed test users can sign in).
 2. **Credentials → Create credentials → OAuth client ID → Web application**. Authorised redirect URI:
    `https://flat-hunt.<subdomain>.workers.dev/auth/google/callback` (or your `PUBLIC_BASE_URL` + `/auth/google/callback`).
-3. Add GitHub secrets `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `ADMIN_EMAILS` (your Gmail; comma-separate
-   several). Redeploy.
+3. Add GitHub secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and the repository **Variable**
+   `ADMIN_EMAILS` (your Gmail; comma-separate several). Redeploy.
 
 ### Reddit source setup (optional)
 
@@ -85,8 +85,13 @@ GitHub secrets `REDDIT_CLIENT_ID` (the string under the app name) and `REDDIT_CL
    | `SESSION_SECRET` | random, 32+ chars |
    | `BACKUP_PASSPHRASE` | random, 20+ chars. **Also save it in your password manager**, because backups can't be decrypted without it |
    | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | optional at first; see "Google sign-in setup" |
-   | `ADMIN_EMAILS` | your Google email (comma-separated list) |
    | `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET` | optional; see "Reddit source setup" |
+   | `GROQ_API_KEY` | optional; AI extraction fallback (console.groq.com → API keys; turn on Zero Data Retention) |
+
+   The optional secrets are uploaded only when set; a deploy without them still passes.
+   Repository **Variables** (same page, Variables tab), passed to the Worker as plain vars when set:
+   `ADMIN_EMAILS` (your Google email; comma-separate several, no spaces), `REDDIT_USERNAME`,
+   `PUBLIC_RATE_LIMIT` (public API requests per minute per IP, default 60).
 
    Generate random values with:
    `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`

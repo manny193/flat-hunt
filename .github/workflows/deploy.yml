@@ -76,17 +76,33 @@ jobs:
           INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          # Optional secrets: uploaded only when set (Google sign-in, Reddit source, Groq AI fallback).
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          # Optional plain config from repository Variables, passed as Worker vars only when set.
+          VAR_ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
+          VAR_REDDIT_USERNAME: ${{ vars.REDDIT_USERNAME }}
+          VAR_PUBLIC_RATE_LIMIT: ${{ vars.PUBLIC_RATE_LIMIT }}
         run: |
           umask 077
           secrets_file="$RUNNER_TEMP/worker-secrets.json"
           node -e '
-            const keys = ["APIFY_TOKEN","INGEST_SECRET","APP_PASSWORD","SESSION_SECRET"];
+            const keys = ["APIFY_TOKEN","INGEST_SECRET","APP_PASSWORD","SESSION_SECRET","GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","REDDIT_CLIENT_ID","REDDIT_CLIENT_SECRET","GROQ_API_KEY"];
             const out = {};
             for (const k of keys) if (process.env[k]) out[k] = process.env[k];
             require("fs").writeFileSync(process.argv[1], JSON.stringify(out));
           ' "$secrets_file"
+          var_args=()
+          for v in ADMIN_EMAILS REDDIT_USERNAME PUBLIC_RATE_LIMIT; do
+            val="VAR_$v"; val="${!val}"
+            [ -z "$val" ] || var_args+=(--var "$v:${val// /}")
+          done
           npx --yes "wrangler@${WRANGLER_VERSION}" deploy \
             --secrets-file "$secrets_file" \
+            "${var_args[@]}" \
             --message "${GITHUB_SHA::7} ${GITHUB_REF_NAME} run ${GITHUB_RUN_ID}"
           rm -f "$secrets_file"
 
