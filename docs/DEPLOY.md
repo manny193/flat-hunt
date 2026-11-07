@@ -68,6 +68,10 @@ GitHub secrets `REDDIT_CLIENT_ID` (the string under the app name) and `REDDIT_CL
      `Workers Scripts : Edit`, `D1 : Edit`, `Account Settings : Read`
    - Account Resources: *Include → your account only*. Zone resources: none.
    - TTL: 1 year (set a calendar reminder to roll it).
+   - **Add `Workers AI : Read`** too. The `npm run ai-eval` job (Actions → AI eval) calls the Workers AI
+     REST API with this token and needs it. The Worker's own `AI` binding is attached as part of the script upload
+     (`Workers Scripts : Edit`); this could not be verified from the build workspace (no network), so if a deploy
+     with the binding fails with code 10000, `Workers AI : Read` is the permission to add.
    - If the first deploy fails with an authentication error (code 10000), add the
      permission the error names. As a last resort, use the *Edit Cloudflare Workers* template, which grants broader access.
 3. **Apify**: create a free account and copy the API token (**Settings → API & Integrations**).
@@ -106,6 +110,15 @@ GitHub secrets `REDDIT_CLIENT_ID` (the string under the app name) and `REDDIT_CL
 That's all. You don't need to edit any config files, because `.github/scripts/prepare-wrangler-config.mjs`
 finds the database id and URL during each run.
 
+## AI extraction
+
+Posts in areas someone follows are read by a model after the regex pass (docs/AI-EXTRACTION.md):
+Workers AI `@cf/google/gemma-4-26b-a4b-it` through the `AI` binding (free 10,000 neurons/day; the app stops
+at 8,000, an admin setting), `@cf/openai/gpt-oss-20b` if Gemma is unavailable on the account, and Groq
+(`GROQ_API_KEY`, optional) when the Workers AI daily allocation is used up. Phones, emails and links are
+redacted before sending. It runs right after each ingest (`ctx.waitUntil`) and on every hourly tick, so
+there is no second cron. Status, failures, the confidence histogram and merge suggestions are on `#admin-ai`.
+
 ## What runs automatically
 
 | What | When | Where |
@@ -116,6 +129,7 @@ finds the database id and URL during each run.
 | Ingest a finished run | when Apify's webhook fires | `POST /api/ingest/apify` |
 | Encrypted D1 export, kept 30 days | Mondays 03:17 IST | `backup.yml` |
 | Site up + last ingest < 12 h | daily 08:43 IST, failure emails you | `healthcheck.yml` |
+| AI extraction eval (regex vs AI vs merged, per field) | on demand | `ai-eval.yml` |
 | Action version bumps | weekly PRs | Dependabot |
 
 The smoke test checks that `/healthz` returns 200, that `GET /api/listings` without login returns **401**, and

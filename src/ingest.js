@@ -8,7 +8,6 @@
 
 import { pick, asName, GROUP_KEYS, prepareItems, emptyReport, screenItem, makeContext, tokens, compatible, scoreCandidate, applyPost, newListing, newId, fingerprint, sameAreas, mergeReports, sketches, postSketch, plausible, MATCH_THRESHOLD, RENT_WINDOW } from './core/logic.js';
 import { bhkKey } from './db/repo.js';
-import { enrich } from './ai.js';
 
 const DAY = 864e5;
 export const CANDIDATE_DAYS = 60;
@@ -137,14 +136,7 @@ export async function ingestItems(repo, raw, opts) {
   const loaded = await db(() => repo.loadListings([...new Set(dbMerges.map(m => m[0]))]));
   for (const [id, s] of dbMerges) { const l = loaded.get(id); if (l) applyPost(l, s.p, s.ex, now); }
   const changed = [...local.values(), ...loaded.values()];
-  // Optional AI enrichment (src/ai.js): a no-op unless env.AI_PROVIDER is set.
-  if (opts.env?.AI_PROVIDER && changed.length) {
-    const byId = new Map(changed.map(l => [l.id, l]));
-    for (const u of await enrich(changed, opts.env)) {
-      const l = byId.get(u?.id); if (!l) continue;
-      Object.assign(l, u.fields || {}); l.aiStatus = u.status || 'done'; l.aiConfidence = u.confidence ?? null;
-    }
-  }
+  // AI extraction is a separate pass over ai_queue (src/ai.js), not part of ingest.
   const tDecide = performance.now();
 
   // 4. write (one batch), together with the run log / page progress so a resume never double-counts

@@ -63,7 +63,7 @@ SELECT ${je('id')},'new','','',${je('kind')},${je('bhk')},${je('rent')},0,${je('
 FROM json_each(?) WHERE true
 ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, bhk=excluded.bhk, rent=excluded.rent, areas=excluded.areas, phones=excluded.phones, fp=excluded.fp, sk=excluded.sk,
   first_posted_at=excluded.first_posted_at, last_posted_at=excluded.last_posted_at, updated_at=excluded.updated_at, data=excluded.data,
-  ai_status=CASE WHEN excluded.ai_status != '' THEN excluded.ai_status ELSE listings.ai_status END,
+  ai_status=CASE WHEN excluded.ai_status != '' THEN excluded.ai_status WHEN excluded.last_posted_at > listings.last_posted_at THEN '' ELSE listings.ai_status END,
   ai_confidence=CASE WHEN excluded.ai_status != '' THEN excluded.ai_confidence ELSE listings.ai_confidence END,
   has_update=CASE WHEN listings.status='approved' THEN 1 ELSE listings.has_update END`;
 const DELETE_MATCH = `DELETE FROM listing_match WHERE listing_id IN (SELECT value FROM json_each(?))`;
@@ -152,6 +152,7 @@ export function createRepo(db) {
         { sql: DELETE_MATCH, params: [arr] },
         { sql: 'DELETE FROM listings WHERE id IN (SELECT value FROM json_each(?))', params: [arr] },
         { sql: 'DELETE FROM user_listing WHERE listing_id IN (SELECT value FROM json_each(?))', params: [arr] },
+        { sql: 'DELETE FROM ai_queue WHERE listing_id IN (SELECT value FROM json_each(?))', params: [arr] },
       ]);
       return res[2].changes;
     },
@@ -210,7 +211,7 @@ export function createRepo(db) {
       return m;
     },
     /** Persist one ingest atomically: listings (insert or merge), match index, post keys, run log. */
-    async saveIngest({ listings, keys, run, now, mergedIds = [] }) {
+    async saveIngest({ listings, keys, run, now, mergedIds = [], extra = [] }) {
       // updated_at is the write time, not the ingest start: a long ingest (several dataset pages)
       // otherwise writes rows "in the past" that a client which synced meanwhile never fetches.
       const recs = listings.map(l => listingToRecord(l, now, Math.max(now, Date.now())));
@@ -223,6 +224,7 @@ export function createRepo(db) {
       for (const c of chunkJson(keys)) stmts.push({ sql: INSERT_KEYS, params: [c] });
       // A repost of a listing someone shortlisted flags it for them ("updated" badge).
       if (mergedIds.length) stmts.push({ sql: `UPDATE user_listing SET has_update = 1, updated_at = ? WHERE status = 'approved' AND listing_id IN (SELECT value FROM json_each(?))`, params: [Math.max(now, Date.now()), JSON.stringify(mergedIds)] });
+      stmts.push(...extra);
       if (run) stmts.push(run.datasetId
         ? { sql: `UPDATE runs SET status = ?, at = ?, report = ?, finished_at = CASE WHEN ? = 'done' THEN ? ELSE finished_at END WHERE dataset_id = ?`, params: [run.status || 'done', now, JSON.stringify(run.report), run.status || 'done', Date.now(), run.datasetId] }
         : { sql: `INSERT INTO runs (source, status, started_at, at, finished_at, report) VALUES (?, 'done', ?, ?, ?, ?)`, params: [run.source, now, now, Date.now(), JSON.stringify(run.report)] });
@@ -412,6 +414,57 @@ export function createRepo(db) {
       return r?.count ?? 1;
     },
 
+    // ---------- AI extraction queue ----------
+    /** Queue newest posts of listings that nobody has had read yet, only in areas someone follows. */
+    async aiEnqueue(now, sinceMs, limit = 50) {
+      return (await db.run(`INSERT OR IGNORE INTO ai_queue (post_id, listing_id, status, attempts, next_at, created_at, updated_at)
+        SELECT json_extract(l.data, '$.posts[0].id'), l.id, 'pending', 0, ?, ?, ? FROM listings l
+        WHERE l.ai_status = '' AND l.is_sample = 0 AND l.last_posted_at >= ? AND json_extract(l.data, '$.posts[0].id') IS NOT NULL
+          AND l.id IN (SELECT m.listing_id FROM listing_match m JOIN user_areas ua ON ua.area_id = m.area_id)
+        ORDER BY l.last_posted_at DESC LIMIT ?`, [now, now, now, sinceMs, limit])).changes;
+    },
+    async aiDue(now, limit) {
+      return db.all(`SELECT q.post_id, q.listing_id, q.attempts FROM ai_queue q WHERE q.status IN ('pending','retry') AND q.next_at <= ? ORDER BY q.created_at LIMIT ?`, [now, limit]);
+    },
+    async aiStats(now) {
+      const [byStatus, byListing, hist, failures, today] = await Promise.all([
+        db.all('SELECT status, count(*) AS n FROM ai_queue GROUP BY status'),
+        db.all("SELECT ai_status AS s, count(*) AS n FROM listings GROUP BY ai_status"),
+        db.all("SELECT min(9, CAST(confidence * 10 AS INTEGER)) AS bin, count(*) AS n FROM ai_queue WHERE status = 'done' AND confidence IS NOT NULL AND updated_at >= ? GROUP BY bin", [now - 30 * 864e5]),
+        db.all(`SELECT q.post_id, q.listing_id, q.error, q.attempts, q.updated_at, substr(json_extract(l.data, '$.posts[0].text'), 1, 160) AS excerpt
+                FROM ai_queue q LEFT JOIN listings l ON l.id = q.listing_id WHERE q.status = 'failed' OR (q.status = 'retry' AND q.error IS NOT NULL) ORDER BY q.updated_at DESC LIMIT 30`),
+        db.first("SELECT count(*) AS n, avg(confidence) AS avg FROM ai_queue WHERE status = 'done' AND updated_at >= ?", [now - (now % 864e5)]),
+      ]);
+      const median = await db.first("SELECT confidence AS c FROM ai_queue WHERE status = 'done' AND confidence IS NOT NULL ORDER BY confidence LIMIT 1 OFFSET (SELECT count(*) / 2 FROM ai_queue WHERE status = 'done' AND confidence IS NOT NULL)");
+      return { byStatus: Object.fromEntries(byStatus.map(r => [r.status, r.n])), byListing: Object.fromEntries(byListing.map(r => [r.s || 'none', r.n])), histogram: Array.from({ length: 10 }, (_, i) => hist.find(h => h.bin === i)?.n || 0), failures, processedToday: today?.n || 0, medianConfidence: median?.c ?? null };
+    },
+    async aiRetry(postId, now) { return (await db.run("UPDATE ai_queue SET status = 'pending', attempts = 0, next_at = ?, error = NULL, updated_at = ? WHERE post_id = ?", [now, now, postId])).changes > 0; },
+    async listSuggestions(status = 'open', limit = 50) {
+      return db.all(`SELECT s.*, a.rent AS a_rent, a.bhk AS a_bhk, b.rent AS b_rent, b.bhk AS b_bhk, substr(json_extract(a.data, '$.posts[0].text'), 1, 140) AS a_text, substr(json_extract(b.data, '$.posts[0].text'), 1, 140) AS b_text
+        FROM merge_suggestions s JOIN listings a ON a.id = s.a JOIN listings b ON b.id = s.b WHERE s.status = ? ORDER BY s.created_at DESC LIMIT ?`, [status, limit]);
+    },
+    async getSuggestion(id) { return db.first('SELECT * FROM merge_suggestions WHERE id = ?', [id]); },
+    async setSuggestion(id, status) { await db.run('UPDATE merge_suggestions SET status = ? WHERE id = ?', [status, id]); },
+    /** Listings that could be the same flat as one whose BHK/rent the AI just changed. */
+    async lookalikes(id, areas, kind, bhk, lo, hi) {
+      const a = areas && areas.length ? areas : [0];
+      return (await db.all(`SELECT DISTINCT l.* FROM listing_match m JOIN listings l ON l.id = m.listing_id
+        WHERE m.area_id IN (SELECT value FROM json_each(?)) AND m.kind = ? AND m.bhk = ? AND m.rent BETWEEN ? AND ? AND m.listing_id != ? LIMIT 5`,
+      [JSON.stringify(a), kind, bhk, lo, hi, id])).map(rowToListing);
+    },
+    /** Fold listing `from` into `into` (already updated in memory): posts, keys, user state move over. */
+    mergeStatements(fromId, intoId) {
+      return [
+        { sql: 'UPDATE OR IGNORE post_keys SET listing_id = ? WHERE listing_id = ?', params: [intoId, fromId] },
+        { sql: `INSERT OR IGNORE INTO user_listing (user_id, listing_id, status, stage, notes, has_update, decided_at, updated_at) SELECT user_id, ?, status, stage, notes, has_update, decided_at, updated_at FROM user_listing WHERE listing_id = ?`, params: [intoId, fromId] },
+        { sql: 'DELETE FROM user_listing WHERE listing_id = ?', params: [fromId] },
+        { sql: 'DELETE FROM listing_match WHERE listing_id = ?', params: [fromId] },
+        { sql: 'DELETE FROM post_keys WHERE listing_id = ?', params: [fromId] },
+        { sql: 'DELETE FROM ai_queue WHERE listing_id = ?', params: [fromId] },
+        { sql: 'DELETE FROM listings WHERE id = ?', params: [fromId] },
+      ];
+    },
+
     // ---------- retention ----------
     /**
      * Delete listings last posted before `cutoff` (and their keys, match rows and user rows) unless
@@ -424,11 +477,12 @@ export function createRepo(db) {
         { sql: `DELETE FROM post_keys WHERE listing_id IN (${sel})`, params: [cutoff, max] },
         { sql: `DELETE FROM listing_match WHERE listing_id IN (${sel})`, params: [cutoff, max] },
         { sql: `DELETE FROM user_listing WHERE listing_id IN (${sel})`, params: [cutoff, max] },
+        { sql: `DELETE FROM ai_queue WHERE listing_id IN (${sel})`, params: [cutoff, max] },
         { sql: `DELETE FROM listings WHERE id IN (${sel})`, params: [cutoff, max] },
         { sql: 'DELETE FROM rate_limits WHERE window_start < ?', params: [now - 864e5] },
         { sql: 'DELETE FROM login_attempts WHERE window_start < ?', params: [now - 864e5] },
       ]);
-      return res[3].changes;
+      return res[4].changes;
     },
   };
 }

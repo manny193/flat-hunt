@@ -8,7 +8,8 @@ import { publicApi } from './public.js';
 import { adminApi } from './admin.js';
 import { serializeListing } from './serialize.js';
 import { ingestItems } from './ingest.js';
-import { ingestDataset, isDatasetId, scheduledJob, actorId, DEFAULT_RESULTS_PER_GROUP } from './apify.js';
+import { ingestDataset, isDatasetId, scheduledJob, actorId, DEFAULT_RESULTS_PER_GROUP, budgeted } from './apify.js';
+import { runEnrich, aiConfigured } from './ai.js';
 import { validateGroups } from './groups.js';
 import { startBackfill, backfillState } from './backfill.js';
 import { generateKeywords, cleanKeywords } from './core/keywords.js';
@@ -58,7 +59,7 @@ async function route(request, env, ctx, deps, fetchFn) {
   if (path === '/healthz' || path === '/api/health') return health(repo());
   if (path === '/api/ingest/apify') {
     if (method !== 'POST') return errorJson(405, 'method_not_allowed');
-    return webhook(request, env, repo(), fetchFn);
+    return webhook(request, env, repo(), fetchFn, ctx);
   }
   if (path === '/login' && method === 'GET') {
     const who = await identify(request, env, repo(), fetchFn);
@@ -170,7 +171,8 @@ async function health(repo) {
   }
 }
 
-async function webhook(request, env, repo, fetchFn) {
+async function webhook(request, env, baseRepo, fetchFn, ctx) {
+  const repo = budgeted(baseRepo);
   if (!env.INGEST_SECRET) return errorJson(503, 'ingest_disabled', 'INGEST_SECRET is not set.');
   if (!(await safeEqual(request.headers.get('x-ingest-secret') || '', env.INGEST_SECRET))) return errorJson(401, 'bad_secret', 'Invalid ingest secret.');
   const body = await readJson(request, LIMITS.webhookBytes);
@@ -180,7 +182,9 @@ async function webhook(request, env, repo, fetchFn) {
   if (!isDatasetId(datasetId)) return errorJson(400, 'bad_dataset_id', 'datasetId is missing or malformed.');
   if (runId != null && !/^[A-Za-z0-9]{6,40}$/.test(String(runId))) return errorJson(400, 'bad_run_id');
   if (!env.APIFY_TOKEN) return errorJson(503, 'apify_not_configured', 'APIFY_TOKEN is not set.');
-  const res = await ingestDataset(repo, env, { datasetId, runId: runId && String(runId) }, { fetchFn });
+  const res = await ingestDataset(repo, env, { datasetId, runId: runId && String(runId), costUsd: typeof body?.costUsd === 'number' ? body.costUsd : undefined }, { fetchFn });
+  // Fresh posts get read by the AI within seconds, with whatever D1 budget this invocation has left.
+  if (aiConfigured(env) && ctx?.waitUntil && repo.left() >= 16 && res.status !== 'skipped') ctx.waitUntil(runEnrich(repo, env, { maxCalls: 4, fetchFn }).catch(e => console.error('enrich after ingest failed', e?.message || e)));
   // 503 makes Apify retry the webhook: that is how a partial ingest (page budget used up) or one
   // that another invocation still holds continues soon instead of at the next 4-hourly sweep.
   if (res.status === 'partial') return json({ status: 'partial', report: res.report }, 503, { 'retry-after': '60' });

@@ -40,6 +40,9 @@
     "crons": ["0 * * * *"]
   },
 
+  // Workers AI (AI extraction, src/ai.js): free 10,000 neurons/day; the app stops at settings.aiConfig.neuronCap.
+  "ai": { "binding": "AI" },
+
   // Non-secret config. Secrets (APIFY_TOKEN, INGEST_SECRET, APP_PASSWORD, SESSION_SECRET)
   // are pushed from GitHub Actions secrets with `wrangler deploy --secrets-file`.
   "vars": {

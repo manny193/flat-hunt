@@ -9,7 +9,7 @@ import { cleanKeywords } from './core/keywords.js';
 import { watchedGroups, isKnownGroup } from './core/logic.js';
 import { backfillState } from './backfill.js';
 import { adminEmails } from './auth.js';
-import { aiStatus } from './ai.js';
+import { aiStatus, acceptSuggestion, aiConfigOf, runEnrich } from './ai.js';
 
 const DAY = 864e5;
 const int = v => (v != null && /^\d{1,15}$/.test(String(v)) ? Number(v) : null);
@@ -249,7 +249,26 @@ export async function adminApi(request, env, method, path, url, repo, fetchFn, w
   }
 
   // ---------- AI extraction ----------
-  if (res === 'ai' && !id && method === 'GET') return json(await aiStatus(repo, env, now));
+  if (res === 'ai') {
+    if (!id && method === 'GET') return json(await aiStatus(repo, env, now));
+    if (!id && method === 'PUT') {
+      const b = await body(); const cur = aiConfigOf(await repo.getSettings()); const out = { ...cur };
+      if (b?.enabled !== undefined) { if (typeof b.enabled !== 'boolean') throw new HttpError(400, 'bad_enabled'); out.enabled = b.enabled; }
+      if (b?.neuronCap !== undefined) { const n = Number(b.neuronCap); if (!Number.isInteger(n) || n < 0 || n > 10000) throw new HttpError(400, 'bad_neuronCap', 'Neuron cap must be 0 to 10,000 a day.'); out.neuronCap = n; }
+      if (b?.maxPostsPerDay !== undefined) { const n = Number(b.maxPostsPerDay); if (!Number.isInteger(n) || n < 0 || n > 2000) throw new HttpError(400, 'bad_maxPostsPerDay'); out.maxPostsPerDay = n; }
+      await repo.putSettings({ aiConfig: out });
+      return json(await aiStatus(repo, env, now));
+    }
+    if (id === 'run' && method === 'POST') return json(await runEnrich(budgeted(repo), env, { maxCalls: 6, now, fetchFn }));
+    if (id === 'retry' && sub && method === 'POST') { if (!/^[A-Za-z0-9_-]{1,40}$/.test(sub)) throw new HttpError(400, 'bad_id'); return (await repo.aiRetry(sub, now)) ? json({ ok: true }) : errorJson(404, 'not_found'); }
+    if (id === 'suggestions' && sub && method === 'POST') {
+      const sid = int(sub); const sg = sid != null ? await repo.getSuggestion(sid) : null; if (!sg) return errorJson(404, 'not_found');
+      const action = (await body())?.action;
+      if (action === 'merge') return json({ merged: await acceptSuggestion(repo, sg, now) });
+      if (action === 'dismiss') { await repo.setSuggestion(sid, 'dismissed'); return json({ dismissed: true }); }
+      throw new HttpError(400, 'bad_action', 'action must be merge or dismiss.');
+    }
+  }
 
   return errorJson(404, 'not_found', 'No such admin route.');
 }

@@ -7,6 +7,7 @@ import { createRepo } from './db/repo.js';
 import { isPage } from './groups.js';
 import { runBackfill } from './backfill.js';
 import { redditStep, redditConfigured } from './reddit.js';
+import { runEnrich, aiConfigured } from './ai.js';
 
 export const API = 'https://api.apify.com/v2';
 export const DEFAULT_ACTOR = 'automly~facebook-public-group-posts-scraper';
@@ -220,6 +221,9 @@ async function extras(repo, env, settings, sch, status, { fetchFn, now }) {
   if (redditConfigured(env) && sch.redditEnabled !== false && repo.left() >= 26) {
     try { status.reddit = await redditStep(repo, env, { fetchFn, now, settings, sch, budget: repo.left() - 6 }); }
     catch (e) { status.reddit = { error: String(e.message || e).slice(0, 200) }; }
+  }
+  if (aiConfigured(env) && repo.left() >= 20) {
+    try { status.ai = await runEnrich(repo, env, { maxCalls: 6, now, fetchFn }); } catch (e) { status.detail += ' AI failed: ' + e.message + '.'; }
   }
   if (settings.areaBackfill && Object.keys(settings.areaBackfill).length && repo.left() >= 12) {
     try { status.backfill = await runBackfill(repo, { maxQueries: repo.left() - 4, now }); } catch (e) { status.detail += ' Backfill failed: ' + e.message + '.'; }

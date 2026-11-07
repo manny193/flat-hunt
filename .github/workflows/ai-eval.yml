@@ -1,0 +1,45 @@
+# On-demand AI extraction eval (docs/AI-EXTRACTION.md section 5): runs the labelled posts through the
+# model via the Cloudflare REST API and prints per-field accuracy for regex, AI-only and merged.
+# About 600 neurons a run. Run it when the prompt, model or merge rules change, and monthly.
+# The Cloudflare API token needs "Workers AI: Read" for this job.
+name: AI eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Workers AI model id"
+        default: "@cf/google/gemma-4-26b-a4b-it"
+        required: true
+      batch:
+        description: "Posts per call (1-10)"
+        default: "5"
+        required: true
+      offline:
+        description: "Score the regex extractor only (no AI calls)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Run eval
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MODEL: ${{ inputs.model }}
+          BATCH: ${{ inputs.batch }}
+          OFFLINE: ${{ inputs.offline }}
+        run: |
+          if [ "$OFFLINE" = "true" ]; then npm run ai-eval; else npm run ai-eval -- --online "--model=$MODEL" "--batch=$BATCH"; fi
