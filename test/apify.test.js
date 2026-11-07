@@ -183,11 +183,34 @@ test('a dataset longer than one invocation’s page budget is resumed, not marke
   assert.equal(r1.status, 503, 'partial ingest asks Apify to call again');
   assert.equal((await r1.json()).status, 'partial');
   const mid = await repo.getRunByDataset('dsBIG000001');
-  assert.equal(mid.status, 'partial'); assert.equal(mid.report.progress.offset, 100);
-  const r2 = await (await hook({ datasetId: 'dsBIG000001' })).json();
-  assert.equal(r2.status, 'done'); assert.equal(r2.report.total, 130);
+  assert.equal(mid.status, 'partial'); assert.equal(mid.report.progress.offset, 40);
+  let last, calls = 1;
+  do { last = await (await hook({ datasetId: 'dsBIG000001' })).json(); calls++; } while (last.status === 'partial' && calls < 10);
+  assert.equal(last.status, 'done'); assert.equal(last.report.total, 130); assert.equal(calls, 4);
   assert.equal((await repo.listListings()).length, 130, 'nothing dropped, nothing doubled');
   assert.equal((await repo.getRunByDataset('dsBIG000001')).report.progress, undefined);
+});
+
+test('webhook and cron stay under the Workers Free cap of 50 D1 queries per invocation (QA)', async () => {
+  const { memoryDb: mk } = await import('./helpers.js');
+  const { createRepo } = await import('../src/db/repo.js');
+  const t = await mk(); let n = 0;
+  const counting = { ...t.db, all: (...a) => (n++, t.db.all(...a)), first: (...a) => (n++, t.db.first(...a)), run: (...a) => (n++, t.db.run(...a)), batch: l => (n += l.length, t.db.batch(l)) };
+  const repo = createRepo(counting);
+  await repo.createArea(GREEN_GLEN, Date.now());
+  await repo.putSettings({ groups: [{ name: 'A', url: 'https://www.facebook.com/groups/111', active: true }] });
+  const big = [DATASET[0], ...Array.from({ length: 300 }, (_, i) => post(i))];
+  const api = fakeApify({ dataset: big, runs: [{ id: 'runSWEEP001', defaultDatasetId: 'dsSWEEP0001', startedAt: '2026-11-07T02:00:00Z' }, { id: 'runSWEEP002', defaultDatasetId: 'dsSWEEP0002', startedAt: '2026-11-07T06:00:00Z' }] });
+  const app = createApp({ repo: () => repo, assets: async () => null, fetch: api.fn });
+  n = 0;
+  const r = await app.fetch(new Request(BASE + '/api/ingest/apify', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ingest-secret': SECRET }, body: JSON.stringify({ datasetId: 'dsHOOK00001' }) }), ENV, {});
+  assert.equal(r.status, 503);
+  assert.ok(n <= 50, `webhook used ${n} D1 statements`);
+  n = 0;
+  const st = await app.scheduled({}, ENV);
+  assert.equal(st.action, 'started', 'the new run starts even with a backlog to sweep');
+  assert.equal(st.swept.length, 1, 'one dataset per cron');
+  assert.ok(n <= 50, `cron used ${n} D1 statements`);
 });
 
 test('webhook while another invocation is ingesting the same dataset asks Apify to retry (QA)', async () => {

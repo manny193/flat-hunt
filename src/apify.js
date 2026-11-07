@@ -9,7 +9,12 @@ export const DEFAULT_ACTOR = 'automly~facebook-public-group-posts-scraper';
 export const OFFICIAL_ACTOR = 'apify~facebook-groups-scraper';
 export const DEFAULT_RESULTS_PER_GROUP = 25;
 const HOUR = 36e5;
-const MAX_PAGES = 10;
+// Pages per invocation. Workers Free allows 50 D1 queries per invocation; ingest setup is ~5 and each
+// page ~9 (key lookup, candidates, token lists, merge load, one 5-statement write batch), so 4 pages
+// stay under the cap. A longer dataset is saved as 'partial' and continued by Apify's webhook retry
+// or the next sweep.
+export const MAX_PAGES = 4;
+const SWEEP_PAGES = 3; // the cron also starts a run in the same invocation
 
 export const actorId = env => {
   const a = String(env.APIFY_ACTOR || DEFAULT_ACTOR).trim().replace('/', '~');
@@ -63,7 +68,7 @@ export async function getUsage(env, fetchFn = fetch) {
  * Ingest one dataset, page by page. Returns {status:'skipped'|'done', report}.
  * The runs row is the lock: claimRun fails when the dataset was already ingested or is being ingested.
  */
-export async function ingestDataset(repo, env, { datasetId, runId, startedAt }, { fetchFn = fetch, now = Date.now() } = {}) {
+export async function ingestDataset(repo, env, { datasetId, runId, startedAt }, { fetchFn = fetch, now = Date.now(), maxPages = MAX_PAGES } = {}) {
   if (!isDatasetId(datasetId)) throw new Error('bad dataset id');
   if (!(await repo.claimRun({ datasetId, runId, startedAt, now }))) {
     const cur = await repo.getRunByDataset(datasetId);
@@ -84,7 +89,7 @@ export async function ingestDataset(repo, env, { datasetId, runId, startedAt }, 
       const items = await apify(env, `/datasets/${datasetId}/items${q}`, {}, fetchFn);
       if (!Array.isArray(items)) throw new Error('dataset items is not an array');
       const last = items.length < limit;
-      partial = !last && page === MAX_PAGES - 1; // page budget used up: save progress, resume later
+      partial = !last && page === maxPages - 1; // page budget used up: save progress, resume later
       const nextOffset = offset + items.length;
       // Progress is saved in the same batch as this page's listings; it must include the group rows
       // found on this page, so it is built after the page's rows are parsed.
@@ -107,7 +112,10 @@ export async function ingestDataset(repo, env, { datasetId, runId, startedAt }, 
   return { status: 'done', report };
 }
 
-/** Ingest recent succeeded runs whose dataset we have not ingested yet (missed webhooks, resumes). */
+/**
+ * Ingest recent succeeded runs whose dataset we have not ingested yet (missed webhooks, resumes).
+ * At most one dataset per call, to stay inside the per-invocation D1 query cap; older first.
+ */
 export async function sweep(repo, env, { fetchFn = fetch, now = Date.now() } = {}) {
   const actor = actorId(env);
   const { data } = await apify(env, `/acts/${actor}/runs?status=SUCCEEDED&desc=1&limit=3`, {}, fetchFn);
@@ -117,8 +125,9 @@ export async function sweep(repo, env, { fetchFn = fetch, now = Date.now() } = {
   for (const r of runs.reverse()) {
     const st = statuses.get(r.defaultDatasetId);
     if (st === 'done') continue;
-    const res = await ingestDataset(repo, env, { datasetId: r.defaultDatasetId, runId: r.id, startedAt: Date.parse(r.startedAt) || null }, { fetchFn, now });
+    const res = await ingestDataset(repo, env, { datasetId: r.defaultDatasetId, runId: r.id, startedAt: Date.parse(r.startedAt) || null }, { fetchFn, now, maxPages: SWEEP_PAGES });
     out.push({ datasetId: r.defaultDatasetId, status: res.status, newListings: res.report?.newListings ?? 0 });
+    if (res.status !== 'skipped') break;
   }
   return out;
 }
@@ -147,13 +156,17 @@ export async function startRun(repo, env, { fetchFn = fetch, now = Date.now() } 
   return { action: 'started', runId: data?.id, groups: groups.length, resultsPerGroup: perGroup, after, detail: detail.trim() };
 }
 
-/** The cron job: sweep first (cheap, catches missed webhooks), then start the next run. */
+/**
+ * The cron job: start the next run first, then sweep. Starting first means a sweep that fails (or
+ * an invocation cut off by the CPU limit while sweeping) can never stop new runs from starting.
+ */
 export async function scheduledJob(repo, env, { fetchFn = fetch, now = Date.now() } = {}) {
   if (!env.APIFY_TOKEN) return { action: 'skipped', detail: 'APIFY_TOKEN is not set.' };
   const status = { at: now, swept: [], action: '', detail: '' };
-  try { status.swept = await sweep(repo, env, { fetchFn, now }); } catch (e) { status.detail = 'Sweep failed: ' + e.message + '. '; }
-  try { const r = await startRun(repo, env, { fetchFn, now }); status.action = r.action; status.detail += r.detail || ''; status.runId = r.runId; }
-  catch (e) { status.action = 'error'; status.detail += 'Start failed: ' + e.message; }
+  try { const r = await startRun(repo, env, { fetchFn, now }); status.action = r.action; status.detail = r.detail ? r.detail + ' ' : ''; status.runId = r.runId; }
+  catch (e) { status.action = 'error'; status.detail = 'Start failed: ' + e.message + '. '; }
+  await repo.putSettings({ scheduler: { ...status, detail: status.detail.trim() } });
+  try { status.swept = await sweep(repo, env, { fetchFn, now }); } catch (e) { status.detail += 'Sweep failed: ' + e.message + '.'; }
   status.detail = status.detail.trim();
   await repo.putSettings({ scheduler: status });
   return status;
