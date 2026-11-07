@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Flat Hunt v2 mockup</title>
+<!-- Reference mockup for docs/DESIGN.md. Not shipped. Inline CSS here only; in the app all of this lives in web/app.css (CSP style-src 'self'). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,600;0,700;1,400&family=Atkinson+Hyperlegible+Mono:wght@500;700&display=swap">
+<style>
+/* ================= TOKENS (copy to app.css :root) ================= */
+:root{
+  /* colour: light */
+  --bg:#F1F2EE; --surface:#FFFFFF; --sunk:#E7E9E4; --plate:#FFFFFF;
+  --line:#DADDD6; --line-strong:#C3C7BF;
+  --ink:#15191A; --ink-2:#3A4240; --muted:#5B6461;
+  --tolet:#C8221F; --tolet-press:#A51A18; --tolet-text:#C8221F; --tolet-soft:#FBE4E1; --on-tolet:#FFFFFF;
+  --keep:#11774A; --keep-soft:#DCEFE4; --on-keep:#FFFFFF;
+  --pass:#5A636C; --pass-soft:#E7EAEC;
+  --amber:#8F5400; --amber-soft:#F6E9D2;
+  --info:#245C8F; --info-soft:#E0EAF4;
+  --rivet:#B9BEB6; --hatch:rgb(21 25 26/.06);
+  --chart-match:#245C8F; --chart-off:#C9CEC6; --chart-new:#C8221F; --chart-grid:#E3E6E0;
+  --e1:0 1px 2px rgb(21 25 26/.06),0 0 0 1px var(--line);
+  --e2:0 14px 32px -14px rgb(21 25 26/.28),0 0 0 1px var(--line);
+  --e3:0 28px 64px -20px rgb(21 25 26/.40);
+  --focus:0 0 0 2px var(--bg),0 0 0 4px var(--info);
+  /* type */
+  --display:"Archivo","Arial Narrow",Arial,sans-serif;
+  --body:"Atkinson Hyperlegible Next","Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Atkinson Hyperlegible Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --fs-11:.6875rem; --fs-12:.75rem; --fs-14:.875rem; --fs-16:1rem; --fs-18:1.125rem; --fs-20:1.25rem; --fs-24:1.5rem; --fs-32:2rem; --fs-44:2.75rem; --fs-56:3.5rem;
+  /* space, radius */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px; --s10:40px; --s14:56px;
+  --r-plate:3px; --r-chip:8px; --r-ctl:12px; --r-card:18px; --r-sheet:24px; --r-pill:999px;
+  /* motion */
+  --d1:120ms; --d2:200ms; --d3:320ms; --d4:520ms;
+  --ease:cubic-bezier(.22,1,.36,1); --ease-io:cubic-bezier(.65,0,.35,1); --spring:cubic-bezier(.34,1.56,.64,1);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#111517; --surface:#181D20; --sunk:#22282B; --plate:#1B2124;
+  --line:#2C3336; --line-strong:#3D4549;
+  --ink:#ECEFED; --ink-2:#C9D0CD; --muted:#9AA4A1;
+  --tolet:#C42A24; --tolet-press:#A8221D; --tolet-text:#FF6B5F; --tolet-soft:#3A1A18; --on-tolet:#FFFFFF;
+  --keep:#4CC68A; --keep-soft:#163023; --on-keep:#0B1F14;
+  --pass:#8C969F; --pass-soft:#23292D;
+  --amber:#E9A94B; --amber-soft:#33270F;
+  --info:#8DB6DD; --info-soft:#1A2836;
+  --rivet:#4A5357; --hatch:rgb(236 239 237/.05);
+  --chart-match:#8DB6DD; --chart-off:#3A4246; --chart-new:#FF6B5F; --chart-grid:#262D30;
+  --e1:0 0 0 1px var(--line),inset 0 1px 0 rgb(255 255 255/.03);
+  --e2:0 18px 40px -16px rgb(0 0 0/.7),0 0 0 1px var(--line);
+  --e3:0 28px 64px -20px rgb(0 0 0/.8);
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111517; --surface:#181D20; --sunk:#22282B; --plate:#1B2124;
+  --line:#2C3336; --line-strong:#3D4549;
+  --ink:#ECEFED; --ink-2:#C9D0CD; --muted:#9AA4A1;
+  --tolet:#C42A24; --tolet-press:#A8221D; --tolet-text:#FF6B5F; --tolet-soft:#3A1A18; --on-tolet:#FFFFFF;
+  --keep:#4CC68A; --keep-soft:#163023; --on-keep:#0B1F14;
+  --pass:#8C969F; --pass-soft:#23292D;
+  --amber:#E9A94B; --amber-soft:#33270F;
+  --info:#8DB6DD; --info-soft:#1A2836;
+  --rivet:#4A5357; --hatch:rgb(236 239 237/.05);
+  --chart-match:#8DB6DD; --chart-off:#3A4246; --chart-new:#FF6B5F; --chart-grid:#262D30;
+  --e1:0 0 0 1px var(--line),inset 0 1px 0 rgb(255 255 255/.03);
+  --e2:0 18px 40px -16px rgb(0 0 0/.7),0 0 0 1px var(--line);
+  --e3:0 28px 64px -20px rgb(0 0 0/.8);
+  color-scheme:dark}
+
+/* ================= BASE ================= */
+*{box-sizing:border-box}
+html,body{background:var(--bg);margin:0}
+.page{overflow-x:clip}
+body{color:var(--ink);font:var(--fs-16)/1.5 var(--body);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:none;box-shadow:var(--focus)}
+svg.i{width:20px;height:20px;flex:none;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.num{font-variant-numeric:tabular-nums}
+.disp{font-family:var(--display);font-stretch:72%;font-weight:800;letter-spacing:-.01em}
+
+/* ================= MOCKUP PAGE SCAFFOLD (not a spec) ================= */
+.page{max-width:1240px;margin:0 auto;padding:var(--s6) max(16px,env(safe-area-inset-left)) var(--s14)}
+.mock-h{font:600 var(--fs-14)/1.3 var(--body);color:var(--muted);margin:var(--s10) 0 var(--s3);display:flex;gap:var(--s2);align-items:center}
+.mock-h:first-child{margin-top:0}
+.mock-h code{font-family:var(--mono);font-size:var(--fs-12);background:var(--sunk);padding:1px 6px;border-radius:6px;color:var(--ink-2)}
+.theme-tg{margin-left:auto}
+
+/* ================= CHROME: brand + topbar ================= */
+.plate{display:inline-block;font-family:var(--display);font-stretch:92%;font-weight:800;font-size:var(--fs-11);letter-spacing:.14em;line-height:1;color:var(--on-tolet);background:var(--tolet);border-radius:var(--r-plate);padding:4px 7px 3px;box-shadow:inset 0 -1px 0 rgb(0 0 0/.18)}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand b{font-family:var(--display);font-stretch:80%;font-weight:800;font-size:var(--fs-20);letter-spacing:-.01em;white-space:nowrap}
+.topbar{display:flex;align-items:center;gap:var(--s2);height:56px;padding:0 var(--s3) 0 var(--s4);background:var(--surface);box-shadow:0 1px 0 var(--line);border-radius:var(--r-card) var(--r-card) 0 0}
+.topbar .sp{flex:1}
+
+/* ================= BUTTONS ================= */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);min-height:44px;padding:0 var(--s4);border-radius:var(--r-ctl);border:1px solid var(--line-strong);background:var(--surface);font-weight:700;font-size:var(--fs-14);white-space:nowrap;transition:background var(--d2) var(--ease),border-color var(--d2) var(--ease),transform var(--d1) var(--ease)}
+.btn:hover{border-color:var(--ink-2)}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:var(--tolet);border-color:var(--tolet);color:var(--on-tolet);box-shadow:inset 0 -2px 0 rgb(0 0 0/.16)}
+.btn.primary:hover{background:var(--tolet-press);border-color:var(--tolet-press)}
+.btn.quiet{background:transparent;border-color:transparent}
+.btn.quiet:hover{background:var(--sunk)}
+.btn.sm{min-height:36px;padding:0 var(--s3);font-size:var(--fs-14)}
+.btn.block{width:100%}
+.btn.google{background:var(--surface);color:var(--ink);border-color:var(--line-strong);gap:10px}
+.btn.google .g{width:18px;height:18px}
+@media (pointer:coarse){.btn.sm{min-height:44px}}
+
+/* ================= BROWSE HEADER ================= */
+.bhead{padding:var(--s5) var(--s4) var(--s3);background:var(--surface)}
+.bhead h1{font-family:var(--display);font-stretch:74%;font-weight:800;font-size:var(--fs-32);line-height:1.02;letter-spacing:-.015em;margin:0;text-wrap:balance}
+.area-pick{all:unset;cursor:pointer;color:var(--tolet-text);border-bottom:2px dashed currentColor;border-radius:2px}
+.area-pick:focus-visible{box-shadow:var(--focus)}
+.bhead p{margin:var(--s2) 0 0;color:var(--muted);font-size:var(--fs-14);max-width:60ch}
+.bhead p b{color:var(--ink);font-weight:700}
+.filters{display:flex;gap:var(--s2);overflow-x:auto;padding:var(--s3) var(--s4);background:var(--surface);box-shadow:0 1px 0 var(--line);scrollbar-width:none}
+.fchip{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 var(--s3);border-radius:var(--r-pill);border:1px solid var(--line-strong);background:var(--surface);font-weight:600;font-size:var(--fs-14);transition:background var(--d2) var(--ease)}
+.fchip svg{width:14px;height:14px}
+.fchip[aria-pressed="true"],.fchip.set{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+@media (pointer:coarse){.fchip{min-height:44px}}
+
+/* ================= LISTING CARD + TO-LET BOARD ================= */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:var(--s4);padding:var(--s4)}
+.lcard{position:relative;background:var(--surface);border-radius:var(--r-card);box-shadow:var(--e1);overflow:hidden;display:flex;flex-direction:column;transition:box-shadow var(--d2) var(--ease),transform var(--d2) var(--ease)}
+.lcard:hover{box-shadow:var(--e2);transform:translateY(-2px)}
+.photo{aspect-ratio:16/10;background:repeating-linear-gradient(135deg,var(--sunk) 0 12px,var(--bg) 12px 24px);display:flex;align-items:flex-end;justify-content:flex-end;padding:var(--s3) var(--s3) var(--s8)}
+.photo .count{display:inline-flex;gap:6px;align-items:center;font-size:var(--fs-12);font-weight:700;color:#fff;background:rgb(10 12 13/.62);backdrop-filter:blur(6px);padding:4px 9px;border-radius:var(--r-pill)}
+.photo .count svg{width:14px;height:14px}
+.meta{display:flex;align-items:center;gap:var(--s2);padding:var(--s4) var(--s4) var(--s3);font-size:var(--fs-12);color:var(--muted);min-width:0}
+.meta .grp{font-weight:700;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.meta .sp{flex:1}
+.fresh{width:8px;height:8px;border-radius:50%;background:var(--tolet);box-shadow:0 0 0 3px var(--tolet-soft);flex:none}
+.reposts{flex:none;font-weight:700;color:var(--info);background:var(--info-soft);border-radius:var(--r-pill);padding:2px 8px}
+
+/* the signature: an enamel tin board with rivets and a painted inner line */
+.board{position:relative;margin:0 var(--s4);background:var(--plate);border:2px solid var(--tolet);border-radius:4px;padding:var(--s4) var(--s4) 0;box-shadow:inset 0 0 0 3px var(--plate),inset 0 0 0 4px var(--tolet-soft)}
+.photo + .board{margin-top:calc(-1 * var(--s6))}
+.board::before,.board::after{content:"";position:absolute;top:7px;width:5px;height:5px;border-radius:50%;background:var(--rivet);box-shadow:inset 0 1px 0 rgb(0 0 0/.25)}
+.board::before{left:7px}.board::after{right:7px}
+.board .plate{position:absolute;top:-10px;left:var(--s3)}
+.rent{display:flex;align-items:baseline;gap:4px;font-family:var(--display);font-stretch:66%;font-weight:800;font-size:var(--fs-44);line-height:.95;color:var(--tolet-text);letter-spacing:-.015em;font-variant-numeric:tabular-nums;margin-top:2px}
+.rent small{font-size:var(--fs-18);font-stretch:85%;font-weight:700}
+.kind{display:flex;flex-wrap:wrap;gap:0 var(--s3);font-family:var(--display);font-stretch:86%;font-weight:700;font-size:var(--fs-20);line-height:1.2;margin-top:var(--s1)}
+.money2{display:flex;flex-wrap:wrap;gap:0 var(--s3);font-size:var(--fs-14);color:var(--muted);margin-top:2px}
+.strip{display:flex;align-items:center;gap:var(--s2);margin:var(--s3) calc(-1 * var(--s4)) 0;padding:var(--s2) var(--s4);border-top:1.5px dashed var(--tolet-soft);font-size:var(--fs-14)}
+.strip .ph{font-family:var(--mono);font-weight:700;letter-spacing:.04em;color:var(--ink)}
+.strip .sp{flex:1}
+.strip.locked .ph{color:var(--muted);letter-spacing:.12em}
+.strip.locked svg{width:16px;height:16px;color:var(--muted)}
+.strip .link{all:unset;cursor:pointer;font-weight:700;color:var(--tolet-text);font-size:var(--fs-14);padding:6px 0}
+.strip .link:focus-visible{box-shadow:var(--focus);border-radius:4px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;padding:var(--s3) var(--s4) 0}
+.chip{font-size:var(--fs-12);font-weight:700;padding:4px 9px;border-radius:var(--r-chip);background:var(--sunk);color:var(--ink-2);white-space:nowrap}
+.chip.keep{background:var(--keep-soft);color:var(--keep)}
+.chip.brok{background:none;color:var(--tolet-text);box-shadow:inset 0 0 0 1.5px currentColor}
+.excerpt{margin:0;padding:var(--s3) var(--s4) var(--s4);font-size:var(--fs-14);line-height:1.55;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.masked{display:inline-flex;align-items:center;gap:3px;font-size:var(--fs-12);font-weight:700;color:var(--muted);background:repeating-linear-gradient(135deg,var(--hatch) 0 4px,transparent 4px 8px),var(--sunk);border-radius:6px;padding:0 6px;vertical-align:1px}
+.masked svg{width:11px;height:11px}
+mark{background:none;color:inherit;box-shadow:inset 0 -.42em 0 var(--amber-soft)}
+
+/* inline sign-in card in the grid */
+.cta-card{background:var(--tolet);color:var(--on-tolet);border-radius:var(--r-card);padding:var(--s6);display:flex;flex-direction:column;gap:var(--s3);position:relative;overflow:hidden;box-shadow:inset 0 0 0 6px var(--tolet),inset 0 0 0 7px rgb(255 255 255/.35)}
+.cta-card::before,.cta-card::after{content:"";position:absolute;top:14px;width:6px;height:6px;border-radius:50%;background:rgb(255 255 255/.45)}
+.cta-card::before{left:14px}.cta-card::after{right:14px}
+.cta-card h2{font-family:var(--display);font-stretch:74%;font-weight:800;font-size:var(--fs-32);line-height:1;margin:var(--s2) 0 0;letter-spacing:-.01em}
+.cta-card p{margin:0;font-size:var(--fs-16);max-width:34ch}
+.cta-card ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:var(--fs-14)}
+.cta-card li{display:flex;gap:var(--s2);align-items:center}
+.cta-card li svg{width:16px;height:16px}
+.cta-card .btn.google{margin-top:auto;border-color:transparent;background:#FFFFFF;color:#1F1F1F}
+
+/* ================= LOCKED CONTACT BLOCK (detail) ================= */
+.lock{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--e1);overflow:hidden;max-width:560px}
+.lock-rows{padding:var(--s2) var(--s4)}
+.lrow{display:flex;align-items:center;gap:var(--s3);min-height:52px;border-bottom:1px solid var(--line)}
+.lrow:last-child{border-bottom:0}
+.lrow .ic{width:36px;height:36px;border-radius:10px;background:var(--sunk);display:grid;place-items:center;color:var(--muted);flex:none}
+.lrow .lbl{font-size:var(--fs-12);color:var(--muted);font-weight:600}
+.lrow .val{font-weight:700}
+.lrow .val.mono{font-family:var(--mono);letter-spacing:.14em;color:var(--muted)}
+.lrow .tx{flex:1;min-width:0}
+.lrow .pad{color:var(--muted);width:16px;height:16px}
+.lock-foot{background:repeating-linear-gradient(135deg,var(--hatch) 0 6px,transparent 6px 12px),var(--sunk);padding:var(--s4);display:flex;flex-direction:column;gap:var(--s3)}
+.lock-foot p{margin:0;font-size:var(--fs-14);color:var(--ink-2)}
+.lock-foot p b{color:var(--ink)}
+
+/* ================= SWIPE CARD ================= */
+.deckwrap{max-width:420px}
+.deck{position:relative;height:500px}
+.scard{position:absolute;inset:0;background:var(--surface);border-radius:22px;box-shadow:var(--e1);overflow:hidden;display:flex;flex-direction:column}
+.scard.b2{transform:translateY(20px) scale(.9);opacity:.55}
+.scard.b1{transform:translateY(10px) scale(.95)}
+.scard.top{box-shadow:var(--e3),0 0 0 1px var(--line);transform:translateX(38px) rotate(4deg);transform-origin:50% 100%}
+.scard .excerpt{-webkit-line-clamp:5;flex:1}
+.stamp{position:absolute;top:22px;left:18px;z-index:4;font-family:var(--display);font-stretch:80%;font-weight:900;font-size:var(--fs-24);letter-spacing:.06em;padding:2px 10px;border:3px solid currentColor;border-radius:6px;color:var(--keep);background:var(--surface);transform:rotate(-8deg);opacity:.9}
+.sfoot{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s4);border-top:1px solid var(--line);font-size:var(--fs-12);color:var(--muted)}
+.sfoot .sp{flex:1}
+.sfoot svg{width:16px;height:16px}
+.sfoot .on{color:var(--ink)}
+.deck-btns{display:flex;justify-content:center;align-items:center;gap:var(--s4);margin-top:var(--s6)}
+.rb{border-radius:50%;border:1.5px solid var(--line-strong);background:var(--surface);display:grid;place-items:center;color:var(--muted);transition:transform var(--d1) var(--ease),background var(--d2) var(--ease)}
+.rb:active{transform:scale(.92)}
+.rb.sm{width:48px;height:48px}.rb.lg{width:64px;height:64px}
+.rb.lg svg{width:28px;height:28px;stroke-width:2.4}
+.rb.passb{color:var(--pass);border-color:var(--pass)}
+.rb.keepb{color:var(--on-keep);background:var(--keep);border-color:var(--keep);box-shadow:0 10px 24px -10px var(--keep)}
+
+/* ================= ADMIN ================= */
+.ahead{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s3);margin-bottom:var(--s4)}
+.ahead h1{font-family:var(--display);font-stretch:74%;font-weight:800;font-size:var(--fs-32);line-height:1;margin:0}
+.ahead .sp{flex:1}
+.status{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-14);font-weight:600;color:var(--ink-2)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--keep);box-shadow:0 0 0 3px var(--keep-soft)}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s3)}
+@media (max-width:900px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{background:var(--surface);border-radius:14px;box-shadow:var(--e1);padding:var(--s4);display:flex;flex-direction:column;gap:2px;min-width:0}
+.kpi .k{font-size:var(--fs-14);color:var(--muted);font-weight:600}
+.kpi .v{font-family:var(--display);font-stretch:72%;font-weight:800;font-size:var(--fs-32);line-height:1.05;font-variant-numeric:tabular-nums}
+.kpi .v small{font-size:var(--fs-16);color:var(--muted);font-stretch:85%;font-weight:700}
+.kpi .d{font-size:var(--fs-12);color:var(--muted)}
+.kpi .d .up{color:var(--keep);font-weight:700}
+.kpi .d .down{color:var(--tolet-text);font-weight:700}
+.meter{position:relative;height:8px;border-radius:8px;background:var(--sunk);margin:var(--s2) 0 var(--s1)}
+.meter i{position:absolute;inset:0 auto 0 0;border-radius:8px;background:var(--keep)}
+.meter i.w57{width:57%}
+.meter .tick{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink-2);border-radius:1px}
+.meter .t80{left:80%}.meter .t95{left:95%}
+.spark{width:100%;height:28px;margin-top:var(--s1)}
+.spark path{fill:none;stroke:var(--chart-match);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.spark path.new{stroke:var(--chart-new)}
+.panel{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--e1);padding:var(--s4) var(--s4) var(--s3);margin-top:var(--s4);min-width:0}
+.panel h2{font-family:var(--display);font-stretch:85%;font-weight:800;font-size:var(--fs-20);margin:0}
+.panel .phead{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);margin-bottom:var(--s3)}
+.panel .phead .sp{flex:1}
+.legend{display:flex;gap:var(--s4);font-size:var(--fs-12);color:var(--muted);font-weight:600}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:3px;background:var(--chart-match)}
+.legend i.off{background:var(--chart-off)}
+.seg{display:inline-flex;background:var(--sunk);border-radius:10px;padding:3px}
+.seg button{border:0;background:none;border-radius:8px;min-height:30px;padding:0 10px;font-size:var(--fs-12);font-weight:700;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0/.12)}
+svg.chart{width:100%;height:auto;display:block;overflow:visible}
+/* the app renders the SVG at the container's real pixel width (ResizeObserver) so 1 unit = 1 px and text stays 11px; the mockup fakes this with two fixed widths */
+svg.chart.narrow{display:none}
+@media (max-width:720px){svg.chart.wide{display:none}svg.chart.narrow{display:block}}
+.chart .grid{stroke:var(--chart-grid);stroke-width:1}
+.chart .grid.base{stroke:var(--line-strong)}
+.chart .ax{fill:var(--muted);font:600 11px var(--body);font-variant-numeric:tabular-nums}
+.chart .s-match{fill:var(--chart-match)}
+.chart .s-off{fill:var(--chart-off)}
+.chart g:hover rect{opacity:.8}
+/* table → cards on phone */
+.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-14)}
+.tbl th{text-align:left;font-size:var(--fs-12);font-weight:600;color:var(--muted);padding:var(--s2) var(--s3);border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{padding:var(--s3);border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbl tr:last-child td{border-bottom:0}
+.tbl td.n,.tbl th.n{text-align:right}
+.tbl tbody tr:hover{background:var(--bg)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-12);font-weight:700;padding:2px 8px;border-radius:var(--r-pill)}
+.pill.ok{background:var(--keep-soft);color:var(--keep)}
+.pill.warn{background:var(--amber-soft);color:var(--amber)}
+.pill.bad{background:var(--tolet-soft);color:var(--tolet-text)}
+.pill.run{background:var(--info-soft);color:var(--info)}
+.tscroll{overflow-x:auto;margin:0 calc(-1 * var(--s4));padding:0 var(--s4)}
+@media (max-width:720px){
+  .tbl thead{display:none}
+  .tbl,.tbl tbody,.tbl tr,.tbl td{display:block}
+  .tbl tr{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--s2) var(--s3);padding:var(--s3) 0;border-bottom:1px solid var(--line)}
+  .tbl tr:last-child{border-bottom:0}
+  .tbl td{border:0;padding:0;text-align:left!important;white-space:normal}
+  .tbl td::before{content:attr(data-l);display:block;font-size:var(--fs-12);color:var(--muted);font-weight:600}
+  .tbl td.first{grid-column:1/3;font-weight:700}
+  .tbl td.first::before{display:none}
+  .tbl td.stat{grid-column:3;text-align:right!important}
+  .tbl td.stat::before{display:none}
+}
+
+/* layout of the mockup */
+.two{display:grid;gap:var(--s6);grid-template-columns:1fr}
+@media (min-width:960px){.two{grid-template-columns:minmax(0,1fr) 420px;align-items:start}}
+.frame{border-radius:var(--r-card);box-shadow:var(--e1);overflow:hidden;background:var(--bg)}
+
+/* motion: board swing on first paint (once per session in the app) */
+@media (prefers-reduced-motion:no-preference){
+  .swing .board{animation:swing var(--d4) var(--spring) both;transform-origin:50% 0}
+  @keyframes swing{from{transform:rotate(-3deg) translateY(-4px);opacity:.0}60%{opacity:1}}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h2 class="mock-h">1. Public Browse <code>#browse</code> (signed out) <button class="btn sm quiet theme-tg" type="button" id="tt">Toggle theme</button></h2>
+<div class="frame">
+  <div class="topbar">
+    <div class="brand"><span class="plate" aria-hidden="true">TO-LET</span><b>Flat Hunt</b></div>
+    <span class="sp"></span>
+    <button class="btn sm" type="button">Sign in</button>
+  </div>
+  <div class="bhead">
+    <h1>Flats to let in <button class="area-pick" type="button" aria-haspopup="listbox">Green Glen Layout</button></h1>
+    <p><b>142 listings</b> from 9 Facebook groups, newest first. Reposts are merged into one card. Checked 40 min ago.</p>
+  </div>
+  <div class="filters" role="toolbar" aria-label="Filters">
+    <button class="fchip set" type="button">2 BHK <svg class="i" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+    <button class="fchip" type="button">Rent <svg class="i" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+    <button class="fchip" type="button">Type <svg class="i" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+    <button class="fchip" type="button" aria-pressed="true">No brokerage</button>
+    <button class="fchip" type="button">Furnishing <svg class="i" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+  </div>
+  <div class="grid swing">
+    <article class="lcard">
+      <div class="photo"><span class="count"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/></svg>4 photos</span></div>
+      <div class="board">
+        <span class="plate" aria-hidden="true">TO-LET</span>
+        <div class="rent"><span>₹32,000</span><small>/mo</small></div>
+        <div class="kind"><span>2 BHK</span><span>Whole flat</span></div>
+        <div class="money2"><span>+₹2.5k maint</span><span>₹2L deposit</span></div>
+        <div class="strip locked">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+          <span class="ph" aria-label="Phone number hidden">••••• •••••</span><span class="sp"></span>
+          <button class="link" type="button">Sign in to call</button>
+        </div>
+      </div>
+      <div class="chips"><span class="chip keep">No brokerage</span><span class="chip">Semi-furnished</span><span class="chip">From 1 Dec</span></div>
+      <p class="excerpt">2BHK semi furnished flat available in <mark>Green Glen</mark> layout Bellandur. Rent 32000 + 2500 maintenance, deposit 2 lakh. Direct owner. 5 min walk to Ecospace. Call <span class="masked"><svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>number hidden</span></p>
+      <div class="meta"><span class="fresh" aria-label="New"></span><span class="grp">Bellandur Flats &amp; Flatmates</span><span>40m ago</span><span class="sp"></span><span class="reposts">Posted 3×</span></div>
+    </article>
+
+    <article class="lcard">
+      <div class="meta"><span class="grp">Flatmates Bangalore (HSR, Bellandur)</span><span>3h ago</span><span class="sp"></span></div>
+      <div class="board">
+        <span class="plate" aria-hidden="true">TO-LET</span>
+        <div class="rent"><span>₹14,500</span><small>/mo</small></div>
+        <div class="kind"><span>Room in 3 BHK</span><span>Flatmate</span></div>
+        <div class="money2"><span>₹40k deposit</span></div>
+        <div class="strip locked">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+          <span class="ph" aria-label="Phone number hidden">••••• •••••</span><span class="sp"></span>
+          <button class="link" type="button">Sign in to call</button>
+        </div>
+      </div>
+      <div class="chips"><span class="chip brok">Brokerage 1 month</span><span class="chip">Fully furnished</span><span class="chip">Female only</span></div>
+      <p class="excerpt">Looking for a female flatmate in a 3BHK at Purva Fountain Square, <mark>Green Glen</mark>. Private room with attached bath, balcony. Society name and location on request.</p>
+    </article>
+
+    <aside class="cta-card" aria-label="Sign in">
+      <span><span class="plate" aria-hidden="true">TO-LET</span></span>
+      <h2>Get the numbers before the flat is gone</h2>
+      <ul>
+        <li><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Owner's phone, WhatsApp and map pin</li>
+        <li><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Your own swipe deck and shortlist</li>
+        <li><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Pick the areas we scan for you</li>
+      </ul>
+      <button class="btn google block" type="button"><svg class="g" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.3 5.7c4.3-3.9 7-9.8 7-17z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.3-5.7c-2 1.4-4.7 2.3-8.6 2.3-6.2 0-11.5-4.1-13.4-9.8l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>Continue with Google</button>
+    </aside>
+  </div>
+</div>
+
+<div class="two">
+  <div>
+    <h2 class="mock-h">2. Locked contact block (listing detail, signed out)</h2>
+    <section class="lock" aria-labelledby="lk">
+      <div class="lock-rows">
+        <h3 id="lk" class="sr" hidden>Contact</h3>
+        <div class="lrow"><span class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg></span><span class="tx"><span class="lbl">Phone</span><br><span class="val mono">+91 ••••• •••••</span></span><svg class="i pad" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+        <div class="lrow"><span class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-12.4 7.4L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z"/></svg></span><span class="tx"><span class="lbl">WhatsApp</span><br><span class="val">Message the poster</span></span><svg class="i pad" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+        <div class="lrow"><span class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M12 22s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg></span><span class="tx"><span class="lbl">Location</span><br><span class="val">Green Glen Layout, society hidden</span></span><svg class="i pad" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+      </div>
+      <div class="lock-foot">
+        <p><b>Sign in to contact the owner.</b> We show numbers only to signed-in people so posters don't get spam.</p>
+        <button class="btn google block" type="button"><svg class="g" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.3 5.7c4.3-3.9 7-9.8 7-17z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.3-5.7c-2 1.4-4.7 2.3-8.6 2.3-6.2 0-11.5-4.1-13.4-9.8l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>Continue with Google</button>
+      </div>
+    </section>
+  </div>
+  <div class="deckwrap">
+    <h2 class="mock-h">3. Signed-in swipe card <code>#review</code> (mid-drag right)</h2>
+    <div class="deck">
+      <div class="scard b2"></div>
+      <div class="scard b1"></div>
+      <article class="scard top">
+        <span class="stamp" aria-hidden="true">SHORTLIST</span>
+        <div class="meta"><span class="fresh"></span><span class="grp">Bellandur Flats &amp; Flatmates</span><span>40m ago</span><span class="sp"></span><span class="reposts">Posted 3×</span></div>
+        <div class="board">
+          <span class="plate" aria-hidden="true">TO-LET</span>
+          <div class="rent"><span>₹32,000</span><small>/mo</small></div>
+          <div class="kind"><span>2 BHK</span><span>Whole flat</span></div>
+          <div class="money2"><span>+₹2.5k maint</span><span>₹2L deposit</span></div>
+          <div class="strip"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span class="ph">90000 11111</span><span class="sp"></span><span class="chip keep">Owner</span></div>
+        </div>
+        <div class="chips"><span class="chip keep">No brokerage</span><span class="chip">Semi-furnished</span><span class="chip">From 1 Dec</span></div>
+        <p class="excerpt">2BHK semi furnished flat available in <mark>Green Glen</mark> layout Bellandur. Rent 32000 + 2500 maintenance, deposit 2 lakh. No brokerage, direct owner. Available from 1st Dec. 5 min walk to Ecospace. Call 90000 11111.</p>
+        <div class="sfoot"><svg class="i on" viewBox="0 0 24 24"><path d="M12 22s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg><span class="on">Map pin</span><svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/></svg><span>No photos</span><span class="sp"></span><span>Tap for full post</span></div>
+      </article>
+    </div>
+    <div class="deck-btns">
+      <button class="rb sm" type="button" aria-label="Undo"><svg class="i" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+      <button class="rb lg passb" type="button" aria-label="Pass"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <button class="rb sm" type="button" aria-label="Later"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
+      <button class="rb lg keepb" type="button" aria-label="Shortlist"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>
+    </div>
+  </div>
+</div>
+
+<h2 class="mock-h">4. Admin: Scraper <code>#admin-scraper</code></h2>
+<div class="ahead">
+  <h1>Scraper</h1>
+  <span class="status"><span class="dot"></span>Every 4 h, next run 18:30</span>
+  <span class="sp"></span>
+  <button class="btn" type="button">Schedule</button>
+  <button class="btn primary" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></svg>Run now</button>
+</div>
+<div class="kpis">
+  <div class="kpi"><span class="k">Apify credit, November</span><span class="v num">$2.84 <small>of $5</small></span><div class="meter" role="meter" aria-valuemin="0" aria-valuemax="5" aria-valuenow="2.84" aria-label="Credit used"><i class="w57"></i><span class="tick t80" title="Warn at 80%"></span><span class="tick t95" title="Stop at 95%"></span></div><span class="d">Lasts to ~27 Nov at this rate</span></div>
+  <div class="kpi"><span class="k">Posts fetched, 7 days</span><span class="v num">1,904</span><svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path d="M0 20 L16 16 L33 18 L50 12 L66 14 L83 8 L100 15"/></svg><span class="d"><span class="up">+9%</span> vs previous 7 days</span></div>
+  <div class="kpi"><span class="k">New listings, 7 days</span><span class="v num">87</span><svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path class="new" d="M0 18 L16 14 L33 20 L50 10 L66 12 L83 6 L100 16"/></svg><span class="d"><span class="up">+12</span> · 64 reposts merged</span></div>
+  <div class="kpi"><span class="k">Match rate, 7 days</span><span class="v num">22.4<small>%</small></span><svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path d="M0 14 L16 15 L33 13 L50 16 L66 12 L83 13 L100 14"/></svg><span class="d"><span class="down">−1.1 pts</span> vs previous 7 days</span></div>
+</div>
+
+<section class="panel" aria-labelledby="c1h">
+  <div class="phead">
+    <h2 id="c1h">Posts per day</h2>
+    <div class="legend"><span><i></i>Matched an area</span><span><i class="off"></i>Off-area</span></div>
+    <span class="sp"></span>
+    <div class="seg" role="group" aria-label="Range"><button type="button" aria-pressed="false">7 d</button><button type="button" aria-pressed="true">14 d</button><button type="button" aria-pressed="false">30 d</button></div>
+  </div>
+  <svg class="chart wide" viewBox="0 0 1140 260" role="img" aria-labelledby="cwt cwd"><title id="cwt">Posts fetched per day, last 14 days</title><desc id="cwd">Matched an area vs off-area. Peak 6 Nov: 306 posts, 70 matched.</desc><line class="grid base" x1="44" x2="1132" y1="232.0" y2="232.0"/><text class="ax" x="36" y="236.0" text-anchor="end">0</text><line class="grid" x1="44" x2="1132" y1="158.7" y2="158.7"/><text class="ax" x="36" y="162.7" text-anchor="end">100</text><line class="grid" x1="44" x2="1132" y1="85.3" y2="85.3"/><text class="ax" x="36" y="89.3" text-anchor="end">200</text><line class="grid" x1="44" x2="1132" y1="12.0" y2="12.0"/><text class="ax" x="36" y="16.0" text-anchor="end">300</text><g><title>25 Oct: 198 posts, 38 matched</title><rect class="s-off" x="58.8" y="86.8" width="48.2" height="116.3" rx="2"/><rect class="s-match" x="58.8" y="204.1" width="48.2" height="27.9" rx="2"/></g><text class="ax" x="82.9" y="252" text-anchor="middle">25 Oct</text><g><title>26: 216 posts, 44 matched</title><rect class="s-off" x="136.5" y="73.6" width="48.2" height="125.1" rx="2"/><rect class="s-match" x="136.5" y="199.7" width="48.2" height="32.3" rx="2"/></g><g><title>27: 171 posts, 31 matched</title><rect class="s-off" x="214.2" y="106.6" width="48.2" height="101.7" rx="2"/><rect class="s-match" x="214.2" y="209.3" width="48.2" height="22.7" rx="2"/></g><text class="ax" x="238.3" y="252" text-anchor="middle">27</text><g><title>28: 242 posts, 52 matched</title><rect class="s-off" x="291.9" y="54.5" width="48.2" height="138.3" rx="2"/><rect class="s-match" x="291.9" y="193.9" width="48.2" height="38.1" rx="2"/></g><g><title>29: 228 posts, 47 matched</title><rect class="s-off" x="369.6" y="64.8" width="48.2" height="131.7" rx="2"/><rect class="s-match" x="369.6" y="197.5" width="48.2" height="34.5" rx="2"/></g><text class="ax" x="393.7" y="252" text-anchor="middle">29</text><g><title>30: 206 posts, 40 matched</title><rect class="s-off" x="447.3" y="80.9" width="48.2" height="120.7" rx="2"/><rect class="s-match" x="447.3" y="202.7" width="48.2" height="29.3" rx="2"/></g><g><title>31: 263 posts, 58 matched</title><rect class="s-off" x="525.1" y="39.1" width="48.2" height="149.3" rx="2"/><rect class="s-match" x="525.1" y="189.5" width="48.2" height="42.5" rx="2"/></g><text class="ax" x="549.1" y="252" text-anchor="middle">31</text><g><title>1 Nov: 275 posts, 61 matched</title><rect class="s-off" x="602.8" y="30.3" width="48.2" height="155.9" rx="2"/><rect class="s-match" x="602.8" y="187.3" width="48.2" height="44.7" rx="2"/></g><g><title>2: 237 posts, 49 matched</title><rect class="s-off" x="680.5" y="58.2" width="48.2" height="136.9" rx="2"/><rect class="s-match" x="680.5" y="196.1" width="48.2" height="35.9" rx="2"/></g><text class="ax" x="704.6" y="252" text-anchor="middle">2</text><g><title>3: 254 posts, 55 matched</title><rect class="s-off" x="758.2" y="45.7" width="48.2" height="144.9" rx="2"/><rect class="s-match" x="758.2" y="191.7" width="48.2" height="40.3" rx="2"/></g><g><title>4: 284 posts, 63 matched</title><rect class="s-off" x="835.9" y="23.7" width="48.2" height="161.1" rx="2"/><rect class="s-match" x="835.9" y="185.8" width="48.2" height="46.2" rx="2"/></g><text class="ax" x="860.0" y="252" text-anchor="middle">4</text><g><title>5: 260 posts, 57 matched</title><rect class="s-off" x="913.6" y="41.3" width="48.2" height="147.9" rx="2"/><rect class="s-match" x="913.6" y="190.2" width="48.2" height="41.8" rx="2"/></g><g><title>6: 306 posts, 70 matched</title><rect class="s-off" x="991.3" y="7.6" width="48.2" height="172.1" rx="2"/><rect class="s-match" x="991.3" y="180.7" width="48.2" height="51.3" rx="2"/></g><text class="ax" x="1015.4" y="252" text-anchor="middle">6</text><g><title>7: 192 posts, 42 matched</title><rect class="s-off" x="1069.1" y="91.2" width="48.2" height="109.0" rx="2"/><rect class="s-match" x="1069.1" y="201.2" width="48.2" height="30.8" rx="2"/></g><text class="ax" x="1093.1" y="252" text-anchor="middle">7</text></svg>
+  <svg class="chart narrow" viewBox="0 0 326 200" role="img" aria-labelledby="cnt cnd"><title id="cnt">Posts fetched per day, last 14 days</title><desc id="cnd">Matched an area vs off-area. Peak 6 Nov: 306 posts, 70 matched.</desc><line class="grid base" x1="44" x2="318" y1="172.0" y2="172.0"/><text class="ax" x="36" y="176.0" text-anchor="end">0</text><line class="grid" x1="44" x2="318" y1="118.7" y2="118.7"/><text class="ax" x="36" y="122.7" text-anchor="end">100</text><line class="grid" x1="44" x2="318" y1="65.3" y2="65.3"/><text class="ax" x="36" y="69.3" text-anchor="end">200</text><line class="grid" x1="44" x2="318" y1="12.0" y2="12.0"/><text class="ax" x="36" y="16.0" text-anchor="end">300</text><g><title>25 Oct: 198 posts, 38 matched</title><rect class="s-off" x="47.7" y="66.4" width="12.1" height="84.3" rx="2"/><rect class="s-match" x="47.7" y="151.7" width="12.1" height="20.3" rx="2"/></g><text class="ax" x="53.8" y="192" text-anchor="middle">25 Oct</text><g><title>26: 216 posts, 44 matched</title><rect class="s-off" x="67.3" y="56.8" width="12.1" height="90.7" rx="2"/><rect class="s-match" x="67.3" y="148.5" width="12.1" height="23.5" rx="2"/></g><g><title>27: 171 posts, 31 matched</title><rect class="s-off" x="86.9" y="80.8" width="12.1" height="73.7" rx="2"/><rect class="s-match" x="86.9" y="155.5" width="12.1" height="16.5" rx="2"/></g><g><title>28: 242 posts, 52 matched</title><rect class="s-off" x="106.4" y="42.9" width="12.1" height="100.3" rx="2"/><rect class="s-match" x="106.4" y="144.3" width="12.1" height="27.7" rx="2"/></g><g><title>29: 228 posts, 47 matched</title><rect class="s-off" x="126.0" y="50.4" width="12.1" height="95.5" rx="2"/><rect class="s-match" x="126.0" y="146.9" width="12.1" height="25.1" rx="2"/></g><text class="ax" x="132.1" y="192" text-anchor="middle">29</text><g><title>30: 206 posts, 40 matched</title><rect class="s-off" x="145.6" y="62.1" width="12.1" height="87.5" rx="2"/><rect class="s-match" x="145.6" y="150.7" width="12.1" height="21.3" rx="2"/></g><g><title>31: 263 posts, 58 matched</title><rect class="s-off" x="165.1" y="31.7" width="12.1" height="108.3" rx="2"/><rect class="s-match" x="165.1" y="141.1" width="12.1" height="30.9" rx="2"/></g><g><title>1 Nov: 275 posts, 61 matched</title><rect class="s-off" x="184.7" y="25.3" width="12.1" height="113.1" rx="2"/><rect class="s-match" x="184.7" y="139.5" width="12.1" height="32.5" rx="2"/></g><g><title>2: 237 posts, 49 matched</title><rect class="s-off" x="204.3" y="45.6" width="12.1" height="99.3" rx="2"/><rect class="s-match" x="204.3" y="145.9" width="12.1" height="26.1" rx="2"/></g><text class="ax" x="210.4" y="192" text-anchor="middle">2</text><g><title>3: 254 posts, 55 matched</title><rect class="s-off" x="223.9" y="36.5" width="12.1" height="105.1" rx="2"/><rect class="s-match" x="223.9" y="142.7" width="12.1" height="29.3" rx="2"/></g><g><title>4: 284 posts, 63 matched</title><rect class="s-off" x="243.4" y="20.5" width="12.1" height="116.9" rx="2"/><rect class="s-match" x="243.4" y="138.4" width="12.1" height="33.6" rx="2"/></g><g><title>5: 260 posts, 57 matched</title><rect class="s-off" x="263.0" y="33.3" width="12.1" height="107.3" rx="2"/><rect class="s-match" x="263.0" y="141.6" width="12.1" height="30.4" rx="2"/></g><g><title>6: 306 posts, 70 matched</title><rect class="s-off" x="282.6" y="8.8" width="12.1" height="124.9" rx="2"/><rect class="s-match" x="282.6" y="134.7" width="12.1" height="37.3" rx="2"/></g><text class="ax" x="288.6" y="192" text-anchor="middle">6</text><g><title>7: 192 posts, 42 matched</title><rect class="s-off" x="302.1" y="69.6" width="12.1" height="79.0" rx="2"/><rect class="s-match" x="302.1" y="149.6" width="12.1" height="22.4" rx="2"/></g><text class="ax" x="308.2" y="192" text-anchor="middle">7</text></svg>
+</section>
+
+<section class="panel" aria-labelledby="runs-h">
+  <div class="phead"><h2 id="runs-h">Runs</h2><span class="sp"></span><button class="btn sm quiet" type="button">Export CSV</button></div>
+  <div class="tscroll">
+  <table class="tbl">
+    <thead><tr><th>Started</th><th>Status</th><th class="n">Duration</th><th class="n">Fetched</th><th class="n">Matched</th><th class="n">New</th><th class="n">Merged</th><th class="n">Dupes</th><th class="n">Off-area</th><th class="n">Failed groups</th><th class="n">Cost</th></tr></thead>
+    <tbody>
+      <tr><td class="first">Today 14:30</td><td class="stat" data-l="Status"><span class="pill run">Ingesting 3/5</span></td><td class="n" data-l="Duration">2m 10s</td><td class="n" data-l="Fetched">142</td><td class="n" data-l="Matched">31</td><td class="n" data-l="New">9</td><td class="n" data-l="Merged">6</td><td class="n" data-l="Dupes">12</td><td class="n" data-l="Off-area">111</td><td class="n" data-l="Failed groups">0</td><td class="n" data-l="Cost">$0.09</td></tr>
+      <tr><td class="first">Today 10:30</td><td class="stat" data-l="Status"><span class="pill ok">Done</span></td><td class="n" data-l="Duration">4m 52s</td><td class="n" data-l="Fetched">250</td><td class="n" data-l="Matched">58</td><td class="n" data-l="New">14</td><td class="n" data-l="Merged">11</td><td class="n" data-l="Dupes">27</td><td class="n" data-l="Off-area">192</td><td class="n" data-l="Failed groups">0</td><td class="n" data-l="Cost">$0.16</td></tr>
+      <tr><td class="first">Today 06:30</td><td class="stat" data-l="Status"><span class="pill warn">Partial</span></td><td class="n" data-l="Duration">5m 03s</td><td class="n" data-l="Fetched">198</td><td class="n" data-l="Matched">40</td><td class="n" data-l="New">8</td><td class="n" data-l="Merged">9</td><td class="n" data-l="Dupes">19</td><td class="n" data-l="Off-area">158</td><td class="n" data-l="Failed groups">2</td><td class="n" data-l="Cost">$0.13</td></tr>
+      <tr><td class="first">6 Nov 22:30</td><td class="stat" data-l="Status"><span class="pill bad">Failed</span></td><td class="n" data-l="Duration">0m 41s</td><td class="n" data-l="Fetched">0</td><td class="n" data-l="Matched">0</td><td class="n" data-l="New">0</td><td class="n" data-l="Merged">0</td><td class="n" data-l="Dupes">0</td><td class="n" data-l="Off-area">0</td><td class="n" data-l="Failed groups">9</td><td class="n" data-l="Cost">$0.01</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+</div>
+<script>
+// mockup-only theme toggle
+document.getElementById('tt').onclick=()=>{const r=document.documentElement;const d=r.dataset.theme==='dark'||(!r.dataset.theme&&matchMedia('(prefers-color-scheme:dark)').matches);r.dataset.theme=d?'light':'dark';};
+</script>
+</body>
+</html>
