@@ -265,7 +265,7 @@ function reviewHTML() {
     <button class="btn small" type="button" data-go="filters">${I.filter}Filters${fc ? ` · ${fc}` : ''}</button>
     <div class="seg" role="group" aria-label="View"><button type="button" data-mode="cards" aria-pressed="${state.mode === 'cards'}">${I.cards}<span>Cards</span></button><button type="button" data-mode="list" aria-pressed="${state.mode === 'list'}">${I.list}<span>List</span></button></div></div>
     ${total ? `<div class="progress" aria-hidden="true"><i data-w="${Math.round(100 * done / total)}"></i></div>` : ''}
-    ${hidden ? `<p class="note">${hidden} hidden by filters. <button type="button" id="btn-reset">Show all</button></p>` : ''}
+    ${hidden ? `<p class="note">${hidden} hidden by filters. <button type="button" id="btn-show-all">Show all</button></p>` : ''}
     ${bannersHTML()}`;
   if (!state.loaded) return head + '<div class="deck"><div class="scard top skel"><div class="bar w40"></div><div class="bar big"></div><div class="bar w70"></div><div class="bar"></div><div class="bar w85"></div></div></div>';
   if (!state.listings.length) return head + emptyFirstRun();
@@ -639,7 +639,7 @@ document.addEventListener('click', async e => {
   if (el.closest('#f-area') && d.v) { state.f.area = d.v; savePrefs(); render(); renderSheet(); return; }
   if (el.closest('#f-bhk') && d.v) { state.f.bhk = d.v; savePrefs(); render(); renderSheet(); return; }
   if (el.closest('#f-type') && d.v) { state.f.type = d.v; savePrefs(); render(); renderSheet(); return; }
-  if (el.id === 'btn-reset') { state.f = { ...DEFAULT_F }; savePrefs(); render(); if (state.open) renderSheet(); return; }
+  if (el.id === 'btn-reset' || el.id === 'btn-show-all') { state.f = { ...DEFAULT_F }; savePrefs(); render(); if (state.open) renderSheet(); return; }
   if (el.id === 'btn-samples') {
     try { const samples = await (await fetch('/samples.json', { credentials: 'same-origin' })).json(); await runImport(samples, 'sample'); }
     catch { toast('Couldn’t load the sample posts.'); }

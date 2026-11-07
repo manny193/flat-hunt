@@ -20,6 +20,16 @@ const VIEWPORTS = [
 ];
 
 function assert(cond, msg) { if (!cond) throw new Error('Assertion failed: ' + msg); }
+// Touch targets of at least 44x44 px and no sideways scrolling on the phone viewport (QA).
+async function phoneLayout(page, selectors) {
+  const [sw, iw] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+  assert(sw <= iw, `no horizontal scroll (${sw} > ${iw})`);
+  for (const sel of selectors) for (const el of await page.locator(sel).all()) {
+    if (!(await el.isVisible())) continue;
+    const b = await el.boundingBox();
+    assert(b.width >= 44 && b.height >= 44, `${sel} is ${Math.round(b.width)}x${Math.round(b.height)}, want 44x44`);
+  }
+}
 
 async function runViewport(browser, vp) {
   const dir = mkdtempSync(join(tmpdir(), 'flat-hunt-e2e-'));
@@ -62,6 +72,7 @@ async function runViewport(browser, vp) {
       const sub = await page.locator('.shead .sub').textContent();
       assert(sub.trim() === '4 new', 'expected 4 new (5 listings, 1 "looking for" hidden), got ' + sub);
     });
+    if (vp.name === 'phone') await step('review: tap targets and width', () => phoneLayout(page, ['.deck-btns .rb', '.tabbar a', '.topbar .iconbtn', '.topbar .btn', '#deck .info-btn']));
     const topLabel = async () => (await page.locator('#deck .scard.top').getAttribute('aria-label')) || '';
     let kept = '';
     await step(vp.name === 'phone' ? 'swipe right to shortlist' : 'press → to shortlist', async () => {
@@ -91,6 +102,7 @@ async function runViewport(browser, vp) {
       const rowText = await page.locator('.lrow').first().textContent();
       assert(rowText.includes(rent.replace(/^₹/, '')) || rowText.includes(rent), `row shows ${rent}: ${rowText.slice(0, 80)}`);
       assert(await page.locator('.lrow .stage-pill').inputValue() === 'To call', 'stage To call');
+      if (vp.name === 'phone') await phoneLayout(page, ['.lrow .circle', '.lrow .stage-pill', '.lrow [data-next]', '.lrow [data-menu]']);
     });
     await step(vp.name === 'phone' ? 'tap Pass on the next card' : 'press ← to pass', async () => {
       await page.goto('/#review');

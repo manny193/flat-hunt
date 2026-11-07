@@ -302,3 +302,9 @@ img.broken{display:none}
 [hidden]{display:none!important}
 .topbar .brand{flex:0 1 auto;min-width:0}
 .topbar .brand-area{min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* Touch screens: every tappable control at least 44x44 px (QA). Desktop sizes are unchanged. */
+@media (pointer: coarse){
+  .iconbtn,.circle{width:44px;height:44px;flex:none}
+  .btn,.btn.small,.stage-pill{min-height:44px}
+  .info-btn{width:44px;height:44px}
+}
