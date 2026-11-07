@@ -49,9 +49,10 @@ export const actorId = env => {
   return a;
 };
 export const isDatasetId = id => typeof id === 'string' && /^[A-Za-z0-9]{6,40}$/.test(id);
-// Small pages so that one page always fits in the Workers Free 10 ms CPU budget: an invocation
+// Small pages so that one page always fits in the Workers Free 10 ms CPU budget (v2 stores every
+// housing post, so each post is fuzzy-matched: 25 posts measured ~10 ms JS vs 3,000 listings, 15 ~4.5 ms): an invocation
 // cut off mid-way still saved every finished page, so each retry makes progress.
-export const pageSize = env => Math.min(500, Math.max(10, parseInt(env.INGEST_PAGE_SIZE, 10) || 25));
+export const pageSize = env => Math.min(500, Math.max(10, parseInt(env.INGEST_PAGE_SIZE, 10) || 15));
 
 // No `fields=`: the actors' real column names are unverified (docs/APIFY.md), and a name missing
 // from a whitelist would silently drop data. Omit only comment columns, which can be large and

@@ -126,3 +126,36 @@ test('every cron step together stays under 50 D1 queries per invocation', async 
   const runs = await c.repo.listRuns(5, { source: 'reddit' });
   assert.ok(runs[0].report.newListings > 50, JSON.stringify(runs[0].report).slice(0, 300));
 });
+
+// QA round 2: worst hour. Scrape due, an unfinished Apify dataset to sweep, Reddit backlog, AI queue,
+// area backfill and the daily purge all at once, plus the webhook with AI enrich after it.
+test('worst-case hour (sweep backlog + Reddit + AI + backfill + purge) stays under 50 D1 statements (QA)', async () => {
+  resetRedditToken();
+  const t = await memoryDb(); const c = counting(t);
+  await c.repo.createArea(GREEN_GLEN, Date.now());
+  // Existing listings for the AI queue and the purge.
+  await ingestItems(c.repo, Array.from({ length: 40 }, (_, i) => ({ text: `${1 + (i % 3)}BHK for rent in Green Glen Layout rent ${20000 + i * 500} word${i}q call 98${String(10000000 + i)}`, url: `https://www.facebook.com/groups/1/posts/a${i}/` })), { source: 'manual', now: Date.now() - 2 * H });
+  const ds = Array.from({ length: 300 }, (_, i) => ({ type: 'post', text: `2BHK available in Green Glen Layout, rent ${30000 + i * 100}. unique${i}zz call 97${String(10000000 + i)}`, url: `https://www.facebook.com/groups/2/posts/d${i}/`, createdAt: new Date().toISOString() }));
+  const base = fakeApis({ redditPosts: { bangalorerentals: Array.from({ length: 100 }, (_, i) => rpost(i, 'bangalorerentals', 0.5 + i * 0.1)) } });
+  const fn = async (url, init = {}) => {
+    const u = new URL(url);
+    if (/\/v2\/acts\/.+\/runs$/.test(u.pathname) && init.method !== 'POST') return Response.json({ data: { items: [{ id: 'runBACKLOG1', defaultDatasetId: 'dsBACKLOG01', startedAt: new Date(Date.now() - H).toISOString() }] } });
+    if (/\/v2\/datasets\/.+\/items$/.test(u.pathname)) { const off = +u.searchParams.get('offset'), lim = +u.searchParams.get('limit'); return Response.json(ds.slice(off, off + lim)); }
+    return base.fn(url, init);
+  };
+  const AI = { run: async (model, { messages }) => { const ids = [...messages.at(-1).content.matchAll(/id="(P\d+)"/g)].map(m => m[1]); return { response: JSON.stringify({ results: ids.map(id => ({ id, isRental: true, kind: 'offer', type: 'flat', bhk: null, rent: null, deposit: null, depositMonths: null, maintenance: null, brokerage: null, brokerageAmount: null, furnishing: null, gender: null, availableFrom: null, society: null, locality: null, otherUnits: [], summary: 'x', confidence: 0.9 })) }) }; } };
+  const env = { ...ENV, AI, REDDIT_CLIENT_ID: 'cid', REDDIT_CLIENT_SECRET: 'sec', REDDIT_USERNAME: 'tester' };
+  await c.repo.putSettings({ groups: [{ name: 'G', url: 'https://www.facebook.com/groups/111', active: true }], subreddits: [{ name: 'bangalorerentals' }], areaBackfill: { 1: { next: 0, max: 50000, startedAt: 1 } }, scheduler: { lastStartedAt: Date.now() - 2 * H } });
+  const app = createApp({ repo: () => c.repo, assets: async () => null, fetch: fn });
+  for (let i = 0; i < 3; i++) {
+    c.reset();
+    const st = await app.scheduled({}, env);
+    assert.ok(c.count() <= 50, `cron invocation ${i} used ${c.count()} D1 statements: ${JSON.stringify({ a: st.action, sw: st.swept, r: st.reddit?.action, ai: st.ai?.action, b: !!st.backfill, p: st.purged })}`);
+  }
+  // Webhook for a fresh dataset, with AI enrich in waitUntil counted in the same invocation.
+  c.reset(); const waits = [];
+  const r = await app.fetch(new Request('https://hunt.test/api/ingest/apify', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ingest-secret': ENV.INGEST_SECRET }, body: JSON.stringify({ datasetId: 'dsHOOKQA001' }) }), env, { waitUntil: p => waits.push(p) });
+  await Promise.all(waits);
+  assert.ok([200, 503].includes(r.status));
+  assert.ok(c.count() <= 50, `webhook + enrich used ${c.count()} D1 statements`);
+});

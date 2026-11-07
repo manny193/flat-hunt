@@ -233,7 +233,7 @@ test('dataset reads never drop fields with fields=; only comment fields are omit
 
 test('default dataset page size is small enough for the 10 ms CPU budget (QA)', async () => {
   const { pageSize } = await import('../src/apify.js');
-  assert.equal(pageSize({}), 25);
+  assert.equal(pageSize({}), 15, 'v2 stores and fuzzy-matches every housing post: 25 posts ~10 ms JS, 15 ~4.5 ms');
 });
 
 test('invocation killed mid-dataset (CPU limit): lock expires after 5 min and the next attempt resumes exactly (QA)', async () => {
