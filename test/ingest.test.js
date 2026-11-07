@@ -221,3 +221,22 @@ test('ingested rows are visible to an incremental refresh that synced during the
   const seen = await repo.listListings({ since: clientSync - 3000 });
   assert.equal(seen.length, 1, 'the app’s next ?since= refresh returns the new listing');
 });
+
+// Store-all mode (every housing post kept, areas matched on read): every post now reaches dedupe and
+// fuzzy matching, so measure one page against a tracker of mostly off-area listings.
+test('timing: store-all page (no area filter) against 3,000 stored listings', async () => {
+  const { repo } = await setup([GREEN_GLEN]);
+  const r = rng(99);
+  const seed = Array.from({ length: 3000 }, (_, i) => synthPost(r, 60000 + i, i % 10 ? 'Whitefield' : 'Green Glen'));
+  for (let i = 0; i < seed.length; i += 500) await ingestItems(repo, seed.slice(i, i + 500), { source: 'apify', storeAll: true, now: NOW - 864e5 });
+  assert.ok((await repo.listingIds()).length > 2500);
+  const areas = await repo.listAreas(), settings = await repo.getSettings();
+  const js = [];
+  for (const size of [25, 25, 25, 25, 15, 15, 15, 15]) {
+    const page = Array.from({ length: size }, (_, i) => i % 5 === 0 ? { ...seed[js.length * 31 + i], url: `https://www.facebook.com/groups/77/posts/s${js.length}-${i}/` } : synthPost(r, 70000 + js.length * 100 + i, i % 10 ? 'Whitefield' : 'Green Glen'));
+    js.push({ size, ms: (await ingestItems(repo, page, { source: 'apify', storeAll: true, now: NOW + js.length, areas, settings })).timings.jsMs });
+  }
+  const med = s => { const v = js.slice(1).filter(x => x.size === s).map(x => x.ms).sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
+  console.log(`# ingest timing, store-all page vs 3,000 listings: 25 posts JS median ${med(25).toFixed(1)} ms, 15 posts ${med(15).toFixed(1)} ms (cold first page ${js[0].ms.toFixed(1)} ms)`);
+  assert.ok(med(25) < 25, `store-all 25-post page JS ${med(25).toFixed(1)} ms (loose ceiling for CI)`);
+});

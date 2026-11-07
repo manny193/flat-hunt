@@ -6,6 +6,7 @@ import { redditStep, redditConfigured, subredditsOf, validateSubreddits, DEFAULT
 import { validateGroups, groupsView, groupId, classifyFacebookUrl, PAGE_WARNING } from './groups.js';
 import { editArea, areaName, LIMITS } from './app.js';
 import { cleanKeywords } from './core/keywords.js';
+import { watchedGroups, isKnownGroup } from './core/logic.js';
 import { backfillState } from './backfill.js';
 import { adminEmails } from './auth.js';
 import { aiStatus } from './ai.js';
@@ -14,7 +15,6 @@ const DAY = 864e5;
 const int = v => (v != null && /^\d{1,15}$/.test(String(v)) ? Number(v) : null);
 const clampInt = (v, lo, hi, def) => { const n = int(v); return n == null ? def : Math.min(hi, Math.max(lo, n)); };
 const dayKey = t => new Date(t + 5.5 * 36e5).toISOString().slice(0, 10); // IST calendar day
-const sum = o => Object.values(o || {}).reduce((a, b) => a + (Number(b) || 0), 0);
 
 /** Normalised per-run stats for the run log and charts (works for Apify, Reddit, phone and paste runs). */
 export function runView(r) {
@@ -231,11 +231,21 @@ export async function adminApi(request, env, method, path, url, repo, fetchFn, w
     return json({ report, changed: changed.length });
   }
   if (res === 'phone-scans' && !id && method === 'GET') {
-    const runs = (await repo.listRuns(clampInt(q.get('limit'), 1, 100, 30), { source: 'phone' })).map(runView);
-    const s = await repo.getSettings(); const watched = new Set((s.groups || []).map(g => String(g.name || '').toLowerCase()));
+    const rawRuns = await repo.listRuns(clampInt(q.get('limit'), 1, 100, 30), { source: 'phone' });
+    // "Posts from groups we don't scrape": groups seen in scans that are not active watched groups.
+    const s = await repo.getSettings();
+    const watched = watchedGroups(s.groups);
     const outside = {};
-    for (const r of runs) for (const [g, n] of Object.entries(r.outsideGroups)) { const o = outside[g] ||= { group: g, posts: 0, scans: 0 }; o.posts += n; o.scans++; }
-    return json({ scans: runs.map(r => ({ ...r, outsideCount: sum(r.outsideGroups) })), outsideGroups: Object.values(outside).filter(o => !watched.has(o.group.toLowerCase())).sort((a, b) => b.posts - a.posts) });
+    for (const r of rawRuns) {
+      const p = r.report || {};
+      for (const [g, n] of Object.entries(p.fetchedByGroup || {})) {
+        if (g === 'Group not detected' || isKnownGroup(g, '', watched)) continue;
+        const o = outside[g] ||= { group: g, posts: 0, matched: 0, scans: 0 };
+        o.posts += n; o.matched += (p.matchedByGroup || {})[g] || 0; o.scans++;
+      }
+    }
+    const outsideCount = r => Object.entries(r.report?.fetchedByGroup || {}).filter(([g]) => outside[g]).reduce((a, [, n]) => a + n, 0);
+    return json({ scans: rawRuns.map(r => ({ ...runView(r), outsideCount: outsideCount(r) })), outsideGroups: Object.values(outside).sort((a, b) => b.posts - a.posts) });
   }
 
   // ---------- AI extraction ----------

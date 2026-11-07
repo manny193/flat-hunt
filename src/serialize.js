@@ -35,7 +35,7 @@ export function publicListing(l, { maxPosts = 1 } = {}) {
   for (const k of PUBLIC_SCALARS) if (l[k] !== undefined && l[k] !== null) out[k] = l[k];
   out.hasPhone = Array.isArray(l.phones) && l.phones.length > 0; // society is hidden too (DESIGN.md)
   out.areas = Array.isArray(l.areas) ? l.areas.filter(Number.isInteger) : [];
-  out.groups = (Array.isArray(l.groups) ? l.groups : []).slice(0, 10).map(publicText);
+  out.groups = (Array.isArray(l.groups) ? l.groups : []).slice(0, 10).map(g => publicText(g));
   out.rentHistory = (Array.isArray(l.rentHistory) ? l.rentHistory : []).map(h => ({ rent: h.rent, at: h.at }));
   const posts = Array.isArray(l.posts) ? l.posts : [];
   const hide = typeof l.society === 'string' ? [l.society] : [];
