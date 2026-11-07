@@ -158,3 +158,11 @@ test('money parsing: "Rs." with a dot does not end the label look-back (AI eval 
   const ex = extract('TO-LET: 3 BHK unfurnished independent floor, 5th Cross, Green Glen Layout. Rent Rs. 45,000/- Maintenance Rs. 4,000/- Security deposit Rs. 2,50,000/-. Only family preferred. No brokers please. Contact owner: 9000089012');
   assert.equal(ex.rent, 45000); assert.equal(ex.maintenance, 4000); assert.equal(ex.deposit, 250000);
 });
+
+// QA round 2: the public mask learned separators and Unicode digits that extraction did not, so a
+// signed-in user saw "No number in post" for "Call 98765 - 43210". One matcher now serves both.
+test('phones: spaced dashes/slashes and non-ASCII digits are extracted; rent ranges are not phones (QA)', () => {
+  for (const t of ['Call 98765 - 43210', 'call 98765 / 43210', 'ph ९८७६५४३२१०', '+91 – 98765 43210', 'call ９８７６５４３２１０']) assert.deepEqual(extract(t).phones, ['9876543210'], t);
+  const e = extract('2BHK, rent 65000 - 70000, deposit 2L');
+  assert.deepEqual(e.phones, []); assert.equal(e.rent, 65000);
+});

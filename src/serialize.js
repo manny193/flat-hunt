@@ -7,28 +7,14 @@
 import { societyOf } from './core/logic.js';
 
 export const PHONE_TOKEN = '[[phone]]';
-// Indian mobiles, optionally +91 / 91 / 0 prefixed, digits optionally split by up to 3 separator
-// characters (spaces, newlines, dots, dashes, slashes, underscores, brackets, zero-width characters),
-// so "98765 - 43210" and "98765 / 43210" are caught too. Run it through maskPhones(), which also reads
-// non-ASCII digits (Devanagari, full-width, mathematical) as digits.
-const SEP = '[\\s.\\-/_\u2013\u2014()\u200b-\u200d\u2060\ufeff]';
-export const PHONE_ANY = new RegExp(`(?<!\\d)(?:\\+?${SEP}{0,3}91${SEP}{0,3}|0)?([6-9](?:${SEP}{0,3}\\d){9})(?!\\d)`, 'g');
-/** Same-length copy of s with every Unicode decimal digit as ASCII (astral digits padded with a zero-width space). */
-function asciiDigits(s) {
-  return s.replace(/\p{Nd}/gu, ch => { const d = String(Number.isNaN(+ch) ? digitValue(ch) : +ch); return ch.length === 2 ? d + '\u200b' : d; });
-}
-function digitValue(ch) {
-  // Unicode decimal digits come in contiguous blocks of ten starting at a code point ending in 0 or 6;
-  // find the block start by stepping back while the previous code point is still a digit.
-  let cp = ch.codePointAt(0), n = 0;
-  while (n < 9 && /\p{Nd}/u.test(String.fromCodePoint(cp - 1))) { cp--; n++; }
-  return n;
-}
+// Phone matching lives in core/logic.js so extraction (call buttons) and masking (public view) agree.
+export { PHONE_ANY } from './core/logic.js';
+import { phoneMatches } from './core/logic.js';
 /** Replace every mobile number in s with token, whatever digits or separators it is written with. */
 export function maskPhones(s, token = PHONE_TOKEN) {
-  s = String(s ?? ''); const n = asciiDigits(s);
+  s = String(s ?? '');
   let out = '', last = 0;
-  for (const m of n.matchAll(PHONE_ANY)) {
+  for (const m of phoneMatches(s)) {
     let end = m.index + m[0].length; const c = s.charCodeAt(end);
     if (c >= 0xdc00 && c <= 0xdfff) end++; // don't split an astral digit's surrogate pair
     out += s.slice(last, m.index) + token; last = end;

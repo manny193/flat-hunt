@@ -467,3 +467,12 @@ a.btn.google{color:var(--ink)}
 @media (max-width:420px){.topbar .area-chip{max-width:34vw}.topbar .btn.sm{padding:0 var(--s2)}}
 #main:focus,#main:focus-visible{box-shadow:none;outline:none}
 #slq{max-width:280px}
+/* QA round 2: touch screens get 44 px targets for the remaining small controls (desktop unchanged). */
+@media (pointer:coarse){
+  .area-pick,.strip .link{display:inline-flex;align-items:center;min-height:44px}
+  .info-btn{min-height:44px;min-width:44px}
+  .seg button{min-height:44px;min-width:44px}
+  select,.tbl select,.tbl input[type=checkbox]{min-height:44px}
+  .sheet a.small,#signin a.small{display:inline-flex;align-items:center;min-height:44px}
+  .tbl input[type=checkbox]{min-width:44px}
+}

@@ -43,7 +43,34 @@ const LABELS = [['deposit', /deposit|advance|security/g], ['maintenance', /maint
 const CLOSE_LABEL = /(deposit|advance|security|maint\w*|brokerage|broker|commission|rent|rental|price|cost|budget)\s*(?:is|of|amount)?\s*[:=\-–@]?\s*$/;
 const TRAILS_NUMBER = /\d\s*(?:k|l|lakhs?|lacs?|thousand|rupees|rs\.?|inr|\/-|\s)*$/i;
 const LABELLED_NUMBER = /(?:deposit|advance|security|maint\w*|brokerage|broker|commission|rent|rental|price|cost|budget)\s*(?:is|of|amount)?\s*[:=\-–@]?\s*(?:₹|rs\.?|inr)?\s*[\d.,]+\s*(?:k|l|lakhs?|lacs?|thousand|rupees|\/-|\s)*$/i;
-const PHONE_RE = /(?:\+?91[\s-]*)?\b([6-9](?:[\s-]?\d){9})\b/g;
+// Indian mobiles, optionally +91 / 91 / 0 prefixed, digits optionally split by up to 3 separator
+// characters (spaces, newlines, dots, dashes, slashes, underscores, brackets, zero-width characters),
+// so "98765 - 43210" and "98765 / 43210" are caught too. Run it through maskPhones(), which also reads
+// non-ASCII digits (Devanagari, full-width, mathematical) as digits.
+const SEP = '[\\s.\\-/_\u2013\u2014()\u200b-\u200d\u2060\ufeff]';
+export const PHONE_ANY = new RegExp(`(?<!\\d)(?:\\+?${SEP}{0,3}91${SEP}{0,3}|0)?([6-9](?:${SEP}{0,3}\\d){9})(?!\\d)`, 'g');
+/** Same-length copy of s with every Unicode decimal digit as ASCII (astral digits padded with a zero-width space). */
+export function asciiDigits(s) {
+  return s.replace(/\p{Nd}/gu, ch => { const d = String(Number.isNaN(+ch) ? digitValue(ch) : +ch); return ch.length === 2 ? d + '\u200b' : d; });
+}
+function digitValue(ch) {
+  // Unicode decimal digits come in contiguous blocks of ten starting at a code point ending in 0 or 6;
+  // find the block start by stepping back while the previous code point is still a digit.
+  let cp = ch.codePointAt(0), n = 0;
+  while (n < 9 && /\p{Nd}/u.test(String.fromCodePoint(cp - 1))) { cp--; n++; }
+  return n;
+}
+// "rent 65000 - 70000" is a range, not a phone: two groups that both end in 00 are read as money.
+const isRange = m => { const g = m.match(/\d+/g) || []; return g.length === 2 && g.every(x => x.length >= 4 && x.endsWith('00')); };
+/** Matches of PHONE_ANY in text (ASCII-digit copy), minus rent ranges. */
+export const phoneMatches = (text, n = asciiDigits(String(text || ''))) => [...n.matchAll(PHONE_ANY)].filter(m => !isRange(m[0]));
+/** Every mobile number in the text as 10 ASCII digits, however it is written. */
+export function findPhones(text) {
+  const n = asciiDigits(String(text || ''));
+  return [...new Set(phoneMatches(text, n).map(m => m[1].replace(/\D/g, '')))];
+}
+/** Text with every mobile number blanked to spaces (same length, so money parsing indices hold). */
+const blankPhones = t => { let out = '', last = 0; for (const m of phoneMatches(t)) { out += t.slice(last, m.index) + ' '.repeat(m[0].length); last = m.index + m[0].length; } return out + t.slice(last); };
 export function moneyMentions(text) {
   const out = []; const re = /(₹|rs\.?|inr)?\s*(\d{1,3}(?:,\d{2,3})+|\d+(?:\.\d+)?)\s*(k\b|thousand|lakhs?\b|lacs?\b|l\b)?/gi; let m;
   while ((m = re.exec(text))) {
@@ -81,7 +108,7 @@ export const societyOf = text => (String(text || '').match(SOCIETY_RE) || [null]
 export function extract(text) {
   const t = String(text || ''); const lo = t.toLowerCase(); const ex = {};
   // Phone numbers written with spaces ("98765 43210") must not be read as money.
-  const money = moneyMentions(t.replace(PHONE_RE, m => ' '.repeat(m.length)));
+  const money = moneyMentions(blankPhones(t));
   const rent = money.find(x => x.label === 'rent' && x.n >= 2000 && x.n <= 400000) || money.find(x => !x.label && x.n >= 3000 && x.n <= 400000);
   ex.rent = rent ? rent.n : null;
   const dep = money.find(x => x.label === 'deposit'); ex.deposit = dep ? dep.n : null;
@@ -106,7 +133,7 @@ export function extract(text) {
   ex.gender = fem && male ? 'any' : fem ? 'female' : male ? 'male' : null;
   const av = t.match(/\b(?:available|vacant|move[\s-]?in)\s*(?:from|by|on|date)?\s*[:-]?\s*((?:immediate(?:ly)?|\d{1,2}(?:st|nd|rd|th)?\s*(?:of\s*)?[A-Za-z]{3,9}|[A-Za-z]{3,9}\s*\d{1,2}(?:st|nd|rd|th)?|[A-Za-z]{3,9}\s*(?:1st|first)\s*week|next\s*month|this\s*month))/i);
   ex.availableFrom = av ? av[1].trim() : (/\bimmediate(ly)?\b/i.test(t) ? 'Immediate' : null);
-  ex.phones = [...new Set([...t.matchAll(PHONE_RE)].map(x => x[1].replace(/\D/g, '')))];
+  ex.phones = findPhones(t);
   ex.mapLinks = [...new Set([...t.matchAll(/https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|(?:www\.)?google\.[a-z.]+\/maps|maps\.google\.[a-z.]+)[^\s)\]]*/gi)].map(x => x[0]))];
   const soc = t.match(SOCIETY_RE);
   ex.society = soc ? soc[0] : null;
