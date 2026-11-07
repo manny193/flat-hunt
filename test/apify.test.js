@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
-import { buildInput, webhookParam, OFFICIAL_ACTOR, DEFAULT_ACTOR, DATASET_FIELDS } from '../src/apify.js';
+import { buildInput, webhookParam, OFFICIAL_ACTOR, DEFAULT_ACTOR, DATASET_OMIT } from '../src/apify.js';
 import { memoryDb, GREEN_GLEN } from './helpers.js';
 
 const BASE = 'https://hunt.test';
@@ -68,7 +68,7 @@ test('webhook: ingests the dataset in pages; a replay of the same dataset is ski
   const pages = api.calls.filter(c => c.url.pathname.includes('/datasets/'));
   assert.deepEqual(pages.map(c => c.url.searchParams.get('offset')), ['0', '10', '20']);
   assert.ok(pages.every(c => c.url.searchParams.get('limit') === '10' && c.url.searchParams.get('clean') === 'true'));
-  assert.deepEqual(pages[0].url.searchParams.get('fields').split(','), DATASET_FIELDS);
+  assert.deepEqual(pages[0].url.searchParams.get('omit').split(','), DATASET_OMIT);
   assert.equal((await repo.listListings())[0].posts[0].group, 'Bellandur Flats', 'group name from the group row on page 1 used on later pages');
 
   const again = await hook({ datasetId: 'dsAAAA0001', runId: 'runAAAA0001' });
@@ -161,4 +161,54 @@ test('settings show Apify usage and groups that could not be scraped', async () 
   assert.equal(s.apify.configured, true); assert.equal(s.apify.webhook, true);
   assert.equal(JSON.stringify(s).includes(SECRET), false, 'secrets never echoed');
   assert.equal(JSON.stringify(s).includes('apify_api_TOKEN'), false);
+});
+
+// ---------- QA regressions ----------
+test('resume after a cut-off keeps group names from rows on earlier pages (QA)', async () => {
+  let failed = false;
+  const api = fakeApify({ failOn: u => u.pathname.includes('/datasets/') && u.searchParams.get('offset') === '10' && !failed && (failed = true) });
+  const { hook, repo } = await harness(api, { INGEST_PAGE_SIZE: '10' });
+  assert.equal((await hook({ datasetId: 'dsGRP000001' })).status, 500);
+  assert.equal((await (await hook({ datasetId: 'dsGRP000001' })).json()).status, 'done');
+  const groups = (await repo.listListings()).map(l => l.posts[0].group);
+  assert.equal(groups.length, 24);
+  assert.ok(groups.every(g => g === 'Bellandur Flats'), 'every post named by the group row on page 1: ' + [...new Set(groups)]);
+});
+
+test('a dataset longer than one invocation’s page budget is resumed, not marked done (QA)', async () => {
+  const big = [DATASET[0], ...Array.from({ length: 130 }, (_, i) => post(i))];
+  const api = fakeApify({ dataset: big });
+  const { hook, repo } = await harness(api, { INGEST_PAGE_SIZE: '10' });
+  const r1 = await hook({ datasetId: 'dsBIG000001' });
+  assert.equal(r1.status, 503, 'partial ingest asks Apify to call again');
+  assert.equal((await r1.json()).status, 'partial');
+  const mid = await repo.getRunByDataset('dsBIG000001');
+  assert.equal(mid.status, 'partial'); assert.equal(mid.report.progress.offset, 100);
+  const r2 = await (await hook({ datasetId: 'dsBIG000001' })).json();
+  assert.equal(r2.status, 'done'); assert.equal(r2.report.total, 130);
+  assert.equal((await repo.listListings()).length, 130, 'nothing dropped, nothing doubled');
+  assert.equal((await repo.getRunByDataset('dsBIG000001')).report.progress, undefined);
+});
+
+test('webhook while another invocation is ingesting the same dataset asks Apify to retry (QA)', async () => {
+  const api = fakeApify();
+  const { hook, repo } = await harness(api);
+  await repo.claimRun({ datasetId: 'dsBUSY00001', now: Date.now() });
+  const r = await hook({ datasetId: 'dsBUSY00001' });
+  assert.equal(r.status, 503); assert.ok(r.headers.get('retry-after'));
+  assert.equal((await r.json()).reason, 'in progress');
+});
+
+test('dataset reads never drop fields with fields=; only comment fields are omitted (QA)', async () => {
+  const api = fakeApify();
+  const { hook } = await harness(api);
+  await hook({ datasetId: 'dsFLD000001' });
+  const page = api.calls.find(c => c.url.pathname.includes('/datasets/')).url;
+  assert.equal(page.searchParams.get('fields'), null);
+  for (const f of page.searchParams.get('omit').split(',')) assert.match(f, /comments?/i, f + ' is ignored by the normaliser anyway');
+});
+
+test('default dataset page size is small enough for the 10 ms CPU budget (QA)', async () => {
+  const { pageSize } = await import('../src/apify.js');
+  assert.equal(pageSize({}), 25);
 });

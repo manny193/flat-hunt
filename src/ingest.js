@@ -133,7 +133,8 @@ export async function ingestItems(repo, raw, opts) {
   // 4. write (one batch), together with the run log / page progress so a resume never double-counts
   const runReport = mergeReports(opts.run?.report ? structuredClone(opts.run.report) : null, report);
   if (opts.datasetId) runReport.datasetId = opts.datasetId;
-  if (opts.run?.progress) runReport.progress = opts.run.progress; else delete runReport.progress;
+  const progress = typeof opts.run?.progress === 'function' ? opts.run.progress(prepared.groups) : opts.run?.progress;
+  if (progress) runReport.progress = progress; else delete runReport.progress;
   await db(() => repo.saveIngest({ listings: changed, keys: newKeys, run: { source, datasetId: opts.datasetId, status: opts.run?.status || 'done', report: runReport }, now }));
   const t1 = performance.now();
   return {

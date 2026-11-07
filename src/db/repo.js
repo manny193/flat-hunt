@@ -198,7 +198,7 @@ export function createRepo(db) {
       const r = await db.run(`INSERT INTO runs (source, dataset_id, run_id, status, started_at, at, report) VALUES ('apify', ?, ?, 'ingesting', ?, ?, '{}')
         ON CONFLICT(dataset_id) DO UPDATE SET status = 'ingesting', at = excluded.at,
           run_id = coalesce(runs.run_id, excluded.run_id), started_at = coalesce(runs.started_at, excluded.started_at)
-        WHERE runs.status IN ('running', 'failed') OR (runs.status = 'ingesting' AND runs.at < ?)`,
+        WHERE runs.status IN ('running', 'failed', 'partial') OR (runs.status = 'ingesting' AND runs.at < ?)`,
       [datasetId, runId ?? null, startedAt ?? null, now, now - 5 * 60e3]);
       return r.changes > 0;
     },

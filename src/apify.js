@@ -17,12 +17,14 @@ export const actorId = env => {
   return a;
 };
 export const isDatasetId = id => typeof id === 'string' && /^[A-Za-z0-9]{6,40}$/.test(id);
-export const pageSize = env => Math.min(500, Math.max(10, parseInt(env.INGEST_PAGE_SIZE, 10) || 100));
+// Small pages so that one page always fits in the Workers Free 10 ms CPU budget: an invocation
+// cut off mid-way still saved every finished page, so each retry makes progress.
+export const pageSize = env => Math.min(500, Math.max(10, parseInt(env.INGEST_PAGE_SIZE, 10) || 25));
 
-// Fields we read from either actor. `fields=` trims the payload (comments, reactions, etc.).
-export const DATASET_FIELDS = ['type', 'id', 'groupId', 'name', 'privacy', 'text', 'postText', 'message', 'url', 'postUrl', 'permalink', 'topLevelUrl',
-  'createdAt', 'time', 'timestamp', 'date', 'authorName', 'user', 'author', 'source', 'groupTitle', 'groupName', 'groupUrl', 'facebookUrl', 'inputUrl',
-  'media', 'attachments', 'images', 'failedGroups', 'privateGroups', 'skippedGroups', 'unscrapableGroups', 'inaccessibleGroups', 'errors', 'failed'];
+// No `fields=`: the actors' real column names are unverified (docs/APIFY.md), and a name missing
+// from a whitelist would silently drop data. Omit only comment columns, which can be large and
+// which normalizeRaw/collectImages ignore anyway (collectImages skips keys matching /comments?/).
+export const DATASET_OMIT = ['topComments', 'latestComments', 'comments'];
 
 async function apify(env, path, init = {}, fetchFn = fetch) {
   if (!env.APIFY_TOKEN) throw new Error('APIFY_TOKEN is not set');
@@ -63,7 +65,10 @@ export async function getUsage(env, fetchFn = fetch) {
  */
 export async function ingestDataset(repo, env, { datasetId, runId, startedAt }, { fetchFn = fetch, now = Date.now() } = {}) {
   if (!isDatasetId(datasetId)) throw new Error('bad dataset id');
-  if (!(await repo.claimRun({ datasetId, runId, startedAt, now }))) return { status: 'skipped', reason: 'already ingested' };
+  if (!(await repo.claimRun({ datasetId, runId, startedAt, now }))) {
+    const cur = await repo.getRunByDataset(datasetId);
+    return { status: 'skipped', reason: cur?.status === 'done' ? 'already ingested' : 'in progress' };
+  }
   const prev = await repo.getRunByDataset(datasetId);
   let report = prev?.report?.progress ? prev.report : null; // resume after a cut-off invocation
   if (report) delete report.error;
@@ -71,26 +76,31 @@ export async function ingestDataset(repo, env, { datasetId, runId, startedAt }, 
   let groups = report?.progress?.groups || [];
   const [areas, settings] = await Promise.all([repo.listAreas(), repo.getSettings()]);
   const limit = pageSize(env);
+  const mergeGroups = more => [...new Map([...groups, ...more].map(g => [g.id, g])).values()].slice(0, 200);
+  let partial = false;
   try {
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const q = `?clean=true&format=json&limit=${limit}&offset=${offset}&fields=${DATASET_FIELDS.join(',')}`;
+    for (let page = 0; ; page++) {
+      const q = `?clean=true&format=json&limit=${limit}&offset=${offset}&omit=${DATASET_OMIT.join(',')}`;
       const items = await apify(env, `/datasets/${datasetId}/items${q}`, {}, fetchFn);
       if (!Array.isArray(items)) throw new Error('dataset items is not an array');
-      const last = items.length < limit || page === MAX_PAGES - 1;
+      const last = items.length < limit;
+      partial = !last && page === MAX_PAGES - 1; // page budget used up: save progress, resume later
       const nextOffset = offset + items.length;
-      const progress = last ? null : { offset: nextOffset, groups };
-      const res = await ingestItems(repo, items, { source: 'apify', now, datasetId, areas, settings, groups, run: { status: last ? 'done' : 'ingesting', report, progress } });
+      // Progress is saved in the same batch as this page's listings; it must include the group rows
+      // found on this page, so it is built after the page's rows are parsed.
+      const progress = last ? null : pageGroups => ({ offset: nextOffset, groups: mergeGroups(pageGroups) });
+      const res = await ingestItems(repo, items, { source: 'apify', now, datasetId, areas, settings, groups, run: { status: last ? 'done' : partial ? 'partial' : 'ingesting', report, progress } });
       report = res.runReport;
-      groups = [...new Map([...groups, ...res.groups].map(g => [g.id, g])).values()].slice(0, 200);
-      if (!last) report.progress = { offset: nextOffset, groups };
+      groups = mergeGroups(res.groups);
       offset = nextOffset;
-      if (last) break;
+      if (last || partial) break;
     }
   } catch (e) {
     // Keep the progress already saved; mark failed so the sweep (or Apify's retry) can resume.
     await repo.failRunKeepProgress(datasetId, String(e.message || e), now);
     throw e;
   }
+  if (partial) return { status: 'partial', report };
   delete report.progress;
   if (report.unscrapable?.length) await repo.putSettings({ unscrapableGroups: { at: now, datasetId, groups: report.unscrapable.slice(0, 50) } });
   else await repo.putSettings({ unscrapableGroups: { at: now, datasetId, groups: [] } });

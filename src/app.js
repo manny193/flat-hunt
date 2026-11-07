@@ -121,6 +121,10 @@ async function webhook(request, env, repo, fetchFn) {
   if (runId != null && !/^[A-Za-z0-9]{6,40}$/.test(String(runId))) return errorJson(400, 'bad_run_id');
   if (!env.APIFY_TOKEN) return errorJson(503, 'apify_not_configured', 'APIFY_TOKEN is not set.');
   const res = await ingestDataset(repo, env, { datasetId, runId: runId && String(runId) }, { fetchFn });
+  // 503 makes Apify retry the webhook: that is how a partial ingest (page budget used up) or one
+  // that another invocation still holds continues soon instead of at the next 4-hourly sweep.
+  if (res.status === 'partial') return json({ status: 'partial', report: res.report }, 503, { 'retry-after': '60' });
+  if (res.status === 'skipped' && res.reason === 'in progress') return json({ status: 'skipped', reason: res.reason }, 503, { 'retry-after': '300' });
   return json(res.status === 'skipped' ? { status: 'skipped', reason: res.reason } : { status: 'done', report: res.report });
 }
 
