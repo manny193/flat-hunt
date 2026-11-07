@@ -151,3 +151,10 @@ test('all areas paused: posts are skipped, not all kept (QA)', () => {
   const none = makeContext([], { keywordFilter: true });
   assert.ok(processItems(SAMPLES, 'scraper', [], none).report.newListings > 0, 'no areas at all: nothing to filter by, keep posts');
 });
+
+// AI eval e08: "Maintenance Rs. 4,000/- Security deposit Rs. 2,50,000/-" was read as deposit 4,000,
+// because the "Rs." before the rent ended the look-back at its dot.
+test('money parsing: "Rs." with a dot does not end the label look-back (AI eval e08)', () => {
+  const ex = extract('TO-LET: 3 BHK unfurnished independent floor, 5th Cross, Green Glen Layout. Rent Rs. 45,000/- Maintenance Rs. 4,000/- Security deposit Rs. 2,50,000/-. Only family preferred. No brokers please. Contact owner: 9000089012');
+  assert.equal(ex.rent, 45000); assert.equal(ex.maintenance, 4000); assert.equal(ex.deposit, 250000);
+});

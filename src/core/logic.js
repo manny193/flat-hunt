@@ -56,7 +56,8 @@ export function moneyMentions(text) {
     if (n < 1000 || n > 10000000) continue;
     const after = text.slice(m.index + all.length, m.index + all.length + 24).toLowerCase();
     if (/^\s*(sq|sqft|sft|square|ft\b)/.test(after)) continue;
-    const before = text.slice(Math.max(0, m.index - 30), m.index).toLowerCase().split(/[.;\n|!?]|,(?!\d)/).pop();
+    // "Rs." is a currency, not a sentence end ("Rent Rs. 45,000/- Maintenance Rs. 4,000/-").
+    const before = text.slice(Math.max(0, m.index - 30), m.index).toLowerCase().split(/(?<!\brs)[.;\n|!?]|,(?!\d)/).pop();
     let label = null, best = -1;
     for (const [name, r] of LABELS) { let mm, last = -1; r.lastIndex = 0; while ((mm = r.exec(before))) last = mm.index; if (last > best) { best = last; label = name; } }
     // A label written right before the number ("Rent 25000 deposit 1 lakh") wins over a label
