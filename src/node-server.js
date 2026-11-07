@@ -36,7 +36,8 @@ export function staticAssets(root = WEB_DIR) {
   };
 }
 
-function toRequest(req, env) {
+/** node:http request -> Fetch Request. Exported for tests. */
+export function toRequest(req, env) {
   const proto = env.TRUST_PROXY === '1' && req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
   const url = `${proto}://${req.headers.host || 'localhost'}${req.url}`;
   const headers = new Headers();
@@ -46,7 +47,9 @@ function toRequest(req, env) {
     if (k.startsWith('cf-access-') && env.AUTH_MODE !== 'cloudflare-access') continue;
     headers.set(k, Array.isArray(v) ? v.join(', ') : v);
   }
-  const fwd = env.TRUST_PROXY === '1' ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '';
+  // The proxy we trust appends the address it saw, so the client is the *last* entry; anything to its
+  // left was sent by the client and would let it pick a fresh "IP" per login attempt.
+  const fwd = env.TRUST_PROXY === '1' ? String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean).pop() || '' : '';
   headers.set('cf-connecting-ip', fwd || req.socket.remoteAddress || 'unknown');
   const hasBody = !['GET', 'HEAD'].includes(req.method);
   return new Request(url, { method: req.method, headers, body: hasBody ? Readable.toWeb(req) : undefined, duplex: hasBody ? 'half' : undefined });
