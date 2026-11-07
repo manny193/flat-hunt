@@ -25,18 +25,18 @@ At $1.20/1,000 that is ~4,000 posts/month, ~130/day across all groups. Frequency
 ## How runs happen (no Apify Schedule needed)
 
 ```
-our cron (every 4h) ──► budget check ──► POST /v2/acts/{actor}/runs   (input built from DB: groups + cutoff)
+our cron (every 4h) ──► budget check ──► (starts the new run first) POST /v2/acts/{actor}/runs   (input built from DB: groups + cutoff)
                                               │  webhook on ACTOR.RUN.SUCCEEDED (registered per run via ?webhooks=)
                                               ▼
             POST https://<site>/api/ingest/apify   header X-Ingest-Secret, body {datasetId, runId}
                                               │
-            our cron also sweeps: GET /v2/acts/{actor}/runs?status=SUCCEEDED&desc=1&limit=3
-            and ingests any dataset not yet in the runs table (webhook missed)
+            then the same cron sweeps: GET /v2/acts/{actor}/runs?status=SUCCEEDED&desc=1&limit=3
+            and ingests one dataset not yet done (webhook missed, or a partial ingest to resume)
 ```
 
 - Start a run: `POST https://api.apify.com/v2/acts/automly~facebook-public-group-posts-scraper/runs?webhooks=<base64 JSON>` with `Authorization: Bearer $APIFY_TOKEN`, body = input JSON.
 - Per-run webhook (base64 of a JSON array): `[{"eventTypes":["ACTOR.RUN.SUCCEEDED"],"requestUrl":"https://<site>/api/ingest/apify","headersTemplate":"{\"X-Ingest-Secret\":\"<secret>\"}","payloadTemplate":"{\"datasetId\":{{resource.defaultDatasetId}},\"runId\":{{resource.id}}}"}]`
-- Dataset items: `GET https://api.apify.com/v2/datasets/{datasetId}/items?clean=true&format=json`
+- Dataset items, read in pages: `GET https://api.apify.com/v2/datasets/{datasetId}/items?clean=true&format=json&limit=25&offset=N` (no `fields=`: the actors' column names are unverified, so we read whole rows; a page cut off mid-way is resumed from the saved offset)
 - Usage: `GET https://api.apify.com/v2/users/me/limits`
 
 ## Inputs

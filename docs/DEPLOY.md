@@ -16,7 +16,7 @@ Production runs on **Cloudflare Workers (free plan)**: the Worker serves the UI 
   scheduled()          │ fetch() +    │                │ (SQLite, 7-day    │
                        │ scheduled()  │                │  Time Travel)     │
                        └──────┬───────┘                └───────────────────┘
-          start run + sweep   │  ▲  POST /api/ingest/apify (X-Ingest-Secret)
+          start run, then sweep│  ▲  POST /api/ingest/apify (X-Ingest-Secret)
                               ▼  │
                        ┌──────────────┐
                        │ Apify actor  │ scrapes public FB groups
@@ -75,7 +75,7 @@ finds the database id and URL during each run.
 |---|---|---|
 | Unit + e2e (Playwright) tests, Worker dry-run bundle, Docker build + healthcheck | every PR and every push to `main` | `ci.yml` |
 | Apply D1 migrations → deploy Worker + secrets → smoke test → auto-rollback on failure | every push to `main` | `deploy.yml` |
-| Start the Apify run (budget check, "newer than" cutoff, per-run webhook) and sweep missed runs | every 4 h at 06:00/10:00/14:00/18:00/22:00/02:00 IST | Worker `scheduled()` |
+| Start the Apify run first (budget check, "newer than" cutoff, per-run webhook), then sweep one missed or partial run | every 4 h at 06:00/10:00/14:00/18:00/22:00/02:00 IST | Worker `scheduled()` |
 | Ingest a finished run | when Apify's webhook fires | `POST /api/ingest/apify` |
 | Encrypted D1 export, kept 30 days | Mondays 03:17 IST | `backup.yml` |
 | Site up + last ingest < 12 h | daily 08:43 IST, failure emails you | `healthcheck.yml` |
@@ -162,7 +162,7 @@ Total: **₹0/month.** All limits below were checked on 2026-11-07.
 | Apify | US$5 credit/month, can't overspend | see docs/APIFY.md |
 
 **About the 10 ms CPU limit**: waiting on network and D1 doesn't count, only JavaScript execution does. To stay inside the
-limit, ingest fetches the dataset in pages (`limit`/`offset`, with `fields=` to drop unused columns),
+limit, ingest fetches the dataset in pages of `INGEST_PAGE_SIZE` posts (default 25; at most 4 pages per webhook call and one dataset per cron run, to stay under D1's 50 queries per invocation),
 filters by keyword first, runs fuzzy matching only against SQL-selected candidates, saves
 progress per page, and resumes from the saved offset (on Apify's webhook retry or the next sweep) if an
 invocation is cut off. If CPU still proves too tight, the fix is Workers Paid (US$5/month,
