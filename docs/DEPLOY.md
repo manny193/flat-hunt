@@ -1,7 +1,7 @@
 # Deploying Flat Hunt
 
 Production runs on **Cloudflare Workers (free plan)**: the Worker serves the UI and API,
-**D1** stores the listings, a **Cron Trigger** starts the Apify scrape every 4 hours, and
+**D1** stores the listings, an hourly **Cron Trigger** starts the Apify scrape when it is due (every 4 hours by default, set by an admin), and
 **GitHub Actions** tests and deploys every push to `main`. It costs ₹0 a month, and you don't need a card.
 
 ## Architecture
@@ -12,7 +12,7 @@ Production runs on **Cloudflare Workers (free plan)**: the Worker serves the UI 
                                │  (login check, then web/ assets or /api/*)
                                ▼
                        ┌──────────────┐   D1 binding   ┌───────────────────┐
-  Cron 4-hourly ─────► │ Worker       │ ─────────────► │ D1 "flat-hunt"   │
+  Cron hourly ───────► │ Worker       │ ─────────────► │ D1 "flat-hunt"   │
   scheduled()          │ fetch() +    │                │ (SQLite, 7-day    │
                        │ scheduled()  │                │  Time Travel)     │
                        └──────┬───────┘                └───────────────────┘
@@ -25,8 +25,37 @@ Production runs on **Cloudflare Workers (free plan)**: the Worker serves the UI 
  GitHub schedules     ─► weekly encrypted D1 backup, daily healthcheck (failures email you)
 ```
 
-Public paths (no login): `/login`, `/api/login`, `/healthz`, and `POST /api/ingest/apify`, which is
-protected by the `X-Ingest-Secret` header. Everything else needs a session.
+Public paths (no login): `/login`, `/api/login`, `/auth/google`, `/auth/google/callback`, `/api/me`,
+`/api/public/*` (read-only browse, contact details removed on the server, rate-limited per IP), `/healthz`,
+and `POST /api/ingest/apify`, which is protected by the `X-Ingest-Secret` header. Everything else needs a
+signed-in, approved user; `/api/admin/*` needs an admin.
+
+### Accounts and roles
+
+- **Public**: browses listings in any area. Phone numbers, WhatsApp/tel/map links, emails, society names,
+  author names and post URLs are removed by the server before the response is built.
+- **User**: signs in with Google; sees full details; has their own review deck, shortlist, notes and areas.
+- **Admin**: everything, plus `/api/admin/*`. Admins are the emails in `ADMIN_EMAILS`, plus anyone an admin
+  promotes in the Users page. The `APP_PASSWORD` login is kept as an admin-only **break-glass** login (it
+  signs in as the first `ADMIN_EMAILS` account), so you can get in before Google is set up.
+- New sign-ups are open; the admin setting "require approval" makes new users *pending* (public view only)
+  until approved. Role and status are re-read from D1 on every request, so blocking works at once.
+
+### Google sign-in setup (founder, about 10 minutes)
+
+1. console.cloud.google.com → create a project → **APIs & Services → OAuth consent screen**: External,
+   app name "Flat Hunt", your email; scopes `openid`, `email`, `profile` (no verification needed for these).
+   Publish the app (otherwise only listed test users can sign in).
+2. **Credentials → Create credentials → OAuth client ID → Web application**. Authorised redirect URI:
+   `https://flat-hunt.<subdomain>.workers.dev/auth/google/callback` (or your `PUBLIC_BASE_URL` + `/auth/google/callback`).
+3. Add GitHub secrets `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `ADMIN_EMAILS` (your Gmail; comma-separate
+   several). Redeploy.
+
+### Reddit source setup (optional)
+
+reddit.com/prefs/apps → "create another app" → type **script** → redirect `http://localhost` (unused). Add
+GitHub secrets `REDDIT_CLIENT_ID` (the string under the app name) and `REDDIT_CLIENT_SECRET`, and the variable
+`REDDIT_USERNAME` (used in the User-Agent). Without them the Reddit source shows as "not connected".
 
 ## One-time setup (founder, about 15 minutes)
 
@@ -55,6 +84,9 @@ protected by the `X-Ingest-Secret` header. Everything else needs a session.
    | `APP_PASSWORD` | your login password, 16+ chars (a 4–5 word passphrase is fine) |
    | `SESSION_SECRET` | random, 32+ chars |
    | `BACKUP_PASSPHRASE` | random, 20+ chars. **Also save it in your password manager**, because backups can't be decrypted without it |
+   | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | optional at first; see "Google sign-in setup" |
+   | `ADMIN_EMAILS` | your Google email (comma-separated list) |
+   | `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET` | optional; see "Reddit source setup" |
 
    Generate random values with:
    `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`
@@ -75,7 +107,7 @@ finds the database id and URL during each run.
 |---|---|---|
 | Unit + e2e (Playwright) tests, Worker dry-run bundle, Docker build + healthcheck | every PR and every push to `main` | `ci.yml` |
 | Apply D1 migrations → deploy Worker + secrets → smoke test → auto-rollback on failure | every push to `main` | `deploy.yml` |
-| Start the Apify run first (budget check, "newer than" cutoff, per-run webhook), then sweep one missed or partial run | every 4 h at 06:00/10:00/14:00/18:00/22:00/02:00 IST | Worker `scheduled()` |
+| Hourly tick: start the Apify run if due (admin interval, default 4 h; budget check; cutoff = max(last good start − 1 h, now − backfillDays)), sweep one missed or partial run, then with the remaining D1 budget: one Reddit step, area backfill chunks, AI extraction, and the daily retention purge (default 30 days, shortlisted listings kept) | every hour at :00 UTC (:30 IST) | Worker `scheduled()` |
 | Ingest a finished run | when Apify's webhook fires | `POST /api/ingest/apify` |
 | Encrypted D1 export, kept 30 days | Mondays 03:17 IST | `backup.yml` |
 | Site up + last ingest < 12 h | daily 08:43 IST, failure emails you | `healthcheck.yml` |
@@ -109,7 +141,7 @@ that the ingest endpoint rejects a wrong secret. If any check fails, the deploy 
   Workflows run with `permissions: contents: read`, checkout doesn't keep credentials, and every
   third-party action is pinned to a full commit SHA.
 - **Headers** (set by the Worker on every response):
-  `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.fbcdn.net; connect-src 'self'; manifest-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+  `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.fbcdn.net https://i.redd.it https://preview.redd.it https://lh3.googleusercontent.com; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
   `Strict-Transport-Security: max-age=31536000`, `X-Content-Type-Options: nosniff`,
   `Referrer-Policy: no-referrer`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`,
   `Cross-Origin-Opener-Policy: same-origin`, `X-Robots-Tag: noindex, nofollow`,
@@ -137,9 +169,10 @@ Worker within a minute.
 
 | Secret | Notes |
 |---|---|
-| `APP_PASSWORD` | takes effect at the next login |
+| `APP_PASSWORD` | takes effect at the next login; removing it switches the break-glass login off (existing password sessions stop working) |
+| `GOOGLE_CLIENT_SECRET` | create a new secret in Google Cloud, update, redeploy, then delete the old one |
 | `SESSION_SECRET` | logs out every session |
-| `INGEST_SECRET` | future runs use the new value, and the 4-hourly sweep catches any run whose webhook used the old one |
+| `INGEST_SECRET` | future runs use the new value, and the hourly sweep catches any run whose webhook used the old one |
 | `APIFY_TOKEN` | regenerate in Apify first, then update the secret and redeploy |
 | `CLOUDFLARE_API_TOKEN` | use **Roll** on the token page, then update the secret |
 | `BACKUP_PASSPHRASE` | keep the old one until the old artifacts expire (30 days) |
@@ -150,10 +183,10 @@ Total: **₹0/month.** All limits below were checked on 2026-11-07.
 
 | Service | Free limit | Our use |
 |---|---|---|
-| Workers requests | 100,000/day | a few hundred (UI + 6 crons + 6 webhooks) |
+| Workers requests | 100,000/day | a few hundred (UI + 24 crons + webhooks) plus public browsing |
 | Workers CPU | **10 ms per invocation, including cron** | the tight one. Ingest is paged and resumable (see below) |
 | Cron Triggers | 5 per account | 1 |
-| Subrequests | 50 per invocation | 2–4 per cron run, one per dataset page |
+| Subrequests | 50 per invocation | 2–4 per cron run, one per dataset page, one per subreddit |
 | D1 | 5 GB total, 500 MB/DB, 5M rows read/day, 100k rows written/day, 50 queries/invocation | ~10 MB, <0.5M reads/day |
 | D1 Time Travel | 7 days | backups |
 | Static assets | unlimited (with `run_worker_first` they also count as Worker requests) | small |
@@ -191,7 +224,7 @@ Custom Domain. Then set the repository variable `PUBLIC_BASE_URL=https://your.do
 - Docker: `docker compose -f infra/docker-compose.yml up --build` uses the same app on Node 22 slim,
   running as non-root, with a `/data` volume for SQLite and a `/healthz` healthcheck. To self-host for real (on any
   VM), keep the port on loopback and put an HTTPS proxy or tunnel in front. Set `CRON_ENABLED=1` so
-  the Node server runs the 4-hourly job itself.
+  the Node server runs the hourly job itself.
 
 ## Platforms considered (2026-11-07)
 
