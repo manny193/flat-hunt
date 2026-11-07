@@ -56,7 +56,7 @@ const INSERT_KEYS = `INSERT OR IGNORE INTO post_keys (key,listing_id) SELECT ${j
 // Candidate listings for fuzzy matching, one query for the whole batch.
 // Each spec row: i (post index), a (area id, 0 = none), k (kind), b (bhk text|null), lo/hi (rent window|null).
 // Three UNION ALL branches so SQLite can use the (area_id, kind, rent) index range for the common case.
-// At most 200 most-recent candidates per post.
+// At most 100 most-recent candidates per post (reposts usually come within days).
 const CANDIDATES = `WITH q AS MATERIALIZED (
   SELECT ${je('i')} AS qi, ${je('a')} AS area, ${je('k')} AS kind, ${je('b')} AS bhk, ${je('lo')} AS lo, ${je('hi')} AS hi FROM json_each(?)
 ), hits AS (
@@ -74,11 +74,11 @@ const CANDIDATES = `WITH q AS MATERIALIZED (
 ), ranked AS (
   SELECT qi, listing_id, ROW_NUMBER() OVER (PARTITION BY qi ORDER BY last_posted_at DESC) AS rn
   FROM hits WHERE qb IS NULL OR mb IS NULL OR mb = qb
+), cand AS (
+  SELECT listing_id, group_concat(DISTINCT qi) AS qis FROM ranked WHERE rn <= 100 GROUP BY listing_id
 )
-SELECT l.id, l.kind, l.bhk, l.rent, l.phones, l.fp, l.areas, group_concat(DISTINCT r.qi) AS qis
-FROM ranked r JOIN listings l ON l.id = r.listing_id
-WHERE r.rn <= 200
-GROUP BY l.id`;
+SELECT l.id, l.kind, l.bhk, l.rent, l.phones, l.fp, l.areas, c.qis
+FROM cand c CROSS JOIN listings l ON l.id = c.listing_id`;
 
 export function createRepo(db) {
   return {

@@ -48,7 +48,6 @@ CREATE TABLE IF NOT EXISTS listing_match (
   PRIMARY KEY (listing_id, area_id)
 );
 CREATE INDEX IF NOT EXISTS listing_match_lookup ON listing_match (area_id, kind, rent);
-CREATE INDEX IF NOT EXISTS listing_match_recent ON listing_match (area_id, kind, last_posted_at);
 
 -- Exact-duplicate keys: 'u:<normalised url>', 'h:<text hash>', 'n:<text hash>|<group>' (url-less posts).
 CREATE TABLE IF NOT EXISTS post_keys (

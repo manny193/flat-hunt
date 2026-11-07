@@ -221,8 +221,8 @@ export function fingerprint(l) { return (l.posts || []).slice(0, 5).map(q => [..
  */
 export function scoreCandidate(tok, ex, c) {
   let score = 0, best = 0;
-  for (const s of c.fp || []) {
-    const t = tokens(s); const lo = Math.min(t.size, tok.size), hi = Math.max(t.size, tok.size);
+  for (const t of fpSets(c)) {
+    const lo = Math.min(t.size, tok.size), hi = Math.max(t.size, tok.size);
     if (!hi || lo / hi < 0.3) continue; // jaccard can't reach 0.3: skip the set walk
     best = Math.max(best, jaccard(tok, t));
   }
@@ -232,6 +232,11 @@ export function scoreCandidate(tok, ex, c) {
     if (nearSameRent || best >= 0.3) score = Math.max(score, 0.9);
   }
   return score;
+}
+/** Token sets of a candidate's fingerprint, built once and cached on the object. */
+export function fpSets(c) {
+  if (!c._sets) Object.defineProperty(c, '_sets', { value: (c.fp || []).map(s => new Set(s ? s.split(' ') : [])), writable: true, configurable: true });
+  return c._sets;
 }
 export const compatible = (c, ex) => (c.kind || 'offer') === ex.kind && bhkOk(c.bhk, ex.bhk) && rentOk(c.rent, ex.rent);
 
