@@ -361,8 +361,8 @@ export function emptyReport(source, now, total) {
 /** Add page report b into the running report a (dataset ingest happens in pages). */
 export function mergeReports(a, b) {
   if (!a) return structuredClone(b);
-  for (const k of ['total', 'noText', 'offTopic', 'seeking', 'dupes', 'newListings', 'merged', 'known', 'outside']) a[k] = (a[k] || 0) + (b[k] || 0);
-  for (const k of ['outsideGroups', 'knownGroups', 'byArea', 'fetchedByGroup', 'matchedByGroup']) { if (!a[k] && !b[k]) continue; a[k] = a[k] || {}; for (const [g, n] of Object.entries(b[k] || {})) a[k][g] = (a[k][g] || 0) + n; }
+  for (const k of ['total', 'noText', 'offTopic', 'seeking', 'dupes', 'newListings', 'merged', 'known', 'outside', 'notHousing', 'offArea']) a[k] = (a[k] || 0) + (b[k] || 0);
+  for (const k of ['outsideGroups', 'knownGroups', 'byArea', 'fetchedByGroup', 'matchedByGroup', 'newByGroup']) { if (!a[k] && !b[k]) continue; a[k] = a[k] || {}; for (const [g, n] of Object.entries(b[k] || {})) a[k][g] = (a[k][g] || 0) + n; }
   const seen = new Set((a.unscrapable || []).map(u => u.url || u.name));
   a.unscrapable = [...(a.unscrapable || []), ...(b.unscrapable || []).filter(u => !seen.has(u.url || u.name))];
   return a;
@@ -370,6 +370,8 @@ export function mergeReports(a, b) {
 /** Normalise, area-filter and classify one raw item. Returns null (and counts it) when skipped. */
 const TEXT_KEYS = ['text', 'postText', 'post_text', 'message', 'content', 'body', 'caption', 'description'];
 export const GROUP_KEYS = ['groupTitle', 'groupName', 'group_name', 'group', 'pageName', 'groupTitleText'];
+// Housing words: with storeAll (every post kept, area matched on read) this keeps sofa sales out.
+export const HOUSING_RE = /\b(rent|rental|rented|flat|flats|flatmates?|room ?mates?|rooms?|pg|bhk|\d\s*bhk|1rk|rk|apartment|house|lease|tenants?|accommodation|to[\s-]?let|deposit|sharing|villa|studio|co-?living|occupancy)\b/i;
 export function screenItem(raw, source, ctx, report, now) {
   // Cheap checks first: most scraped posts are about other areas, so skip full normalisation for them.
   const obj = typeof raw === 'string' ? { text: raw } : (raw && typeof raw === 'object' ? raw : {});
@@ -377,7 +379,11 @@ export function screenItem(raw, source, ctx, report, now) {
   if (text.length < 15) { report.noText++; return null; }
   const areas = matchAreas(text + ' ' + asName(pick(obj, GROUP_KEYS)), ctx.areas);
   // Filter whenever the user has any area: pausing every area must not let every post through.
-  if (ctx.keywordFilter !== false && (ctx.areas.length || ctx.hasAreas) && !areas.length) { report.offTopic++; return null; }
+  if (ctx.storeAll) {
+    // Store every housing post; posts in none of our areas are kept (area 0) for future areas.
+    if (!HOUSING_RE.test(text)) { report.notHousing = (report.notHousing || 0) + 1; return null; }
+    if (!areas.length) report.offArea = (report.offArea || 0) + 1;
+  } else if (ctx.keywordFilter !== false && (ctx.areas.length || ctx.hasAreas) && !areas.length) { report.offTopic++; return null; }
   const p = normalizeRaw(obj, source, now);
   p.areas = areas;
   let known = isKnownGroup(p.group, p.groupUrl, ctx.watched); if (known == null && typeof p.groupKnownHint === 'boolean') known = p.groupKnownHint;

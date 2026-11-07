@@ -1,6 +1,6 @@
 // Node entry: node:http -> the same Fetch handler as the Worker, node:sqlite storage, web/ served statically.
 //   PORT (8787), HOST (0.0.0.0), DB_PATH (./data/flat-hunt.db), CRON_ENABLED=1 + APIFY_TOKEN for the in-process
-//   4-hourly job (CRON_INTERVAL_MINUTES, default 240), TRUST_PROXY=1 behind a reverse proxy, AUTH_DISABLED=1 for local dev.
+//   hourly job (CRON_INTERVAL_MINUTES, default 60; runs start when due per the admin schedule), TRUST_PROXY=1 behind a reverse proxy, AUTH_DISABLED=1 for local dev.
 import http from 'node:http';
 import { Readable } from 'node:stream';
 import { readFile, stat } from 'node:fs/promises';
@@ -85,7 +85,7 @@ export async function startServer(opts = {}) {
 
   let timer = null;
   if (env.CRON_ENABLED === '1' && env.APIFY_TOKEN) {
-    const minutes = Math.max(15, parseInt(env.CRON_INTERVAL_MINUTES, 10) || 240);
+    const minutes = Math.max(15, parseInt(env.CRON_INTERVAL_MINUTES, 10) || 60);
     const run = () => app.scheduled({ cron: 'node-interval', scheduledTime: Date.now() }, env).catch(e => console.error('scheduled job failed', e));
     const first = setTimeout(run, 2 * 60e3); first.unref();
     timer = setInterval(run, minutes * 60e3); timer.unref();

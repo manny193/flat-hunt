@@ -9,7 +9,7 @@ const CSP = [
   "script-src 'self'",
   "style-src 'self' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
-  "img-src 'self' data: https://*.fbcdn.net",
+  "img-src 'self' data: https://*.fbcdn.net https://i.redd.it https://preview.redd.it https://lh3.googleusercontent.com",
   "connect-src 'self'",
   "manifest-src 'self'",
   "base-uri 'none'",

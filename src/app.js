@@ -2,9 +2,15 @@
 // Platform adapters (src/worker.js, src/node-server.js) supply the repository and a static file server.
 
 import { HttpError, json, errorJson, readJson, safeEqual, secure } from './http.js';
-import { authenticate, authMode, attemptLogin, clearCookie } from './auth.js';
+import { identify, authMode, attemptLogin, clearCookie, loginMethods, googleConfigured, adminEmails, breakGlassUser, atLeast, roleOf, createUserSession, sessionCookie } from './auth.js';
+import { startGoogle, finishGoogle, clearFlowCookie } from './google.js';
+import { publicApi } from './public.js';
+import { adminApi } from './admin.js';
+import { serializeListing } from './serialize.js';
 import { ingestItems } from './ingest.js';
 import { ingestDataset, isDatasetId, scheduledJob, actorId, DEFAULT_RESULTS_PER_GROUP } from './apify.js';
+import { validateGroups } from './groups.js';
+import { startBackfill, backfillState } from './backfill.js';
 import { generateKeywords, cleanKeywords } from './core/keywords.js';
 import { esc } from './core/logic.js';
 import { STAGES, STATUSES } from './db/repo.js';
@@ -40,6 +46,8 @@ export function createApp(deps) {
   };
 }
 
+export { areaName, validateSettings, settingsView };
+
 async function route(request, env, ctx, deps, fetchFn) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
@@ -53,33 +61,85 @@ async function route(request, env, ctx, deps, fetchFn) {
     return webhook(request, env, repo(), fetchFn);
   }
   if (path === '/login' && method === 'GET') {
-    const who = await authenticate(request, env, fetchFn);
-    if (who.user) return redirect(safeNext(url.searchParams.get('next')));
-    return loginPage(authMode(env), url.searchParams.get('error'), safeNext(url.searchParams.get('next')));
+    const who = await identify(request, env, repo(), fetchFn);
+    if (atLeast(who, 'user')) return redirect(safeNext(url.searchParams.get('next')));
+    return loginPage(env, who, url.searchParams.get('error'), safeNext(url.searchParams.get('next')));
   }
   if (path === '/api/login') {
     if (method !== 'POST') return errorJson(405, 'method_not_allowed');
     checkOrigin(request);
     return login(request, env, repo());
   }
-  if (path === '/api/logout' && method === 'POST') { checkOrigin(request); return new Response(null, { status: 204, headers: { 'set-cookie': clearCookie() } }); }
+  if ((path === '/api/logout' || path === '/auth/logout') && method === 'POST') {
+    checkOrigin(request);
+    const h = new Headers(); h.append('set-cookie', clearCookie()); h.append('set-cookie', clearFlowCookie());
+    return new Response(null, { status: 204, headers: h });
+  }
+  if (path === '/auth/google' && method === 'GET') {
+    if (!googleConfigured(env)) return redirect('/login?error=google_unconfigured');
+    return startGoogle(request, env, safeNext(url.searchParams.get('next')));
+  }
+  if (path === '/auth/google/callback' && method === 'GET') return googleCallback(request, env, repo(), fetchFn);
+  if (path === '/api/me' && method === 'GET') return json(meView(await identify(request, env, repo(), fetchFn), env));
+  if (path.startsWith('/api/public/')) return publicApi(request, env, repo(), path, url);
   if ((method === 'GET' || method === 'HEAD') && PUBLIC_ASSETS.has(path)) return (await deps.assets(request, env)) || errorJson(404, 'not_found');
 
-  // ---------- everything else needs a session ----------
-  const who = await authenticate(request, env, fetchFn);
-  if (!who.user) {
-    if (who.mode === 'unconfigured') return errorJson(503, 'auth_not_configured', 'Login is not configured on the server: set APP_PASSWORD and SESSION_SECRET.');
+  // ---------- everything else needs a signed-in, approved user ----------
+  const who = await identify(request, env, repo(), fetchFn);
+  if (who.role === 'public') {
+    if (who.mode === 'unconfigured') return errorJson(503, 'auth_not_configured', 'Login is not configured on the server: set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET or APP_PASSWORD, and SESSION_SECRET.');
     if (path.startsWith('/api/')) return errorJson(401, 'unauthenticated', 'Log in to continue.', { login: '/login' });
     if (method === 'GET' && (request.headers.get('accept') || '').includes('text/html')) return redirect('/login' + (path !== '/' ? '?next=' + encodeURIComponent(path + url.search) : ''));
     return errorJson(401, 'unauthenticated');
   }
+  if (who.role === 'pending') {
+    if (path.startsWith('/api/')) return errorJson(403, 'pending_approval', 'Your account is waiting for an admin to approve it.');
+    if (method === 'GET' && (request.headers.get('accept') || '').includes('text/html')) return redirect('/login?error=pending');
+    return errorJson(403, 'pending_approval');
+  }
 
   if (path.startsWith('/api/')) {
     if (!['GET', 'HEAD'].includes(method)) checkOrigin(request);
-    return api(request, env, method, path, url, repo(), fetchFn);
+    if (path === '/api/admin' || path.startsWith('/api/admin/')) {
+      if (who.role !== 'admin') return errorJson(403, 'admin_only', 'That is for admins.');
+      return adminApi(request, env, method, path, url, repo(), fetchFn, who);
+    }
+    return api(request, env, method, path, url, repo(), fetchFn, who);
   }
   if (method !== 'GET' && method !== 'HEAD') return errorJson(405, 'method_not_allowed');
   return (await deps.assets(request, env)) || errorJson(404, 'not_found');
+}
+
+/** What the UI needs to know about the caller. Never includes anything secret. */
+function meView(who, env) {
+  return {
+    role: who.role,
+    user: who.user ? { id: who.user.id, email: who.user.email, name: who.user.name, picture: who.user.picture, status: who.user.status } : null,
+    via: who.via,
+    login: loginMethods(env),
+  };
+}
+
+async function googleCallback(request, env, repo, fetchFn) {
+  const fail = (code, next) => {
+    const h = new Headers({ location: `/login?error=${code}${next && next !== '/' ? '&next=' + encodeURIComponent(next) : ''}` });
+    h.append('set-cookie', clearFlowCookie());
+    return new Response(null, { status: 302, headers: h });
+  };
+  if (!googleConfigured(env)) return fail('google_unconfigured');
+  const r = await finishGoogle(request, env, fetchFn);
+  if (!r.ok) return fail(r.error, r.next);
+  const now = Date.now();
+  const isAdmin = adminEmails(env).includes(r.profile.email);
+  const settings = await repo.getSettings();
+  const user = await repo.upsertUser({ ...r.profile, role: isAdmin ? 'admin' : 'user', status: settings.requireApproval === true && !isAdmin ? 'pending' : 'active' }, now);
+  if (user.status === 'blocked' && !isAdmin) return fail('blocked');
+  const role = roleOf(user, env);
+  if (role === 'admin') await repo.adoptLegacyState(user.id, now);
+  const h = new Headers({ location: role === 'pending' ? '/login?error=pending' : safeNext(r.next) });
+  h.append('set-cookie', sessionCookie(await createUserSession(env, user.id, role, now)));
+  h.append('set-cookie', clearFlowCookie());
+  return new Response(null, { status: 302, headers: h });
 }
 
 // ---------- helpers ----------
@@ -140,6 +200,7 @@ async function login(request, env, repo) {
     const body = await readJson(request, 4 * KB); password = body?.password;
   }
   const r = await attemptLogin(request, env, repo, password);
+  if (r.ok) { const u = await breakGlassUser(repo, env); await repo.adoptLegacyState(u.id, Date.now()); }
   if (form) {
     if (r.ok) return new Response(null, { status: 303, headers: { location: next, 'set-cookie': r.cookie } });
     const err = r.status === 429 ? 'locked' : r.status === 503 ? 'unconfigured' : 'wrong';
@@ -151,17 +212,29 @@ async function login(request, env, repo) {
   return errorJson(401, 'wrong_password', 'That password is not right.');
 }
 
-function loginPage(mode, error, next) {
-  const msg = { wrong: 'That password is not right.', locked: 'Too many wrong passwords. Try again in 15 minutes.', unconfigured: 'Login is not configured on the server.' }[error] || '';
-  const body = mode === 'unconfigured' || mode === 'cloudflare-access' && !msg
-    ? `<p class="help">${mode === 'unconfigured' ? 'Login is not configured on the server. Set APP_PASSWORD and SESSION_SECRET, then reload.' : 'Sign in through Cloudflare Access to use this app.'}</p>`
-    : `<form method="post" action="/api/login" class="login-form">
+const LOGIN_ERRORS = {
+  wrong: 'That password is not right.', locked: 'Too many wrong passwords. Try again in 15 minutes.', unconfigured: 'Login is not configured on the server.',
+  google_cancelled: 'Google sign-in was cancelled.', google_failed: 'Google sign-in did not work. Try again.', google_expired: 'The sign-in took too long. Try again.',
+  google_state: 'The sign-in could not be verified. Try again.', google_unverified: 'Your Google email address is not verified.',
+  google_unconfigured: 'Google sign-in is not set up on this server yet.', blocked: 'This account has been blocked by an admin.',
+  pending: 'Thanks for signing up. An admin needs to approve your account before you can see contact details. You can still browse listings.',
+};
+function loginPage(env, who, error, next) {
+  const mode = authMode(env); const methods = loginMethods(env);
+  const msg = LOGIN_ERRORS[error] || (who.role === 'pending' ? LOGIN_ERRORS.pending : '');
+  const nextQ = next !== '/' ? '?next=' + encodeURIComponent(next) : '';
+  const google = methods.google ? `<a class="btn primary google" href="/auth/google${esc(nextQ)}">Continue with Google</a>` : '';
+  const password = methods.password ? `<form method="post" action="/api/login" class="login-form">
         <input type="hidden" name="next" value="${esc(next)}">
-        <label class="lbl" for="pw">Password</label>
-        <input class="input" id="pw" name="password" type="password" autocomplete="current-password" required autofocus>
-        ${msg ? `<p class="login-err" role="alert">${esc(msg)}</p>` : ''}
-        <button class="btn primary" type="submit">Log in</button>
-      </form>`;
+        <label class="lbl" for="pw">${methods.google ? 'Admin password (break-glass)' : 'Password'}</label>
+        <input class="input" id="pw" name="password" type="password" autocomplete="current-password" required${methods.google ? '' : ' autofocus'}>
+        <button class="btn${methods.google ? '' : ' primary'}" type="submit">Log in</button>
+      </form>` : '';
+  const err = msg ? `<p class="login-err" role="alert">${esc(msg)}</p>` : '';
+  const body = mode === 'unconfigured'
+    ? '<p class="help">Login is not configured on the server. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (or APP_PASSWORD), and SESSION_SECRET, then reload.</p>'
+    : mode === 'cloudflare-access' && !methods.password && !methods.google ? `${err}<p class="help">Sign in through Cloudflare Access to use this app.</p>`
+    : `${err}${google}${password}<p class="help"><a href="/">Browse listings without signing in</a></p>`;
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Log in · Flat Hunt</title><meta name="robots" content="noindex"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#D0312D"><link rel="stylesheet" href="/app.css"></head>
@@ -170,10 +243,16 @@ function loginPage(mode, error, next) {
 }
 
 // ---------- API ----------
-async function api(request, env, method, path, url, repo, fetchFn) {
+export const MAX_USER_AREAS = 20;
+export const MAX_AREAS = 300;
+const adminOnly = who => { if (who.role !== 'admin') throw new HttpError(403, 'admin_only', 'That is for admins.'); };
+
+async function api(request, env, method, path, url, repo, fetchFn, who) {
   const seg = path.split('/').slice(2); // after /api
   const [res, id] = seg;
   const now = Date.now();
+  const uid = who.user.id;
+  const out = l => serializeListing(l, who.role);
 
   if (res === 'listings') {
     if (!id && method === 'GET') {
@@ -181,84 +260,116 @@ async function api(request, env, method, path, url, repo, fetchFn) {
       if (status && !STATUSES.includes(status)) throw new HttpError(400, 'bad_status');
       if (area != null && area !== '' && int(area) == null) throw new HttpError(400, 'bad_area');
       if (since != null && since !== '' && int(since) == null) throw new HttpError(400, 'bad_since');
-      const listings = await repo.listListings({ status: status || undefined, area: area ? int(area) : undefined, since: since ? int(since) : undefined });
-      const out = { now, listings };
-      if (since) out.ids = await repo.listingIds(); // lets the client drop listings deleted elsewhere
-      return json(out);
+      const listings = await repo.listListings({ userId: uid, status: status || undefined, area: area ? int(area) : undefined, since: since ? int(since) : undefined });
+      const body = { now, listings: listings.map(out) };
+      if (since) body.ids = await repo.listingIds(uid); // lets the client drop listings deleted elsewhere
+      return json(body);
     }
     if (!id && method === 'DELETE') {
+      adminOnly(who);
       const status = url.searchParams.get('status'); const sample = url.searchParams.get('sample') === '1';
       if (!sample && status !== 'rejected') throw new HttpError(400, 'bad_filter', 'Bulk delete supports ?status=rejected or ?sample=1.');
-      const ids = await repo.idsWhere({ status, sample });
+      const ids = await repo.idsWhere({ status, sample, userId: uid });
       return json({ deleted: await repo.deleteListings(ids), ids });
     }
     if (id && seg.length === 2) {
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new HttpError(400, 'bad_id');
-      if (method === 'GET') { const l = await repo.getListing(id); return l ? json(l) : errorJson(404, 'not_found'); }
-      if (method === 'DELETE') return (await repo.deleteListings([id])) ? new Response(null, { status: 204 }) : errorJson(404, 'not_found');
-      if (method === 'PATCH') return json(await patchListing(repo, id, await readJson(request, LIMITS.smallBytes), now));
+      if (method === 'GET') { const l = await repo.getListing(id, uid); return l ? json(out(l)) : errorJson(404, 'not_found'); }
+      if (method === 'DELETE') { adminOnly(who); return (await repo.deleteListings([id])) ? new Response(null, { status: 204 }) : errorJson(404, 'not_found'); }
+      if (method === 'PATCH') return json(out(await patchListing(repo, id, await readJson(request, LIMITS.smallBytes), now, uid)));
     }
   }
 
   if (res === 'import' && !id && method === 'POST') {
+    adminOnly(who);
     const body = await readJson(request, LIMITS.importBytes);
     const source = IMPORT_SOURCES.includes(body?.source) ? body.source : null;
     if (!source) throw new HttpError(400, 'bad_source', `source must be one of ${IMPORT_SOURCES.join(', ')}.`);
     if (!Array.isArray(body.items) || !body.items.length) throw new HttpError(400, 'no_items', 'items must be a non-empty array.');
     if (body.items.length > LIMITS.importItems) throw new HttpError(413, 'too_many_items', `At most ${LIMITS.importItems} posts per import.`);
     const items = body.items.filter(x => typeof x === 'string' || (x && typeof x === 'object' && !Array.isArray(x)));
-    const { report, changed } = await ingestItems(repo, items, { source, now, sample: source === 'sample' });
+    const { report, changed } = await ingestItems(repo, items, { source, now, sample: source === 'sample', env });
     return json({ report, changed: changed.length });
   }
 
   if (res === 'settings' && !id) {
+    adminOnly(who);
     if (method === 'GET') return json(await settingsView(repo, env));
     if (method === 'PUT') { await repo.putSettings(validateSettings(await readJson(request, LIMITS.smallBytes))); return json(await settingsView(repo, env)); }
   }
 
   if (res === 'areas') {
-    if (!id && method === 'GET') return json({ areas: await repo.listAreas() });
+    // A user's own areas. Areas are global: picking an existing name links it; a new name creates it
+    // (keywords generated) and backfills matches from stored posts.
+    if (!id && method === 'GET') {
+      if (url.searchParams.get('scope') === 'all') {
+        const [all, st] = await Promise.all([repo.areaStats(now), repo.getSettings()]);
+        return json({ areas: all.map(a => ({ id: a.id, name: a.name, active: a.active, listings: a.listings, matching: !!backfillState(st, a.id) })) });
+      }
+      const [areas, settings] = await Promise.all([repo.listUserAreas(uid), repo.getSettings()]);
+      return json({ areas: areas.map(a => ({ ...a, matching: !!backfillState(settings, a.id) })) });
+    }
     if (!id && method === 'POST') {
       const b = await readJson(request, LIMITS.smallBytes);
-      const name = areaName(b?.name);
-      const keywords = b?.keywords != null ? cleanKeywords(b.keywords) : generateKeywords(name);
-      if (!keywords.length) throw new HttpError(400, 'no_keywords', 'That name gives no usable keywords. Use at least 3 letters.');
-      if ((await repo.listAreas()).some(a => a.name.toLowerCase() === name.toLowerCase())) throw new HttpError(409, 'duplicate_area', 'You already have an area with that name.');
-      return json(await repo.createArea({ name, keywords, active: b?.active !== false }, now), 201);
+      const mine = await repo.listUserAreas(uid);
+      let area;
+      if (b?.areaId != null) {
+        const aid = int(b.areaId); if (aid == null) throw new HttpError(400, 'bad_area');
+        area = await repo.getArea(aid); if (!area) return errorJson(404, 'not_found');
+      } else {
+        const name = areaName(b?.name);
+        area = await repo.getAreaByName(name);
+        if (!area) {
+          const keywords = b?.keywords != null && who.role === 'admin' ? cleanKeywords(b.keywords) : generateKeywords(name);
+          if (!keywords.length) throw new HttpError(400, 'no_keywords', 'That name gives no usable keywords. Use at least 3 letters.');
+          if ((await repo.listAreas()).length >= MAX_AREAS) throw new HttpError(409, 'too_many_areas', 'The area list is full. Ask an admin.');
+          area = await repo.createArea({ name, keywords, active: who.role !== 'admin' || b?.active !== false }, now);
+          await startBackfill(repo, area, now);
+        }
+      }
+      if (mine.some(a => a.id === area.id)) throw new HttpError(409, 'duplicate_area', 'You already have an area with that name.');
+      if (mine.length >= MAX_USER_AREAS) throw new HttpError(409, 'too_many_areas', `You can follow at most ${MAX_USER_AREAS} areas.`);
+      await repo.linkArea(uid, area.id, now);
+      return json({ ...area, matching: !!backfillState(await repo.getSettings(), area.id) }, 201);
     }
     if (id && seg.length === 2) {
       const aid = int(id); if (aid == null) throw new HttpError(400, 'bad_id');
       const cur = await repo.getArea(aid); if (!cur) return errorJson(404, 'not_found');
-      if (method === 'DELETE') { await repo.deleteArea(aid); return new Response(null, { status: 204 }); }
-      if (method === 'PATCH') {
-        const b = await readJson(request, LIMITS.smallBytes);
-        const name = b?.name != null ? areaName(b.name) : cur.name;
-        if (name.toLowerCase() !== cur.name.toLowerCase() && (await repo.listAreas()).some(a => a.id !== aid && a.name.toLowerCase() === name.toLowerCase())) throw new HttpError(409, 'duplicate_area', 'You already have an area with that name.');
-        const keywords = b?.regenerate ? generateKeywords(name) : b?.keywords != null ? cleanKeywords(b.keywords) : cur.keywords;
-        if (!keywords.length) throw new HttpError(400, 'no_keywords', 'Keep at least one keyword of 3 or more letters.');
-        const active = typeof b?.active === 'boolean' ? b.active : cur.active;
-        return json(await repo.updateArea(aid, { name, keywords, active }));
-      }
+      if (method === 'DELETE') { await repo.unlinkArea(uid, aid); return new Response(null, { status: 204 }); }
+      if (method === 'PATCH') { adminOnly(who); return json(await editArea(repo, cur, await readJson(request, LIMITS.smallBytes), now)); }
     }
   }
 
   if (res === 'keywords' && !id && method === 'GET') return json({ keywords: generateKeywords(areaName(url.searchParams.get('name'))) });
-  if (res === 'runs' && !id && method === 'GET') return json({ runs: await repo.listRuns(20) });
+  if (res === 'runs' && !id && method === 'GET') { adminOnly(who); return json({ runs: await repo.listRuns(20) }); }
   if (res === 'apify' && id === 'run' && method === 'POST') {
+    adminOnly(who);
     if (!env.APIFY_TOKEN) throw new HttpError(503, 'apify_not_configured', 'APIFY_TOKEN is not set on the server.');
-    return json(await scheduledJob(repo, env, { fetchFn }));
+    return json(await scheduledJob(repo, env, { fetchFn, force: true }));
   }
   if (res === 'export' && !id && method === 'GET') {
-    const [listings, areas, settings] = await Promise.all([repo.listListings(), repo.listAreas(), repo.getSettings()]);
-    return new Response(JSON.stringify({ exportedAt: new Date(now).toISOString(), areas, settings: { groups: settings.groups || [], keywordFilter: settings.keywordFilter !== false }, listings }, null, 1), {
+    const [listings, areas, settings] = await Promise.all([repo.listListings({ userId: uid }), repo.listUserAreas(uid), repo.getSettings()]);
+    return new Response(JSON.stringify({ exportedAt: new Date(now).toISOString(), areas, settings: { groups: settings.groups || [], keywordFilter: settings.keywordFilter !== false }, listings: listings.map(out) }, null, 1), {
       headers: { 'content-type': 'application/json; charset=utf-8', 'content-disposition': `attachment; filename="flat-hunt-${new Date(now).toISOString().slice(0, 10)}.json"` },
     });
   }
   return errorJson(404, 'not_found', 'No such API route.');
 }
 
-async function patchListing(repo, id, b, now) {
-  const cur = await repo.getListing(id);
+/** Admin edit of a global area: rename, keywords, pause, regenerate. New keywords re-scan stored posts. */
+export async function editArea(repo, cur, b, now) {
+  const name = b?.name != null ? areaName(b.name) : cur.name;
+  if (name.toLowerCase() !== cur.name.toLowerCase() && (await repo.getAreaByName(name))) throw new HttpError(409, 'duplicate_area', 'You already have an area with that name.');
+  const keywords = b?.regenerate ? generateKeywords(name) : b?.keywords != null ? cleanKeywords(b.keywords) : cur.keywords;
+  if (!keywords.length) throw new HttpError(400, 'no_keywords', 'Keep at least one keyword of 3 or more letters.');
+  const active = typeof b?.active === 'boolean' ? b.active : cur.active;
+  const area = await repo.updateArea(cur.id, { name, keywords, active });
+  if (keywords.some(k => !cur.keywords.includes(k))) await startBackfill(repo, area, now);
+  return area;
+}
+
+async function patchListing(repo, id, b, now, userId) {
+  const cur = await repo.getListing(id, userId);
   if (!cur) throw new HttpError(404, 'not_found');
   if (!b || typeof b !== 'object') throw new HttpError(400, 'bad_body');
   const next = { status: cur.status, stage: cur.stage, notes: cur.notes, decidedAt: cur.decidedAt, hasUpdate: cur.hasUpdate };
@@ -275,7 +386,7 @@ async function patchListing(repo, id, b, now) {
   // Undo restores the previous decision time; only accept a plausible timestamp or null.
   if (b.decidedAt !== undefined) { if (b.decidedAt !== null && !(Number.isInteger(b.decidedAt) && b.decidedAt > 0 && b.decidedAt <= now + 60e3)) throw new HttpError(400, 'bad_decided_at'); next.decidedAt = b.decidedAt; }
   if (b.hasUpdate === false) next.hasUpdate = false;
-  return repo.updateListingFields(id, next, now);
+  return repo.updateListingFields(id, next, now, userId);
 }
 
 function areaName(v) {
@@ -287,15 +398,7 @@ function areaName(v) {
 function validateSettings(b) {
   if (!b || typeof b !== 'object') throw new HttpError(400, 'bad_body');
   const out = {};
-  if (b.groups !== undefined) {
-    if (!Array.isArray(b.groups) || b.groups.length > 50) throw new HttpError(400, 'bad_groups', 'groups must be a list of at most 50.');
-    out.groups = b.groups.map((g, i) => {
-      const name = (str(g?.name, 120) || '').trim(); const raw = (str(g?.url, 300) || '').trim();
-      let u; try { u = new URL(raw); } catch { throw new HttpError(400, 'bad_group_url', `Group ${i + 1}: paste the full link, like https://www.facebook.com/groups/123.`); }
-      if (u.protocol !== 'https:' || !/(^|\.)facebook\.com$/i.test(u.hostname) || !/^\/groups\/[^/]+/.test(u.pathname)) throw new HttpError(400, 'bad_group_url', `Group ${i + 1}: use a facebook.com/groups/… link.`);
-      return { name, url: `https://www.facebook.com${u.pathname.replace(/\/+$/, '')}`, active: g?.active !== false };
-    });
-  }
+  if (b.groups !== undefined) out.groups = validateGroups(b.groups).groups;
   if (b.keywordFilter !== undefined) { if (typeof b.keywordFilter !== 'boolean') throw new HttpError(400, 'bad_keyword_filter'); out.keywordFilter = b.keywordFilter; }
   if (b.resultsPerGroup !== undefined) { const n = Number(b.resultsPerGroup); if (!Number.isInteger(n) || n < 5 || n > 100) throw new HttpError(400, 'bad_results_per_group', 'Posts per group must be 5 to 100.'); out.resultsPerGroup = n; }
   if (!Object.keys(out).length) throw new HttpError(400, 'nothing_to_update');
@@ -314,5 +417,6 @@ async function settingsView(repo, env) {
     unscrapableGroups: s.unscrapableGroups || null,
     apify: { configured: !!env.APIFY_TOKEN, actor, webhook: !!(env.PUBLIC_BASE_URL && env.INGEST_SECRET), webhookUrl: env.PUBLIC_BASE_URL ? env.PUBLIC_BASE_URL.replace(/\/+$/, '') + '/api/ingest/apify' : null },
     auth: authMode(env),
+    login: loginMethods(env),
   };
 }

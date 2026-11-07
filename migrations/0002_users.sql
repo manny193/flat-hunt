@@ -53,3 +53,7 @@ ALTER TABLE runs ADD COLUMN actor TEXT;
 ALTER TABLE runs ADD COLUMN cost_usd REAL;
 ALTER TABLE runs ADD COLUMN finished_at INTEGER;
 CREATE INDEX IF NOT EXISTS runs_source_at ON runs (source, at DESC);
+
+-- Every housing post is now stored and matched to areas on read: listing_match is the listing<->area
+-- join table (area_id 0 = no area yet). This index makes "newest listings in area X" a range scan.
+CREATE INDEX IF NOT EXISTS listing_match_area_posted ON listing_match (area_id, last_posted_at DESC);

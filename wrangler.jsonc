@@ -32,11 +32,12 @@
     }
   ],
 
-  // Every 4 hours at :30 UTC = 06:00, 10:00, 14:00, 18:00, 22:00, 02:00 IST.
-  // The scheduled() handler starts the Apify run and sweeps for missed webhooks (docs/APIFY.md).
+  // Hourly. scheduled() sweeps for missed Apify webhooks every time and starts a scrape only when it is
+  // due per the admin schedule (settings.schedule.intervalHours, default 4); it also steps the Reddit
+  // source, area backfills, AI extraction and the daily retention purge within the per-invocation limits.
   // Free plan: 5 cron triggers per account, 10 ms CPU per invocation.
   "triggers": {
-    "crons": ["30 */4 * * *"]
+    "crons": ["0 * * * *"]
   },
 
   // Non-secret config. Secrets (APIFY_TOKEN, INGEST_SECRET, APP_PASSWORD, SESSION_SECRET)

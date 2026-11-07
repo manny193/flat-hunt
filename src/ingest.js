@@ -37,6 +37,7 @@ export async function ingestItems(repo, raw, opts) {
   const source = opts.source || 'scraper';
   const [areas, settings] = await Promise.all([opts.areas ?? db(() => repo.listAreas()), opts.settings ?? db(() => repo.getSettings())]);
   const ctx = makeContext(areas, settings);
+  ctx.storeAll = !!opts.storeAll; // production sources keep every housing post; area matching happens on read
   const prepared = prepareItems(raw, { groups: opts.groups, watched: Array.isArray(settings?.groups) ? settings.groups : [] });
   const report = emptyReport(source, now, prepared.items.length);
   report.unscrapable = prepared.unscrapable;
@@ -47,7 +48,7 @@ export async function ingestItems(repo, raw, opts) {
   for (const r of prepared.items) {
     const g = groupOf(r); fetchedByGroup[g] = (fetchedByGroup[g] || 0) + 1;
     const s = screenItem(r, source, ctx, report, now);
-    if (s) { posts.push(s); matchedByGroup[g] = (matchedByGroup[g] || 0) + 1; }
+    if (s) { posts.push(s); if (s.p.areas.length) matchedByGroup[g] = (matchedByGroup[g] || 0) + 1; }
   }
   report.fetchedByGroup = fetchedByGroup; report.matchedByGroup = matchedByGroup;
 
@@ -113,6 +114,7 @@ export async function ingestItems(repo, raw, opts) {
       const l = newListing(p, ex, now, idFn());
       if (opts.sample) l.isSample = true;
       local.set(l.id, l); localSlim.set(l.id, slimOf(l)); remember(p, l.id); report.newListings++;
+      const ng = p.group || 'Group not detected'; (report.newByGroup ||= {})[ng] = (report.newByGroup[ng] || 0) + 1;
       return;
     }
     report.merged++;

@@ -39,3 +39,8 @@ export async function enrich(listings, env = {}) {
     return [];
   }
 }
+
+/** Admin view of AI extraction (filled in once a provider is wired). */
+export async function aiStatus(repo, env) {
+  return { provider: env.AI_PROVIDER || null, enabled: !!env.AI_PROVIDER };
+}

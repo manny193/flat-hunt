@@ -272,6 +272,23 @@ export function createRepo(db) {
         FROM areas a ORDER BY a.created_at, a.id`, [now - 7 * 864e5]);
       return rows.map(r => ({ ...rowToArea(r), listings: r.listings, listings7d: r.recent, users: r.users }));
     },
+    async maxListingRowid() { return (await db.first('SELECT max(rowid) AS m FROM listings'))?.m ?? 0; },
+    /**
+     * Area backfill for one rowid range: tag stored listings whose text contains one of the LIKE
+     * patterns with the area (match index + listings.areas), and bump updated_at so open apps see them.
+     * The text scan runs inside SQLite, so it costs D1 rows read, not Worker CPU.
+     */
+    async backfillChunk(areaId, patterns, from, to, now) {
+      if (!patterns.length) return 0;
+      const like = patterns.map(() => "data LIKE ? ESCAPE '\\'").join(' OR ');
+      const sel = `SELECT id FROM listings WHERE rowid > ? AND rowid <= ? AND (${like})`;
+      const res = await db.batch([
+        { sql: `INSERT OR IGNORE INTO listing_match (listing_id, area_id, kind, bhk, rent, last_posted_at) SELECT id, ?, kind, bhk, rent, last_posted_at FROM listings WHERE id IN (${sel})`, params: [areaId, from, to, ...patterns] },
+        { sql: `UPDATE listings SET areas = json_insert(areas, '$[#]', ?), updated_at = ? WHERE id IN (${sel}) AND NOT EXISTS (SELECT 1 FROM json_each(listings.areas) WHERE value = ?)`, params: [areaId, now, from, to, ...patterns, areaId] },
+        { sql: `DELETE FROM listing_match WHERE area_id = 0 AND listing_id IN (SELECT listing_id FROM listing_match WHERE area_id = ?)`, params: [areaId] },
+      ]);
+      return res[0].changes;
+    },
     async listUserAreas(userId) {
       return (await db.all('SELECT a.* FROM areas a JOIN user_areas u ON u.area_id = a.id WHERE u.user_id = ? ORDER BY u.created_at, a.id', [userId])).map(rowToArea);
     },
@@ -337,6 +354,12 @@ export function createRepo(db) {
     async runsSince(t, limit = 1000) { return (await db.all('SELECT * FROM runs WHERE at >= ? ORDER BY at LIMIT ?', [t, limit])).map(rowToRun); },
     async recordStartedRun({ runId, datasetId, startedAt, actor = null }) {
       await db.run(`INSERT OR IGNORE INTO runs (source, dataset_id, run_id, status, started_at, at, report, actor) VALUES ('apify', ?, ?, 'running', ?, ?, '{}', ?)`, [datasetId, runId, startedAt, startedAt, actor]);
+    },
+    async createRun({ source, datasetId, startedAt, actor = null }) {
+      await db.run(`INSERT OR IGNORE INTO runs (source, dataset_id, status, started_at, at, report, actor) VALUES (?, ?, 'ingesting', ?, ?, '{}', ?)`, [source, datasetId, startedAt, startedAt, actor]);
+    },
+    async finishRun(datasetId, { status = 'done', report, now }) {
+      await db.run('UPDATE runs SET status = ?, at = ?, finished_at = ?, report = ? WHERE dataset_id = ?', [status, now, Date.now(), JSON.stringify(report || {}), datasetId]);
     },
     async setRunCost(datasetId, costUsd) { await db.run('UPDATE runs SET cost_usd = ? WHERE dataset_id = ?', [costUsd, datasetId]); },
     /** Take the ingest lock for a dataset. False when already ingested (or being ingested right now). */
