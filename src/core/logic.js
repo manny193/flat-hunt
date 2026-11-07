@@ -39,6 +39,11 @@ export function matchAreas(text, areas) {
   return out;
 }
 
+const LABELS = [['deposit', /deposit|advance|security/g], ['maintenance', /maint\w*/g], ['brokerage', /brokerage|broker|commission/g], ['rent', /rent|rental|price|cost|budget/g]];
+const CLOSE_LABEL = /(deposit|advance|security|maint\w*|brokerage|broker|commission|rent|rental|price|cost|budget)\s*(?:is|of|amount)?\s*[:=\-–@]?\s*$/;
+const TRAILS_NUMBER = /\d\s*(?:k|l|lakhs?|lacs?|thousand|rupees|rs\.?|inr|\/-|\s)*$/i;
+const LABELLED_NUMBER = /(?:deposit|advance|security|maint\w*|brokerage|broker|commission|rent|rental|price|cost|budget)\s*(?:is|of|amount)?\s*[:=\-–@]?\s*(?:₹|rs\.?|inr)?\s*[\d.,]+\s*(?:k|l|lakhs?|lacs?|thousand|rupees|\/-|\s)*$/i;
+const PHONE_RE = /(?:\+?91[\s-]*)?\b([6-9](?:[\s-]?\d){9})\b/g;
 export function moneyMentions(text) {
   const out = []; const re = /(₹|rs\.?|inr)?\s*(\d{1,3}(?:,\d{2,3})+|\d+(?:\.\d+)?)\s*(k\b|thousand|lakhs?\b|lacs?\b|l\b)?/gi; let m;
   while ((m = re.exec(text))) {
@@ -53,8 +58,14 @@ export function moneyMentions(text) {
     if (/^\s*(sq|sqft|sft|square|ft\b)/.test(after)) continue;
     const before = text.slice(Math.max(0, m.index - 30), m.index).toLowerCase().split(/[.;\n|!?]|,(?!\d)/).pop();
     let label = null, best = -1;
-    for (const [name, r] of [['deposit', /deposit|advance|security/g], ['maintenance', /maint\w*/g], ['brokerage', /brokerage|broker|commission/g], ['rent', /rent|rental|price|cost|budget/g]]) { let mm, last = -1; r.lastIndex = 0; while ((mm = r.exec(before))) last = mm.index; if (last > best) { best = last; label = name; } }
-    if (/^\s*(\/-)?\s*(rs\.?|inr)?\s*(as\s+)?(deposit|advance|security)/.test(after)) label = 'deposit';
+    for (const [name, r] of LABELS) { let mm, last = -1; r.lastIndex = 0; while ((mm = r.exec(before))) last = mm.index; if (last > best) { best = last; label = name; } }
+    // A label written right before the number ("Rent 25000 deposit 1 lakh") wins over a label
+    // after it, which then belongs to the next number.
+    // ...unless that label trails an earlier number ("25k rent 1L deposit").
+    let close = CLOSE_LABEL.exec(before);
+    if (close) { const prev = before.slice(0, close.index); if (TRAILS_NUMBER.test(prev) && !LABELLED_NUMBER.test(prev)) close = null; }
+    if (close) label = LABELS.find(([, r]) => { r.lastIndex = 0; return r.test(close[1]); })[0];
+    else if (/^\s*(\/-)?\s*(rs\.?|inr)?\s*(as\s+)?(deposit|advance|security)/.test(after)) label = 'deposit';
     else if (/^\s*(\/-)?\s*(rs\.?|inr)?\s*(as\s+)?maint/.test(after)) label = 'maintenance';
     else if (!label && /^\s*(\/-)?\s*(rs\.?|inr)?\s*(rent|per month|\/month|pm\b|p\.m|monthly)/.test(after)) label = 'rent';
     if (!cur && !unit && !label && n >= 2020 && n <= 2035 && !/,/.test(num)) continue; // years
@@ -65,7 +76,8 @@ export function moneyMentions(text) {
 
 export function extract(text) {
   const t = String(text || ''); const lo = t.toLowerCase(); const ex = {};
-  const money = moneyMentions(t);
+  // Phone numbers written with spaces ("98765 43210") must not be read as money.
+  const money = moneyMentions(t.replace(PHONE_RE, m => ' '.repeat(m.length)));
   const rent = money.find(x => x.label === 'rent' && x.n >= 2000 && x.n <= 400000) || money.find(x => !x.label && x.n >= 3000 && x.n <= 400000);
   ex.rent = rent ? rent.n : null;
   const dep = money.find(x => x.label === 'deposit'); ex.deposit = dep ? dep.n : null;
@@ -90,7 +102,7 @@ export function extract(text) {
   ex.gender = fem && male ? 'any' : fem ? 'female' : male ? 'male' : null;
   const av = t.match(/\b(?:available|vacant|move[\s-]?in)\s*(?:from|by|on|date)?\s*[:-]?\s*((?:immediate(?:ly)?|\d{1,2}(?:st|nd|rd|th)?\s*(?:of\s*)?[A-Za-z]{3,9}|[A-Za-z]{3,9}\s*\d{1,2}(?:st|nd|rd|th)?|[A-Za-z]{3,9}\s*(?:1st|first)\s*week|next\s*month|this\s*month))/i);
   ex.availableFrom = av ? av[1].trim() : (/\bimmediate(ly)?\b/i.test(t) ? 'Immediate' : null);
-  ex.phones = [...new Set([...t.matchAll(/(?:\+?91[\s-]*)?\b([6-9](?:[\s-]?\d){9})\b/g)].map(x => x[1].replace(/\D/g, '')))];
+  ex.phones = [...new Set([...t.matchAll(PHONE_RE)].map(x => x[1].replace(/\D/g, '')))];
   ex.mapLinks = [...new Set([...t.matchAll(/https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|(?:www\.)?google\.[a-z.]+\/maps|maps\.google\.[a-z.]+)[^\s)\]]*/gi)].map(x => x[0]))];
   const soc = t.match(/\b([A-Z][A-Za-z0-9&']+(?:\s+[A-Z][A-Za-z0-9&']+){0,3})\s+(Apartments?|Residency|Enclave|Towers?|Heights|Homes|Nest|Gardens?|Meadows|Elite|Palms|Society)\b/);
   ex.society = soc ? soc[0] : null;

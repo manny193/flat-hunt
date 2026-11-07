@@ -122,3 +122,22 @@ test('watched groups: structured setting, paused groups ignored', () => {
   assert.equal(isKnownGroup('Old group', 'https://facebook.com/groups/222', w), false);
   assert.equal(watchedGroups('A | https://facebook.com/groups/1\nB').length, 2, 'prototype text format still works');
 });
+
+// QA regression: a label written right before a number wins over a label after it
+// ("Rent 25000 deposit 1 lakh" used to give rent=null, deposit=25000), and phone numbers
+// written with a space ("98765 43210") are not read as rent.
+test('money parsing: adjacent labels and spaced phone numbers (QA)', () => {
+  const f = t => { const e = extract(t); return [e.rent, e.deposit, e.maintenance]; };
+  assert.deepEqual(f('Rent 25000 deposit 100000'), [25000, 100000, null]);
+  assert.deepEqual(f('rent 25k deposit 75k'), [25000, 75000, null]);
+  assert.deepEqual(f('rent 25 k deposit 75 k'), [25000, 75000, null]);
+  assert.deepEqual(f('rent 22000 advance 66000'), [22000, 66000, null]);
+  assert.deepEqual(f('Rent 25000 maintenance 2000 deposit 1 lakh'), [25000, 100000, 2000]);
+  assert.deepEqual(f('Rent 30k maintenance extra'), [30000, null, null]);
+  assert.deepEqual(f('Maintenance: 2500 rent: 30000'), [30000, null, 2500]);
+  assert.deepEqual(f('25k rent 1L deposit'), [25000, 100000, null]);
+  assert.deepEqual(f('25000 rent, 1 lakh deposit'), [25000, 100000, null]);
+  assert.deepEqual(f('Rent is 25000, deposit is 2L'), [25000, 200000, null]);
+  const e = extract('call 98765 43210 for 2bhk, 30k');
+  assert.equal(e.rent, 30000); assert.deepEqual(e.phones, ['9876543210']);
+});
