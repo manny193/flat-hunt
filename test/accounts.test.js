@@ -320,3 +320,27 @@ test('legacy state taken by the break-glass placeholder moves to the first real 
   const mine = (await (await call('GET', '/api/listings?status=approved', undefined, { cookie: c2 })).json()).listings;
   assert.equal(mine.length, 1); assert.equal(mine[0].notes, 'nice');
 });
+
+// QA round 2: phone numbers written in ways the first mask missed, in post text, group names and
+// area names, must not reach the public API.
+const NASTY = ['98765 - 43210', '98765 / 43210', '98765_43210', '९८७६५४३२१०', '９８７６５４３２１０', '98765​43210', '𝟗𝟖𝟕𝟔𝟓𝟒𝟑𝟐𝟏𝟎', '987\n654\n3210', '+91 – 98765 43210', '٩٨٧٦٥٤٣٢١٠'];
+const toAscii = s => s.replace(/\p{Nd}/gu, ch => { let cp = ch.codePointAt(0), n = 0; while (n < 9 && /\p{Nd}/u.test(String.fromCodePoint(cp - 1))) { cp--; n++; } return String(n); });
+test('public API never shows phone digits however they are written (QA)', async () => {
+  for (const t of NASTY) {
+    const out = publicText(`call ${t} now`);
+    assert.doesNotMatch(toAscii(out).replace(/[^\d]/g, ''), /[6-9]\d{9}/, JSON.stringify(t) + ' -> ' + JSON.stringify(out));
+    assert.ok(out.includes('[[phone]]'), t);
+  }
+  const h = await harness();
+  const gg = await h.repo.createArea(GREEN_GLEN, Date.now());
+  const { ingestItems } = await import('../src/ingest.js');
+  await ingestItems(h.repo, NASTY.map((t, i) => ({ text: `${1 + (i % 3)}BHK available in Green Glen Layout rent ${21000 + i * 1000}. Call ${t}. word${i}x unique${i}y`, url: `https://www.facebook.com/groups/1/posts/n${i}/`, groupName: `Flats ${t}` })), { source: 'manual' });
+  const body = await (await h.call('GET', `/api/public/listings?area=${gg.id}&limit=60`)).text();
+  const details = await Promise.all(JSON.parse(body).listings.map(async l => (await h.call('GET', `/api/public/listings/${l.id}`)).json()));
+  const fields = details.flatMap(l => [...l.posts.flatMap(p => [p.text, p.group]), ...l.groups]);
+  assert.ok(details.reduce((n, l) => n + l.posts.length, 0) === NASTY.length, 'every post checked');
+  for (const f of fields) assert.doesNotMatch(toAscii(f).replace(/[\s.\-/_()\u2013\u2014\u200b]/g, ''), /(?<!\d)[6-9]\d{9}(?!\d)/, 'mobile digits in public field: ' + JSON.stringify(f));
+  // Area names are public: leaky names are refused at creation.
+  const { cookie } = await h.sessionFor('u@example.com');
+  for (const name of ['Call 98765 43210', 'HSR wa.me/919876543210', 'x ९८७६५४३२१० y']) assert.equal((await h.call('POST', '/api/areas', { body: { name }, headers: { cookie } })).status, 400, name);
+});

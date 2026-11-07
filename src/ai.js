@@ -6,7 +6,7 @@
 // Phones, emails and links are redacted before anything leaves the Worker. Only listings in an area
 // someone follows are queued. Every number the model returns must appear in the post text.
 
-import { PHONE_ANY } from './serialize.js';
+import { maskPhones } from './serialize.js';
 import { fingerprint } from './core/logic.js';
 
 export const MODELS = { primary: '@cf/google/gemma-4-26b-a4b-it', cfFallback: '@cf/openai/gpt-oss-20b', groq: 'openai/gpt-oss-20b' };
@@ -74,11 +74,10 @@ export const SCHEMA = {
 // ---------- redaction, grounding, validation ----------
 /** What a model is allowed to see: phones, emails and links replaced, length capped. */
 export function redact(text, max = 1500) {
-  return String(text || '')
+  return maskPhones(String(text || ''), '[PHONE]')
     .replace(/\b(?:https?:\/\/|www\.)[^\s<>"']+/gi, '[LINK]')
     .replace(/\b(?:wa\.me|maps\.app\.goo\.gl|goo\.gl|(?:[a-z0-9-]+\.)?facebook\.com)(?:\/[^\s<>"']*)?/gi, '[LINK]')
     .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '[EMAIL]')
-    .replace(PHONE_ANY, '[PHONE]')
     .replace(/[<>]/g, ' ')
     .slice(0, max);
 }

@@ -5,7 +5,7 @@
 //   GET /api/public/listings/<id>
 
 import { json, errorJson, clientIp, HttpError } from './http.js';
-import { publicListing } from './serialize.js';
+import { publicListing, publicText } from './serialize.js';
 
 export const PUBLIC_WINDOW_MS = 60e3;
 export const publicLimit = env => Math.max(5, parseInt(env.PUBLIC_RATE_LIMIT, 10) || 60);
@@ -27,7 +27,7 @@ export async function publicApi(request, env, repo, path, url) {
   const q = url.searchParams;
 
   if (seg[0] === 'areas' && seg.length === 1) {
-    const areas = (await repo.areaStats(Date.now())).filter(a => a.active).map(a => ({ id: a.id, name: a.name, listings: a.listings, listings7d: a.listings7d }));
+    const areas = (await repo.areaStats(Date.now())).filter(a => a.active).map(a => ({ id: a.id, name: publicText(a.name), listings: a.listings, listings7d: a.listings7d }));
     return json({ areas });
   }
   if (seg[0] === 'listings' && seg.length === 1) {

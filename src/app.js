@@ -6,7 +6,7 @@ import { identify, authMode, attemptLogin, clearCookie, loginMethods, googleConf
 import { startGoogle, finishGoogle, clearFlowCookie } from './google.js';
 import { publicApi } from './public.js';
 import { adminApi } from './admin.js';
-import { serializeListing } from './serialize.js';
+import { serializeListing, publicText } from './serialize.js';
 import { ingestItems } from './ingest.js';
 import { ingestDataset, isDatasetId, scheduledJob, actorId, DEFAULT_RESULTS_PER_GROUP, budgeted } from './apify.js';
 import { runEnrich, aiConfigured } from './ai.js';
@@ -412,6 +412,8 @@ async function patchListing(repo, id, b, now, userId) {
 function areaName(v) {
   const name = typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
   if (name.length < 2 || name.length > 60) throw new HttpError(400, 'bad_name', 'Area name must be 2 to 60 characters.');
+  // Area names are shown on the public page: no phone numbers, links or emails in them (QA).
+  if (publicText(name) !== name) throw new HttpError(400, 'bad_name', 'Area names can’t contain phone numbers, links or email addresses.');
   return name;
 }
 

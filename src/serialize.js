@@ -5,8 +5,34 @@
 // Phones in public post text become this token (no digits at all); the UI renders it as the hatched
 // "number hidden" pill (docs/DESIGN.md).
 export const PHONE_TOKEN = '[[phone]]';
-// Indian mobiles, optionally +91 / 91 / 0 prefixed, digits optionally split by spaces, dots or dashes.
-export const PHONE_ANY = /(?<!\d)(?:\+?\s?91[\s.-]{0,2}|0)?([6-9](?:[\s.-]{0,2}\d){9})(?!\d)/g;
+// Indian mobiles, optionally +91 / 91 / 0 prefixed, digits optionally split by up to 3 separator
+// characters (spaces, newlines, dots, dashes, slashes, underscores, brackets, zero-width characters),
+// so "98765 - 43210" and "98765 / 43210" are caught too. Run it through maskPhones(), which also reads
+// non-ASCII digits (Devanagari, full-width, mathematical) as digits.
+const SEP = '[\\s.\\-/_\u2013\u2014()\u200b-\u200d\u2060\ufeff]';
+export const PHONE_ANY = new RegExp(`(?<!\\d)(?:\\+?${SEP}{0,3}91${SEP}{0,3}|0)?([6-9](?:${SEP}{0,3}\\d){9})(?!\\d)`, 'g');
+/** Same-length copy of s with every Unicode decimal digit as ASCII (astral digits padded with a zero-width space). */
+function asciiDigits(s) {
+  return s.replace(/\p{Nd}/gu, ch => { const d = String(Number.isNaN(+ch) ? digitValue(ch) : +ch); return ch.length === 2 ? d + '\u200b' : d; });
+}
+function digitValue(ch) {
+  // Unicode decimal digits come in contiguous blocks of ten starting at a code point ending in 0 or 6;
+  // find the block start by stepping back while the previous code point is still a digit.
+  let cp = ch.codePointAt(0), n = 0;
+  while (n < 9 && /\p{Nd}/u.test(String.fromCodePoint(cp - 1))) { cp--; n++; }
+  return n;
+}
+/** Replace every mobile number in s with token, whatever digits or separators it is written with. */
+export function maskPhones(s, token = PHONE_TOKEN) {
+  s = String(s ?? ''); const n = asciiDigits(s);
+  let out = '', last = 0;
+  for (const m of n.matchAll(PHONE_ANY)) {
+    let end = m.index + m[0].length; const c = s.charCodeAt(end);
+    if (c >= 0xdc00 && c <= 0xdfff) end++; // don't split an astral digit's surrogate pair
+    out += s.slice(last, m.index) + token; last = end;
+  }
+  return out + s.slice(last);
+}
 const LINK = /\b(?:https?:\/\/|www\.)[^\s<>"']+/gi;
 // Links people paste without a scheme.
 const BARE_LINK = /\b(?:wa\.me|api\.whatsapp\.com|chat\.whatsapp\.com|maps\.app\.goo\.gl|goo\.gl|g\.co|m\.me|fb\.me|fb\.com|(?:[a-z0-9-]+\.)?facebook\.com|google\.[a-z.]{2,8}\/maps|maps\.google\.[a-z.]{2,8})(?:\/[^\s<>"']*)?/gi;
@@ -17,9 +43,8 @@ const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
 export function publicText(s, hide = []) {
   let t = String(s ?? '');
   for (const h of hide) if (h && h.length >= 4) t = t.split(h).join('[society]');
-  return t
-    .replace(LINK, '[link]').replace(TEL, '[link]').replace(BARE_LINK, '[link]').replace(EMAIL, '[email]')
-    .replace(PHONE_ANY, PHONE_TOKEN);
+  return maskPhones(t
+    .replace(LINK, '[link]').replace(TEL, '[link]').replace(BARE_LINK, '[link]').replace(EMAIL, '[email]'));
 }
 
 const PUBLIC_SCALARS = ['id', 'kind', 'bhk', 'rent', 'type', 'deposit', 'depositMonths', 'maintenance', 'brokerage', 'brokerageAmount',
