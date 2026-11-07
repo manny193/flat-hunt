@@ -344,3 +344,22 @@ test('public API never shows phone digits however they are written (QA)', async 
   const { cookie } = await h.sessionFor('u@example.com');
   for (const name of ['Call 98765 43210', 'HSR wa.me/919876543210', 'x ९८७६५४३२१० y']) assert.equal((await h.call('POST', '/api/areas', { body: { name }, headers: { cookie } })).status, 400, name);
 });
+
+// QA round 2: alg confusion and open redirects on the Google flow.
+test('Google: alg none/HS256 tokens and off-site return URLs are refused (QA)', async () => {
+  const { verifyGoogleIdToken } = await import('../src/google.js');
+  const b = o => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const claims = { iss: 'https://accounts.google.com', aud: ENV.GOOGLE_CLIENT_ID, email: 'a@example.com', email_verified: true, exp: Math.floor(Date.now() / 1000) + 600, nonce: 'n' };
+  const none = `${b({ alg: 'none', kid: 'k1' })}.${b(claims)}.`;
+  const { createHmac } = await import('node:crypto');
+  const hsBody = `${b({ alg: 'HS256', kid: 'k1' })}.${b(claims)}`;
+  const hs = `${hsBody}.${createHmac('sha256', 'gsecret').update(hsBody).digest('base64url')}`;
+  for (const t of [none, hs]) assert.equal((await verifyGoogleIdToken(ENV, t, { nonce: 'n', fetchFn: async () => { throw new Error('no JWKS fetch expected'); } })).ok, false);
+  const h = await harness();
+  for (const next of ['//evil.example', 'https://evil.example', '/\\evil.example', '/%0d%0aSet-Cookie:x', '\t//evil.example', '/login?next=//evil.example']) {
+    const r = await h.call('GET', '/auth/google?next=' + encodeURIComponent(next));
+    const flow = cookies(r).find(c => c.startsWith(OAUTH_COOKIE + '='));
+    const payload = JSON.parse(Buffer.from(flow.split('=')[1].split('.')[0], 'base64url').toString());
+    assert.ok(payload.x === '/' || (payload.x.startsWith('/') && !payload.x.startsWith('//') && !/[\r\n\\]/.test(payload.x)), next + ' -> ' + payload.x);
+  }
+});
