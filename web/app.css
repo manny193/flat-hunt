@@ -85,6 +85,7 @@ svg.i{width:20px;height:20px;flex:none;stroke:currentColor;fill:none;stroke-widt
 .shead .spacer{flex:1}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface)}
 .seg button{border:0;background:none;padding:6px 10px;font-size:.85rem;font-weight:700;color:var(--muted);min-height:36px;display:inline-flex;align-items:center;gap:5px}
+@media (max-width:520px){.shead{gap:8px}.shead [data-mode] span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.shead .seg button{padding:6px 8px}.shead .f-lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.shead h1{font-size:1.6rem}}
 .seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
 .progress{height:4px;border-radius:4px;background:var(--sunk);overflow:hidden;margin:-2px 0 14px}
 .progress i{display:block;height:100%;background:var(--ink);border-radius:4px;transition:width .3s var(--ease)}

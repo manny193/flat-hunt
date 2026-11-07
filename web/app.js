@@ -262,7 +262,7 @@ function reviewHTML() {
   const q = reviewQueue(); const all = reviewAll(); const hidden = Math.max(0, all.length - q.length);
   const done = state.tally.reviewed; const total = done + q.length; const fc = activeFilterCount();
   const head = `<div class="shead"><h1>Review</h1><span class="sub">${q.length} new</span><span class="spacer"></span>
-    <button class="btn small" type="button" data-go="filters">${I.filter}Filters${fc ? ` · ${fc}` : ''}</button>
+    <button class="btn small" type="button" data-go="filters" aria-label="Filters${fc ? `, ${fc} active` : ''}">${I.filter}<span class="f-lbl">Filters</span>${fc ? `<span class="f-n"> · ${fc}</span>` : ''}</button>
     <div class="seg" role="group" aria-label="View"><button type="button" data-mode="cards" aria-pressed="${state.mode === 'cards'}">${I.cards}<span>Cards</span></button><button type="button" data-mode="list" aria-pressed="${state.mode === 'list'}">${I.list}<span>List</span></button></div></div>
     ${total ? `<div class="progress" aria-hidden="true"><i data-w="${Math.round(100 * done / total)}"></i></div>` : ''}
     ${hidden ? `<p class="note">${hidden} hidden by filters. <button type="button" id="btn-show-all">Show all</button></p>` : ''}
@@ -290,7 +290,20 @@ function caughtHTML() {
   return `<div class="caught"><div class="board"><span class="plate">TO-LET</span><span class="rentbig">All caught up</span><div class="kind">${t.reviewed ? `${t.reviewed} reviewed · ${t.kept} shortlisted · ${t.passed} passed` : 'Nothing new to review'}</div>${lastRun ? `<div class="money2">Last import ${esc(ago(lastRun.at))}</div>` : ''}</div>
     <div class="btns"><button class="btn primary" type="button" data-go="import">Import new posts</button>${sc ? `<a class="btn" href="#shortlist">Open shortlist (${sc})</a>` : ''}${state.undo.length ? `<button class="btn ghost" type="button" data-deck="undo">${I.undo}Undo last</button>` : ''}</div></div>`;
 }
+// On phones, size the deck so the Pass/Shortlist buttons sit above the tab bar without scrolling.
+function fitDeck() {
+  const deck = $('#deck'); if (!deck) return;
+  if (innerWidth >= 900) { deck.style.height = ''; return; }
+  const tab = $('#tabbar'); const btns = $('.deck-btns');
+  const bottomLimit = (tab ? tab.getBoundingClientRect().top : innerHeight) - 12;
+  const btnsH = btns ? btns.getBoundingClientRect().height + 22 : 90;
+  const deckTop = deck.getBoundingClientRect().top + window.scrollY; // position as if scrolled to top
+  const h = Math.round(bottomLimit - deckTop - btnsH);
+  deck.style.minHeight = '0';
+  deck.style.height = Math.max(320, Math.min(540, h)) + 'px';
+}
 function afterReview() {
+  fitDeck();
   const top = $('#deck .scard.top'); if (!top) return;
   if (state.enter && state.enter.id === top.dataset.id && !reduceMotion()) {
     const dir = state.enter.dir; top.style.transition = 'none'; top.style.transform = `translateX(${dir * 110}%) rotate(${dir * 12}deg)`;
