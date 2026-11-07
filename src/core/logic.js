@@ -139,9 +139,11 @@ export function normalizeRaw(raw, source, now = Date.now()) {
  * drop non-post rows and collect groups that could not be scraped. Rows without `type`
  * (official actor, phone scan, manual) pass through untouched.
  */
-export function prepareItems(rows) {
+export function prepareItems(rows, hints = {}) {
   if (!Array.isArray(rows)) return { items: [], groups: [], unscrapable: [] };
-  const groups = new Map(); const unscrapable = []; const items = [];
+  // hints.groups: group rows seen on earlier dataset pages; hints.watched: [{name,url}] to name groups by URL.
+  const groups = new Map((hints.groups || []).map(g => [String(g.id), g])); const unscrapable = []; const items = [];
+  const byUrl = new Map((hints.watched || []).filter(w => w.url && w.name).map(w => [normUrl(w.url), w.name]));
   const typeOf = r => (r && typeof r === 'object' && typeof r.type === 'string') ? r.type.toLowerCase() : '';
   for (const r of rows) {
     if (typeOf(r) !== 'group') continue;
@@ -157,6 +159,9 @@ export function prepareItems(rows) {
     if (r && typeof r === 'object' && r.groupId != null && !r.groupTitle && !r.groupName) {
       const g = groups.get(String(r.groupId));
       if (g) { items.push({ ...r, groupName: g.name, groupUrl: r.groupUrl || g.url || (isUrl(r.source) ? r.source : '') }); continue; }
+    }
+    if (r && typeof r === 'object' && !r.groupTitle && !r.groupName && isUrl(r.source) && byUrl.has(normUrl(r.source))) {
+      items.push({ ...r, groupName: byUrl.get(normUrl(r.source)), groupUrl: r.source }); continue;
     }
     items.push(r);
   }
@@ -213,21 +218,78 @@ export const MATCH_THRESHOLD = 0.6;
 /** Token strings of a listing's latest posts, used for fuzzy matching (stored as listings.fp). */
 export function fingerprint(l) { return (l.posts || []).slice(0, 5).map(q => [...tokens(q.text)].slice(0, 160).join(' ')); }
 
+// Bottom-k MinHash sketches: 32 smallest token hashes per post. Comparing two sketches estimates
+// their Jaccard similarity in O(k) without parsing the full token lists, so most candidates are
+// rejected cheaply and the exact Jaccard runs only on plausible ones.
+export const SKETCH_K = 32;
+const h32 = t => { let h = 0x811c9dc5; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
+export function sketch(set) {
+  const a = []; for (const t of set) a.push(h32(t));
+  a.sort((x, y) => x - y);
+  const out = []; for (const v of a) { if (out[out.length - 1] !== v) out.push(v); if (out.length >= SKETCH_K) break; }
+  return out;
+}
+export function sketchSim(a, b) {
+  let i = 0, j = 0, n = 0, both = 0;
+  while (n < SKETCH_K && (i < a.length || j < b.length)) {
+    if (i < a.length && j < b.length && a[i] === b[j]) { both++; i++; j++; }
+    else if (j >= b.length || (i < a.length && a[i] < b[j])) i++;
+    else j++;
+    n++;
+  }
+  return n ? both / n : 0;
+}
+const encSk = sk => sk.map(v => v.toString(16).padStart(8, '0')).join('');
+const HEX = new Int8Array(128).fill(-1); for (let i = 0; i < 16; i++) HEX['0123456789abcdef'.charCodeAt(i)] = i;
+const decSk = s => {
+  const n = s.length >> 3, out = new Array(n);
+  for (let i = 0, o = 0; i < n; i++) { let v = 0; for (let e = o + 8; o < e; o++) v = v * 16 + HEX[s.charCodeAt(o)]; out[i] = v; }
+  return out;
+};
+/** Sketches of a listing's latest posts, aligned with fingerprint(); stored as listings.sk. */
+export function sketches(l) { return (l.posts || []).slice(0, 5).map(q => encSk(sketch(tokens(q.text)))).join('|'); }
+export const postSketch = tok => sketch(tok);
+export function skOf(c) {
+  if (c._sk === undefined) Object.defineProperty(c, '_sk', { value: c.sk ? c.sk.split('|').map(decSk) : null, writable: true, configurable: true });
+  return c._sk;
+}
+
 /**
- * Score how likely post (p, ex) is a repost of candidate c = {kind,bhk,rent,phones,fp}.
- * Caller has already checked kind/BHK/rent compatibility.
+ * Score how likely a post (tokens tok, extracted ex, sketch psk) is a repost of candidate
+ * c = {kind,bhk,rent,phones,fp|fpRaw,sk?}. Caller has already checked kind/BHK/rent compatibility.
  * Same phone counts as a match only when BHK and rent are both stated AND the rent is (nearly) equal
  * or the texts overlap somewhat: brokers post many different flats with one number.
  */
-export function scoreCandidate(tok, ex, c) {
-  let score = 0, best = 0;
-  for (const t of fpSets(c)) {
-    const lo = Math.min(t.size, tok.size), hi = Math.max(t.size, tok.size);
-    if (!hi || lo / hi < 0.3) continue; // jaccard can't reach 0.3: skip the set walk
-    best = Math.max(best, jaccard(tok, t));
+export const phoneHit = (ex, c) => !!(ex.phones.length && (c.phones || []).some(x => ex.phones.includes(x)) && c.bhk != null && ex.bhk != null && c.rent && ex.rent);
+export const sketchFloor = hit => hit ? 0.15 : 0.35;
+/** True when the sketch says exact Jaccard is worth computing for this candidate. */
+export function plausible(psk, ex, c) {
+  const sks = skOf(c); if (!sks) return true;
+  const floor = sketchFloor(phoneHit(ex, c));
+  return sks.some(sk => sketchSim(psk, sk) >= floor);
+}
+export function scoreCandidate(tok, ex, c, psk) {
+  const hit = phoneHit(ex, c);
+  const sks = psk ? skOf(c) : null;
+  let best = 0;
+  if (sks) {
+    // Exact Jaccard only where the sketch says it could matter.
+    const floor = sketchFloor(hit);
+    let sets = null;
+    for (let k = 0; k < sks.length; k++) {
+      if (sketchSim(psk, sks[k]) < floor) continue;
+      sets = sets || fpSets(c);
+      const t = sets[k]; if (t) best = Math.max(best, jaccard(tok, t));
+    }
+  } else {
+    for (const t of fpSets(c)) {
+      const lo = Math.min(t.size, tok.size), hi = Math.max(t.size, tok.size);
+      if (!hi || lo / hi < 0.3) continue; // jaccard can't reach 0.3: skip the set walk
+      best = Math.max(best, jaccard(tok, t));
+    }
   }
-  score = best;
-  if (ex.phones.length && (c.phones || []).some(x => ex.phones.includes(x)) && c.bhk != null && ex.bhk != null && c.rent && ex.rent) {
+  let score = best;
+  if (hit) {
     const nearSameRent = Math.abs(c.rent - ex.rent) / Math.max(c.rent, ex.rent) <= 0.02;
     if (nearSameRent || best >= 0.3) score = Math.max(score, 0.9);
   }
@@ -235,7 +297,10 @@ export function scoreCandidate(tok, ex, c) {
 }
 /** Token sets of a candidate's fingerprint, built once and cached on the object. */
 export function fpSets(c) {
-  if (!c._sets) Object.defineProperty(c, '_sets', { value: (c.fp || []).map(s => new Set(s ? s.split(' ') : [])), writable: true, configurable: true });
+  if (!c._sets) {
+    if (!c.fp && c.fpRaw) { try { c.fp = JSON.parse(c.fpRaw); } catch { c.fp = []; } }
+    Object.defineProperty(c, '_sets', { value: (c.fp || []).map(s => new Set(s ? s.split(' ') : [])), writable: true, configurable: true });
+  }
   return c._sets;
 }
 export const compatible = (c, ex) => (c.kind || 'offer') === ex.kind && bhkOk(c.bhk, ex.bhk) && rentOk(c.rent, ex.rent);
@@ -281,12 +346,27 @@ export function newListing(p, ex, now, id = newId()) { return applyPost({ id, st
 export function emptyReport(source, now, total) {
   return { at: now, source, total, noText: 0, offTopic: 0, seeking: 0, dupes: 0, newListings: 0, merged: 0, known: 0, outside: 0, outsideGroups: {}, knownGroups: {}, byArea: {}, unscrapable: [] };
 }
+/** Add page report b into the running report a (dataset ingest happens in pages). */
+export function mergeReports(a, b) {
+  if (!a) return structuredClone(b);
+  for (const k of ['total', 'noText', 'offTopic', 'seeking', 'dupes', 'newListings', 'merged', 'known', 'outside']) a[k] = (a[k] || 0) + (b[k] || 0);
+  for (const k of ['outsideGroups', 'knownGroups', 'byArea']) { a[k] = a[k] || {}; for (const [g, n] of Object.entries(b[k] || {})) a[k][g] = (a[k][g] || 0) + n; }
+  const seen = new Set((a.unscrapable || []).map(u => u.url || u.name));
+  a.unscrapable = [...(a.unscrapable || []), ...(b.unscrapable || []).filter(u => !seen.has(u.url || u.name))];
+  return a;
+}
 /** Normalise, area-filter and classify one raw item. Returns null (and counts it) when skipped. */
+const TEXT_KEYS = ['text', 'postText', 'post_text', 'message', 'content', 'body', 'caption', 'description'];
+const GROUP_KEYS = ['groupTitle', 'groupName', 'group_name', 'group', 'pageName', 'groupTitleText'];
 export function screenItem(raw, source, ctx, report, now) {
-  const p = normalizeRaw(raw, source, now);
-  if (!p.text || p.text.length < 15) { report.noText++; return null; }
-  p.areas = matchAreas(p.text + ' ' + p.group, ctx.areas);
-  if (ctx.keywordFilter !== false && ctx.areas.length && !p.areas.length) { report.offTopic++; return null; }
+  // Cheap checks first: most scraped posts are about other areas, so skip full normalisation for them.
+  const obj = typeof raw === 'string' ? { text: raw } : (raw && typeof raw === 'object' ? raw : {});
+  const text = String(pick(obj, TEXT_KEYS) || '').trim();
+  if (text.length < 15) { report.noText++; return null; }
+  const areas = matchAreas(text + ' ' + asName(pick(obj, GROUP_KEYS)), ctx.areas);
+  if (ctx.keywordFilter !== false && ctx.areas.length && !areas.length) { report.offTopic++; return null; }
+  const p = normalizeRaw(obj, source, now);
+  p.areas = areas;
   let known = isKnownGroup(p.group, p.groupUrl, ctx.watched); if (known == null && typeof p.groupKnownHint === 'boolean') known = p.groupKnownHint;
   p.groupKnown = known;
   const g = p.group || 'Group not detected';

@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS listings (
   is_sample       INTEGER NOT NULL DEFAULT 0,
   areas           TEXT    NOT NULL DEFAULT '[]',
   phones          TEXT    NOT NULL DEFAULT '[]',
-  fp              TEXT    NOT NULL DEFAULT '[]',
+  fp              TEXT    NOT NULL DEFAULT '[]',  -- token strings of the latest 5 posts (fuzzy match)
+  sk              TEXT    NOT NULL DEFAULT '',    -- MinHash sketches of the same posts (cheap prefilter)
   first_posted_at INTEGER,
   last_posted_at  INTEGER NOT NULL,
   decided_at      INTEGER,

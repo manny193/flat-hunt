@@ -2,7 +2,7 @@
 // Bulk writes pass one JSON array parameter and expand it with json_each(), which keeps the
 // statement count per ingest constant (D1 caps queries per invocation and params per query).
 
-import { fingerprint } from '../core/logic.js';
+import { fingerprint, sketches } from '../core/logic.js';
 
 const J = s => { try { return s == null ? null : JSON.parse(s); } catch { return null; } };
 const parseBhk = b => b == null ? null : /^\d+(\.\d+)?$/.test(b) ? Number(b) : b;
@@ -24,7 +24,7 @@ function listingToRecord(l, now) {
   const data = {}; for (const [k, v] of Object.entries(l)) if (!COLUMN_KEYS.includes(k)) data[k] = v;
   return {
     id: l.id, kind: l.kind || 'offer', bhk: bhkKey(l.bhk), rent: l.rent || null, isSample: l.isSample ? 1 : 0,
-    areas: JSON.stringify(l.areas || []), phones: JSON.stringify(l.phones || []), fp: JSON.stringify(fingerprint(l)),
+    areas: JSON.stringify(l.areas || []), phones: JSON.stringify(l.phones || []), fp: JSON.stringify(fingerprint(l)), sk: sketches(l),
     first: l.firstPostedAt || l.lastPostedAt || now, last: l.lastPostedAt || now, created: l.createdAt || now, updated: now,
     data: JSON.stringify(data),
   };
@@ -42,10 +42,10 @@ export function chunkJson(items, maxBytes = 400_000) {
 }
 const je = (path) => `json_extract(value,'$.${path}')`;
 
-const UPSERT_LISTINGS = `INSERT INTO listings (id,status,stage,notes,kind,bhk,rent,has_update,is_sample,areas,phones,fp,first_posted_at,last_posted_at,decided_at,created_at,updated_at,data)
-SELECT ${je('id')},'new','','',${je('kind')},${je('bhk')},${je('rent')},0,${je('isSample')},${je('areas')},${je('phones')},${je('fp')},${je('first')},${je('last')},NULL,${je('created')},${je('updated')},${je('data')}
+const UPSERT_LISTINGS = `INSERT INTO listings (id,status,stage,notes,kind,bhk,rent,has_update,is_sample,areas,phones,fp,sk,first_posted_at,last_posted_at,decided_at,created_at,updated_at,data)
+SELECT ${je('id')},'new','','',${je('kind')},${je('bhk')},${je('rent')},0,${je('isSample')},${je('areas')},${je('phones')},${je('fp')},${je('sk')},${je('first')},${je('last')},NULL,${je('created')},${je('updated')},${je('data')}
 FROM json_each(?) WHERE true
-ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, bhk=excluded.bhk, rent=excluded.rent, areas=excluded.areas, phones=excluded.phones, fp=excluded.fp,
+ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, bhk=excluded.bhk, rent=excluded.rent, areas=excluded.areas, phones=excluded.phones, fp=excluded.fp, sk=excluded.sk,
   first_posted_at=excluded.first_posted_at, last_posted_at=excluded.last_posted_at, updated_at=excluded.updated_at, data=excluded.data,
   has_update=CASE WHEN listings.status='approved' THEN 1 ELSE listings.has_update END`;
 const DELETE_MATCH = `DELETE FROM listing_match WHERE listing_id IN (SELECT value FROM json_each(?))`;
@@ -77,7 +77,7 @@ const CANDIDATES = `WITH q AS MATERIALIZED (
 ), cand AS (
   SELECT listing_id, group_concat(DISTINCT qi) AS qis FROM ranked WHERE rn <= 100 GROUP BY listing_id
 )
-SELECT l.id, l.kind, l.bhk, l.rent, l.phones, l.fp, l.areas, c.qis
+SELECT l.id, l.kind, l.bhk, l.rent, l.phones, l.sk, l.areas, c.qis
 FROM cand c CROSS JOIN listings l ON l.id = c.listing_id`;
 
 export function createRepo(db) {
@@ -125,7 +125,13 @@ export function createRepo(db) {
       if (!specs.length) return [];
       const out = [];
       for (const chunk of chunkJson(specs)) out.push(...await db.all(CANDIDATES, [chunk, since, since, since]));
-      return out.map(r => ({ id: r.id, kind: r.kind, bhk: parseBhk(r.bhk), rent: r.rent, phones: J(r.phones) || [], fp: J(r.fp) || [], areas: J(r.areas) || [], qis: String(r.qis).split(',').map(Number) }));
+      // Token lists (fp) are not selected here: only candidates that pass the sketch prefilter need them.
+      return out.map(r => ({ id: r.id, kind: r.kind, bhk: parseBhk(r.bhk), rent: r.rent, phones: J(r.phones) || [], fp: null, sk: r.sk, areas: J(r.areas) || [], qis: String(r.qis).split(',').map(Number) }));
+    },
+    async fingerprints(ids) {
+      const m = new Map(); if (!ids.length) return m;
+      for (const r of await db.all('SELECT id, fp FROM listings WHERE id IN (SELECT value FROM json_each(?))', [JSON.stringify(ids)])) m.set(r.id, r.fp);
+      return m;
     },
     async loadListings(ids) {
       const m = new Map(); if (!ids.length) return m;
@@ -143,7 +149,7 @@ export function createRepo(db) {
       for (const c of chunkJson(match)) stmts.push({ sql: INSERT_MATCH, params: [c] });
       for (const c of chunkJson(keys)) stmts.push({ sql: INSERT_KEYS, params: [c] });
       if (run) stmts.push(run.datasetId
-        ? { sql: `UPDATE runs SET status = 'done', at = ?, report = ? WHERE dataset_id = ?`, params: [now, JSON.stringify(run.report), run.datasetId] }
+        ? { sql: `UPDATE runs SET status = ?, at = ?, report = ? WHERE dataset_id = ?`, params: [run.status || 'done', now, JSON.stringify(run.report), run.datasetId] }
         : { sql: `INSERT INTO runs (source, status, at, report) VALUES (?, 'done', ?, ?)`, params: [run.source, now, JSON.stringify(run.report)] });
       await db.batch(stmts);
       return stmts.length;
