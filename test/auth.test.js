@@ -121,8 +121,10 @@ test('Cloudflare Access: email header trusted only in access mode; JWT verified 
   resetAccessCache();
   const hdr = { 'cf-access-authenticated-user-email': 'me@example.com' };
   assert.equal((await (await harness(pwEnv)).call('GET', '/api/listings', { headers: hdr })).status, 401, 'ignored outside access mode');
-  assert.equal((await (await harness({ RUNTIME: 'worker', AUTH_MODE: 'cloudflare-access' })).call('GET', '/api/listings', { headers: hdr })).status, 200);
-  assert.equal((await (await harness({ RUNTIME: 'worker', AUTH_MODE: 'cloudflare-access' })).call('GET', '/api/listings')).status, 401);
+  // QA: without CF_ACCESS_TEAM_DOMAIN + CF_ACCESS_AUD the header is forgeable, so it is not trusted (fails closed).
+  assert.equal((await (await harness({ RUNTIME: 'worker', AUTH_MODE: 'cloudflare-access' })).call('GET', '/api/listings', { headers: hdr })).status, 503);
+  assert.equal((await (await harness({ ...pwEnv, AUTH_MODE: 'cloudflare-access' })).call('GET', '/api/listings', { headers: hdr })).status, 401, 'falls back to password login');
+  assert.equal((await (await harness({ RUNTIME: 'worker', AUTH_MODE: 'cloudflare-access' })).call('GET', '/api/listings')).status, 503);
 
   const { sign, fetchFn } = await accessFixture();
   const env = { RUNTIME: 'worker', AUTH_MODE: 'cloudflare-access', CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud-123' };

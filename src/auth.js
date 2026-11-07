@@ -84,7 +84,9 @@ export async function verifyAccessJwt(env, jwt, fetchFn = fetch, now = Date.now(
 // ---------- middleware ----------
 /** How this deployment authenticates. 'unconfigured' fails closed (503). */
 export function authMode(env) {
-  if (env.AUTH_MODE === 'cloudflare-access') return 'cloudflare-access';
+  // The Access email header alone is forgeable whenever a request reaches the Worker without passing
+  // Access (Access app removed or misconfigured, another hostname). Trust Access only with JWT checks.
+  if (env.AUTH_MODE === 'cloudflare-access' && env.CF_ACCESS_TEAM_DOMAIN && env.CF_ACCESS_AUD) return 'cloudflare-access';
   if (env.APP_PASSWORD && env.SESSION_SECRET) return 'password';
   // Only the Node server sets RUNTIME=node; the Worker ignores AUTH_DISABLED.
   if (env.RUNTIME === 'node' && env.AUTH_DISABLED === '1') return 'disabled';
@@ -98,7 +100,6 @@ export async function authenticate(request, env, fetchFn = fetch) {
   if (mode === 'cloudflare-access') {
     const email = request.headers.get('cf-access-authenticated-user-email');
     if (email) {
-      if (!env.CF_ACCESS_TEAM_DOMAIN || !env.CF_ACCESS_AUD) return { user: email, mode };
       try { const who = await verifyAccessJwt(env, request.headers.get('cf-access-jwt-assertion'), fetchFn); if (who) return { user: who, mode }; } catch { /* fall through */ }
     }
     // Access mode can still fall back to the password login when it is configured.
