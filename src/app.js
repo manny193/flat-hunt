@@ -21,7 +21,7 @@ export const LIMITS = { importBytes: 2 * KB * KB, webhookBytes: 16 * KB, smallBy
 const IMPORT_SOURCES = ['scraper', 'phone', 'manual', 'sample'];
 // Paths reachable without a session. Static files here hold no data: the login page needs the
 // stylesheet and icon, and browsers fetch the web manifest without cookies.
-const PUBLIC_ASSETS = new Set(['/app.css', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.webmanifest', '/favicon.ico']);
+const PUBLIC_ASSETS = new Set(['/ui.js', '/app.css', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.webmanifest', '/favicon.ico']);
 
 /**
  * @param deps {repo(env) -> repository, assets(request, env) -> Response|null, fetch?}
@@ -84,6 +84,10 @@ async function route(request, env, ctx, deps, fetchFn) {
   if (path === '/api/me' && method === 'GET') return json(meView(await identify(request, env, repo(), fetchFn), env));
   if (path.startsWith('/api/public/')) return publicApi(request, env, repo(), path, url);
   if ((method === 'GET' || method === 'HEAD') && PUBLIC_ASSETS.has(path)) return (await deps.assets(request, env)) || errorJson(404, 'not_found');
+  // The app shell is public (the public can browse); it holds no data. Fails closed when login is unconfigured.
+  if ((method === 'GET' || method === 'HEAD') && (path === '/' || path === '/index.html') && (request.headers.get('accept') || '').includes('text/html') && authMode(env) !== 'unconfigured') {
+    return (await deps.assets(new Request(new URL('/', url), { method, headers: request.headers }), env)) || errorJson(404, 'not_found');
+  }
 
   // ---------- everything else needs a signed-in, approved user ----------
   const who = await identify(request, env, repo(), fetchFn);
@@ -342,6 +346,18 @@ async function api(request, env, method, path, url, repo, fetchFn, who) {
       if (method === 'DELETE') { await repo.unlinkArea(uid, aid); return new Response(null, { status: 204 }); }
       if (method === 'PATCH') { adminOnly(who); return json(await editArea(repo, cur, await readJson(request, LIMITS.smallBytes), now)); }
     }
+  }
+
+  // Browse any area with full details (signed-in counterpart of /api/public/listings).
+  if (res === 'browse' && !id && method === 'GET') {
+    const q = url.searchParams; const opt = k => { const v = q.get(k); return v == null || v === '' ? null : v; };
+    for (const k of ['area', 'minRent', 'maxRent', 'before']) if (opt(k) != null && int(opt(k)) == null) throw new HttpError(400, 'bad_' + k);
+    if (opt('bhk') && !/^(\d(\.5)?|1RK)$/i.test(opt('bhk'))) throw new HttpError(400, 'bad_bhk');
+    if (opt('type') && !['flat', 'flatmate', 'pg'].includes(opt('type'))) throw new HttpError(400, 'bad_type');
+    const kind = opt('kind') === 'seeking' ? 'seeking' : 'offer';
+    const limit = Math.min(60, Math.max(1, int(q.get('limit')) || 30));
+    const rows = await repo.publicListings({ area: int(opt('area')), bhk: opt('bhk'), minRent: int(opt('minRent')), maxRent: int(opt('maxRent')), type: opt('type'), kind, before: int(opt('before')), limit });
+    return json({ listings: rows.map(out), next: rows.length === limit ? rows[rows.length - 1].lastPostedAt : null });
   }
 
   if (res === 'keywords' && !id && method === 'GET') return json({ keywords: generateKeywords(areaName(url.searchParams.get('name'))) });

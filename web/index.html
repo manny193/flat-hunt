@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Flat Hunt</title>
-<meta name="description" content="Flat and flatmate listings from Facebook groups, deduplicated and ready to swipe.">
+<meta name="description" content="Flats and flatmates to let in Bangalore, gathered from Facebook groups and Reddit, reposts merged into one card.">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#171A18" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#181D20" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Flat Hunt">
@@ -16,33 +16,21 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,700;1,400&family=Atkinson+Hyperlegible+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,600;0,700;1,400&family=Atkinson+Hyperlegible+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="/app.css">
-<script type="module" src="/app.js"></script>
+<script type="module" src="/ui.js"></script>
 </head>
 <body>
-<header class="topbar">
-  <div class="brand"><span class="plate" aria-hidden="true">TO-LET</span><b>Flat Hunt</b><span class="brand-area"></span></div>
-  <span class="spacer"></span>
-  <button class="btn small primary" type="button" data-go="import"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Import</button>
-  <button class="iconbtn" type="button" data-go="settings" aria-label="Settings"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></button>
-</header>
-
-<aside class="rail" aria-label="Navigation">
-  <div class="brand"><span class="plate" aria-hidden="true">TO-LET</span><b>Flat Hunt</b><span class="brand-area"></span></div>
-  <div id="rail-nav"></div>
-  <button class="btn primary" type="button" data-go="import"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Import posts</button>
-  <div class="bottom">
-    <p class="kbdline"><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch screens</p>
-    <button class="btn ghost left" type="button" data-go="settings"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>Settings</button>
+<div class="layout">
+  <aside class="rail" id="rail" aria-label="Navigation"></aside>
+  <div class="col">
+    <div class="app-top"><header class="topbar" id="topbar"></header></div>
+    <main class="main" id="main" tabindex="-1"></main>
   </div>
-</aside>
-
-<main class="main" id="main"></main>
-
+</div>
 <nav class="tabbar" id="tabbar" aria-label="Screens"></nav>
 <div id="sheet-root"></div>
-<div id="toast" class="toast" role="status" hidden></div>
+<div id="toast-root"></div>
 <div id="live" class="sr" aria-live="polite"></div>
 <noscript><p class="noscript">Flat Hunt needs JavaScript.</p></noscript>
 </body>
