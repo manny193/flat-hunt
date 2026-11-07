@@ -106,7 +106,7 @@ test('scheduled: budget check, input from watched groups, cutoff = last successf
   assert.equal(st.action, 'started');
   const start = api.calls.find(c => c.init.method === 'POST');
   assert.equal(start.url.pathname, `/v2/acts/${DEFAULT_ACTOR}/runs`);
-  assert.deepEqual(JSON.parse(start.init.body), { groups: ['https://www.facebook.com/groups/111'], resultsPerGroup: 25, sortOrder: 'new', postsPublishedAfter: new Date(lastStart - 36e5).toISOString(), includeGroupInfo: true });
+  assert.deepEqual(JSON.parse(start.init.body), { groups: ['https://www.facebook.com/groups/111'], resultsPerGroup: 25, sortOrder: 'new', postsPublishedAfter: new Date(lastStart - 36e5).toISOString().slice(0, 10), includeGroupInfo: true });
   const hooks = JSON.parse(atob(start.url.searchParams.get('webhooks')));
   assert.deepEqual(hooks[0].eventTypes, ['ACTOR.RUN.SUCCEEDED']);
   assert.equal(hooks[0].requestUrl, 'https://hunt.test/api/ingest/apify');
@@ -143,7 +143,7 @@ test('scheduled: sweep ingests succeeded runs whose webhook was missed', async (
 test('actor input builders and webhook param', () => {
   const args = { groups: [{ url: 'https://www.facebook.com/groups/1' }], resultsPerGroup: 20, after: Date.UTC(2026, 10, 6) };
   assert.deepEqual(buildInput(OFFICIAL_ACTOR, args), { startUrls: [{ url: 'https://www.facebook.com/groups/1' }], resultsLimit: 20, viewOption: 'CHRONOLOGICAL', onlyPostsNewerThan: '2026-11-06T00:00:00.000Z' });
-  assert.equal(buildInput(DEFAULT_ACTOR, args).postsPublishedAfter, '2026-11-06T00:00:00.000Z');
+  assert.equal(buildInput(DEFAULT_ACTOR, args).postsPublishedAfter, '2026-11-06');
   assert.equal(webhookParam({ INGEST_SECRET: 'x' }), null, 'no PUBLIC_BASE_URL, no webhook');
   assert.match(JSON.parse(atob(webhookParam({ INGEST_SECRET: 'x', PUBLIC_BASE_URL: 'https://a.b' })))[0].payloadTemplate, /resource.defaultDatasetId/);
 });
@@ -249,4 +249,13 @@ test('invocation killed mid-dataset (CPU limit): lock expires after 5 min and th
   const r = await ingestDataset(repo, env, { datasetId: 'dsKILL00001' }, { fetchFn: api.fn, now: T0 + 6 * 60e3 });
   assert.equal(r.status, 'done'); assert.equal(r.report.total, 24); assert.equal(r.report.newListings, 24);
   assert.equal((await repo.listListings()).length, 24);
+});
+
+test('Apify 4xx errors include the reason from the response body, without the token', async () => {
+  const { startRun: sr } = await import('../src/apify.js');
+  const fetchFn = async (url) => url.includes('/users/me/limits')
+    ? new Response(JSON.stringify({ data: { current: { monthlyUsageUsd: 0 }, limits: { maxMonthlyUsageUsd: 5 } } }), { status: 200 })
+    : new Response(JSON.stringify({ error: { type: 'invalid-input', message: 'Input is not valid: field postsPublishedAfter apify_api_SECRET' } }), { status: 400 });
+  const repo = { getSettings: async () => ({ groups: [{ url: 'https://www.facebook.com/groups/111', active: true }] }), putSettings: async () => {}, lastSuccessfulStart: async () => null, recordStartedRun: async () => {} };
+  await assert.rejects(sr(repo, { APIFY_TOKEN: 't' }, { fetchFn }), e => /HTTP 400 \(invalid-input: Input is not valid/.test(e.message) && !/apify_api_SECRET/.test(e.message));
 });

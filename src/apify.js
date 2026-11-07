@@ -62,7 +62,12 @@ export const DATASET_OMIT = ['topComments', 'latestComments', 'comments'];
 async function apify(env, path, init = {}, fetchFn = fetch) {
   if (!env.APIFY_TOKEN) throw new Error('APIFY_TOKEN is not set');
   const r = await fetchFn(API + path, { ...init, headers: { Authorization: `Bearer ${env.APIFY_TOKEN}`, ...(init.body ? { 'content-type': 'application/json' } : {}), ...(init.headers || {}) }, signal: AbortSignal.timeout(20000) });
-  if (!r.ok) throw new Error(`Apify ${init.method || 'GET'} ${path.split('?')[0]} -> HTTP ${r.status}`);
+  if (!r.ok) {
+    // Apify explains 4xx errors in the body ({error:{type,message}}); surface it so admins can act on it.
+    let why = '';
+    try { const b = await r.json(); why = [b?.error?.type, b?.error?.message].filter(Boolean).join(': ').replace(/apify_api_\w+/g, '[token]').slice(0, 300); } catch {}
+    throw new Error(`Apify ${init.method || 'GET'} ${path.split('?')[0]} -> HTTP ${r.status}${why ? ` (${why})` : ''}`);
+  }
   return r.json();
 }
 
@@ -71,7 +76,9 @@ export function buildInput(actor, { groups, resultsPerGroup, after }) {
   const urls = groups.map(g => g.url);
   const iso = new Date(after).toISOString();
   if (actor === OFFICIAL_ACTOR) return { startUrls: urls.map(url => ({ url })), resultsLimit: resultsPerGroup, viewOption: 'CHRONOLOGICAL', onlyPostsNewerThan: iso };
-  return { groups: urls, resultsPerGroup, sortOrder: 'new', postsPublishedAfter: iso, includeGroupInfo: true };
+  // The automly actor documents postsPublishedAfter as a date ("2026-09-01", UTC). Send the date only;
+  // the extra hours it may return are dropped for free by post_keys dedupe.
+  return { groups: urls, resultsPerGroup, sortOrder: 'new', postsPublishedAfter: iso.slice(0, 10), includeGroupInfo: true };
 }
 /** Per-run webhook (base64 JSON) so Apify calls /api/ingest/apify when the run succeeds. */
 export function webhookParam(env) {

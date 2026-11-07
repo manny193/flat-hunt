@@ -45,7 +45,7 @@ test('cron is hourly: a scrape starts only when due; Pages are left out of the a
   assert.equal(first.action, 'started'); assert.match(first.detail, /Skipped 1 Facebook Page/);
   const body = JSON.parse(api.calls.find(c => c.init.method === 'POST').init.body);
   assert.deepEqual(body.groups, ['https://www.facebook.com/groups/111']);
-  assert.ok(Date.parse(body.postsPublishedAfter) >= now - 3 * 24 * H - 1000, 'never more than backfillDays on the first run');
+  assert.ok(Date.parse(body.postsPublishedAfter) >= now - 4 * 24 * H, 'never more than backfillDays (date-only, so up to a day earlier) on the first run');
   const second = await app.scheduled({}, ENV);
   assert.equal(second.action, 'not_due'); assert.equal(api.calls.filter(c => c.init.method === 'POST').length, 1);
   assert.ok(second.nextRunAt > now + 3.9 * H);
