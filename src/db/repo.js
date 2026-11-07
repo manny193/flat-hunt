@@ -20,12 +20,12 @@ export function rowToListing(r) {
     firstPostedAt: r.first_posted_at, lastPostedAt: r.last_posted_at, decidedAt: r.decided_at, createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
-function listingToRecord(l, now) {
+function listingToRecord(l, now, writtenAt = now) {
   const data = {}; for (const [k, v] of Object.entries(l)) if (!COLUMN_KEYS.includes(k)) data[k] = v;
   return {
     id: l.id, kind: l.kind || 'offer', bhk: bhkKey(l.bhk), rent: l.rent || null, isSample: l.isSample ? 1 : 0,
     areas: JSON.stringify(l.areas || []), phones: JSON.stringify(l.phones || []), fp: JSON.stringify(fingerprint(l)), sk: sketches(l),
-    first: l.firstPostedAt || l.lastPostedAt || now, last: l.lastPostedAt || now, created: l.createdAt || now, updated: now,
+    first: l.firstPostedAt || l.lastPostedAt || now, last: l.lastPostedAt || now, created: l.createdAt || now, updated: writtenAt,
     data: JSON.stringify(data),
   };
 }
@@ -140,7 +140,9 @@ export function createRepo(db) {
     },
     /** Persist one ingest atomically: listings (insert or merge), match index, post keys, run log. */
     async saveIngest({ listings, keys, run, now }) {
-      const recs = listings.map(l => listingToRecord(l, now));
+      // updated_at is the write time, not the ingest start: a long ingest (several dataset pages)
+      // otherwise writes rows "in the past" that a client which synced meanwhile never fetches.
+      const recs = listings.map(l => listingToRecord(l, now, Math.max(now, Date.now())));
       const match = [];
       for (const l of listings) for (const a of (l.areas && l.areas.length ? l.areas : [0])) match.push({ l: l.id, a, k: l.kind || 'offer', b: bhkKey(l.bhk), r: l.rent || null, t: l.lastPostedAt || now });
       const stmts = [];

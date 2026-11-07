@@ -210,3 +210,14 @@ test('timing: 300-post scrape batch (10 % in area) on a small tracker, JS time p
   // Target is ~5 ms on a developer machine; the ceiling is looser so shared CI runners don't flake.
   assert.ok(median < 10, `median JS time ${median.toFixed(1)} ms`);
 });
+
+// QA regression: rows written by a long ingest carried the ingest *start* time as updated_at,
+// so a client that synced while the ingest ran (lastSync later than that) never fetched them.
+test('ingested rows are visible to an incremental refresh that synced during the ingest (QA)', async () => {
+  const { repo } = await setup();
+  const started = Date.now() - 60e3;              // ingest began a minute ago (multi-page dataset)
+  const clientSync = Date.now() - 10e3;           // the open app refreshed 10 s ago
+  await ingestItems(repo, [{ text: '2BHK available in Green Glen Layout, rent 30000, call 9000012345', url: 'https://www.facebook.com/groups/1/posts/77/' }], { source: 'apify', now: started });
+  const seen = await repo.listListings({ since: clientSync - 3000 });
+  assert.equal(seen.length, 1, 'the app’s next ?since= refresh returns the new listing');
+});
