@@ -81,8 +81,8 @@ jobs:
           CONFIRM: ${{ inputs.confirm_db_restore }}
         run: |
           [ "$CONFIRM" = "RESTORE" ] || { echo "::error::Type RESTORE in confirm_db_restore to restore the database"; exit 1; }
-          npx --yes "wrangler@${WRANGLER_VERSION}" d1 time-travel info flat-radar --timestamp "$TS"
-          npx --yes "wrangler@${WRANGLER_VERSION}" d1 time-travel restore flat-radar --timestamp "$TS"
+          npx --yes "wrangler@${WRANGLER_VERSION}" d1 time-travel info flat-hunt --timestamp "$TS"
+          npx --yes "wrangler@${WRANGLER_VERSION}" d1 time-travel restore flat-hunt --timestamp "$TS"
 
       - name: Deployments (after)
         run: npx --yes "wrangler@${WRANGLER_VERSION}" deployments list

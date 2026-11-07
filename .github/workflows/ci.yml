@@ -84,12 +84,12 @@ jobs:
           context: .
           load: true
           push: false
-          tags: flat-radar:ci
+          tags: flat-hunt:ci
       - name: Run container and wait for healthy
         run: |
           docker run -d --name fr --init -p 127.0.0.1:8787:8787 \
             -e APP_PASSWORD=ci-only-password-123456 -e SESSION_SECRET=ci-only-session-secret-0123456789abcdef \
-            flat-radar:ci
+            flat-hunt:ci
           for i in $(seq 1 30); do
             status=$(docker inspect -f '{{.State.Health.Status}}' fr)
             echo "health: $status"

@@ -2,7 +2,7 @@
 # (D1 Time Travel already gives 7-day point-in-time restore on the free plan; this is the
 # off-platform copy.) The dump contains third-party phone numbers, so it is AES-256
 # encrypted with BACKUP_PASSPHRASE before upload. Decrypt with:
-#   openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in flat-radar-*.sql.gz.enc -pass pass:'<passphrase>' | gunzip > restore.sql
+#   openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in flat-hunt-*.sql.gz.enc -pass pass:'<passphrase>' | gunzip > restore.sql
 name: Backup
 
 on:
@@ -55,14 +55,14 @@ jobs:
           umask 077
           stamp=$(date -u +%Y%m%dT%H%MZ)
           work="$RUNNER_TEMP/backup"; mkdir -p "$work" out
-          npx --yes "wrangler@${WRANGLER_VERSION}" d1 export flat-radar --remote --output "$work/dump.sql" --skip-confirmation
+          npx --yes "wrangler@${WRANGLER_VERSION}" d1 export flat-hunt --remote --output "$work/dump.sql" --skip-confirmation
           bytes=$(wc -c < "$work/dump.sql"); echo "dump size: $bytes bytes"
           [ "$bytes" -gt 100 ] || { echo "::error::Export looks empty"; exit 1; }
           gzip -9 "$work/dump.sql"
           openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
-            -in "$work/dump.sql.gz" -out "out/flat-radar-$stamp.sql.gz.enc" -pass env:BACKUP_PASSPHRASE
+            -in "$work/dump.sql.gz" -out "out/flat-hunt-$stamp.sql.gz.enc" -pass env:BACKUP_PASSPHRASE
           rm -rf "$work"
-          echo "name=flat-radar-$stamp" >> "$GITHUB_OUTPUT"
+          echo "name=flat-hunt-$stamp" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

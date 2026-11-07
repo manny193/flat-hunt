@@ -68,7 +68,7 @@ jobs:
         run: node .github/scripts/prepare-wrangler-config.mjs wrangler.jsonc
 
       - name: Apply D1 migrations
-        run: npx --yes "wrangler@${WRANGLER_VERSION}" d1 migrations apply flat-radar --remote
+        run: npx --yes "wrangler@${WRANGLER_VERSION}" d1 migrations apply flat-hunt --remote
 
       - name: Deploy Worker (with secrets)
         env:

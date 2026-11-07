@@ -1,14 +1,14 @@
 # Local dev / self-host fallback. Run from the repo root:
 #   docker compose -f infra/docker-compose.yml up --build
-# Then open http://localhost:8787 . Data persists in the "flat-radar-data" volume.
+# Then open http://localhost:8787 . Data persists in the "flat-hunt-data" volume.
 # Put secrets in a repo-root .env file (git-ignored): APP_PASSWORD, SESSION_SECRET,
 # and optionally APIFY_TOKEN, INGEST_SECRET, PUBLIC_BASE_URL, CRON_ENABLED=1.
 services:
-  flat-radar:
+  flat-hunt:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: flat-radar:local
+    image: flat-hunt:local
     init: true                    # forwards SIGTERM to node, reaps zombies
     ports:
       - "127.0.0.1:8787:8787"     # loopback only; never expose the raw port publicly
@@ -16,7 +16,7 @@ services:
       - path: ../.env
         required: false
     volumes:
-      - flat-radar-data:/data
+      - flat-hunt-data:/data
     read_only: true
     tmpfs:
       - /tmp
@@ -26,4 +26,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  flat-radar-data:
+  flat-hunt-data:

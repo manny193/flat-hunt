@@ -1,15 +1,15 @@
-// Cloudflare Workers config for Flat Radar (owned by SRE, see docs/OWNERS.md).
+// Cloudflare Workers config for Flat Hunt (owned by SRE, see docs/OWNERS.md).
 // Deployed only from GitHub Actions (.github/workflows/deploy.yml).
 // The two placeholders below are filled in at deploy time by
 // .github/scripts/prepare-wrangler-config.mjs, so the founder never edits this file:
 //   - database_id 00000000-... -> the real D1 id (found by name, created on first deploy)
-//   - PUBLIC_BASE_URL ""       -> https://flat-radar.<account-subdomain>.workers.dev (or repo variable)
+//   - PUBLIC_BASE_URL ""       -> https://flat-hunt.<account-subdomain>.workers.dev (or repo variable)
 {
-  "name": "flat-radar",
+  "name": "flat-hunt",
   "main": "src/worker.js",
   "compatibility_date": "2026-10-01",
 
-  // Served at https://flat-radar.<your-subdomain>.workers.dev
+  // Served at https://flat-hunt.<your-subdomain>.workers.dev
   "workers_dev": true,
   // Per-version preview URLs would be extra public hostnames; keep them off.
   "preview_urls": false,
@@ -26,7 +26,7 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "flat-radar",
+      "database_name": "flat-hunt",
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }

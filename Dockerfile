@@ -1,17 +1,17 @@
 # syntax=docker/dockerfile:1
-# Flat Radar - local dev and self-host fallback (production runs on Cloudflare Workers).
+# Flat Hunt - local dev and self-host fallback (production runs on Cloudflare Workers).
 # Runs src/node-server.js (node:http + node:sqlite). Zero npm dependencies, so no npm install step.
 #
-#   docker build -t flat-radar .
-#   docker run --init -p 127.0.0.1:8787:8787 -v flat-radar-data:/data \
-#     -e APP_PASSWORD=... -e SESSION_SECRET=... flat-radar
+#   docker build -t flat-hunt .
+#   docker run --init -p 127.0.0.1:8787:8787 -v flat-hunt-data:/data \
+#     -e APP_PASSWORD=... -e SESSION_SECRET=... flat-hunt
 #
 # node:sqlite needs Node >= 22.13 without a flag; the 22 slim tag tracks the latest 22.x.
 FROM node:22-bookworm-slim
 
 ENV NODE_ENV=production \
     PORT=8787 \
-    DB_PATH=/data/flat-radar.db
+    DB_PATH=/data/flat-hunt.db
 
 WORKDIR /app
 

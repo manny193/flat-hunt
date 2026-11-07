@@ -1,4 +1,4 @@
-# Deploying Flat Radar
+# Deploying Flat Hunt
 
 Production runs on **Cloudflare Workers (free plan)**: the Worker serves the UI and API,
 **D1** stores the listings, a **Cron Trigger** starts the Apify scrape every 4 hours, and
@@ -7,12 +7,12 @@ Production runs on **Cloudflare Workers (free plan)**: the Worker serves the UI 
 ## Architecture
 
 ```
- phone / laptop ──HTTPS──► flat-radar.<you>.workers.dev  (Cloudflare edge)
+ phone / laptop ──HTTPS──► flat-hunt.<you>.workers.dev  (Cloudflare edge)
                                │  every request runs src/worker.js first
                                │  (login check, then web/ assets or /api/*)
                                ▼
                        ┌──────────────┐   D1 binding   ┌───────────────────┐
-  Cron 4-hourly ─────► │ Worker       │ ─────────────► │ D1 "flat-radar"   │
+  Cron 4-hourly ─────► │ Worker       │ ─────────────► │ D1 "flat-hunt"   │
   scheduled()          │ fetch() +    │                │ (SQLite, 7-day    │
                        │ scheduled()  │                │  Time Travel)     │
                        └──────┬───────┘                └───────────────────┘
@@ -32,7 +32,7 @@ protected by the `X-Ingest-Secret` header. Everything else needs a session.
 
 1. **Cloudflare account**: sign up at dash.cloudflare.com (free, email only). Open
    **Workers & Pages** once. If it asks you to choose a `workers.dev` subdomain, pick one
-   (for example your name). Your app will be at `https://flat-radar.<subdomain>.workers.dev`.
+   (for example your name). Your app will be at `https://flat-hunt.<subdomain>.workers.dev`.
    Copy the **Account ID**: open the account home page, then the "..." menu next to the account name, then **Copy account ID**.
 2. **API token**: open **My Profile → API Tokens → Create Token → Create Custom Token**.
    - Permissions (all *Account* scope):
@@ -96,8 +96,8 @@ that the ingest endpoint rejects a wrong secret. If any check fails, the deploy 
   even on the free plan ("this step is still needed but you will not be charged"). If you're
   happy to add a card, it's a good optional extra layer:
   Zero Trust → Access → Applications → add a *self-hosted* app for
-  `flat-radar.<sub>.workers.dev` (Allow: your email, login method: One-time PIN) **and** a
-  second app for path `flat-radar.<sub>.workers.dev/api/ingest` with a **Bypass** policy, so
+  `flat-hunt.<sub>.workers.dev` (Allow: your email, login method: One-time PIN) **and** a
+  second app for path `flat-hunt.<sub>.workers.dev/api/ingest` with a **Bypass** policy, so
   Apify can still reach the webhook. Don't use the Worker's one-click "Protect this Worker"
   toggle, because it covers every path, including the webhook.
 - **Webhook**: Apify sends `X-Ingest-Secret`. The Worker compares it in constant time, accepts
@@ -126,7 +126,7 @@ that the ingest endpoint rejects a wrong secret. If any check fails, the deploy 
   A failed smoke test rolls back automatically.
 - **Data**: in the same workflow, fill `d1_restore_timestamp` (within 7 days) and type `RESTORE`.
   For older data, download a backup artifact, decrypt it (command at the top of `backup.yml`)
-  and import it with `wrangler d1 execute flat-radar --remote --file restore.sql`.
+  and import it with `wrangler d1 execute flat-hunt --remote --file restore.sql`.
 - Write migrations as add-only (new tables/columns), so the previous code version still works
   after a code rollback.
 
@@ -170,7 +170,7 @@ invocation is cut off. If CPU still proves too tight, the fix is Workers Paid (U
 
 ## Domain
 
-The default is free: `https://flat-radar.<subdomain>.workers.dev`. A custom domain is optional, and buying one is
+The default is free: `https://flat-hunt.<subdomain>.workers.dev`. A custom domain is optional, and buying one is
 **your decision**. Prices were checked Oct–Nov 2026, at roughly ₹89 per US$:
 
 | Option | Cost | Notes |
@@ -182,7 +182,7 @@ The default is free: `https://flat-radar.<subdomain>.workers.dev`. A custom doma
 | `.xyz` | ~₹180 first year (Porkbun/Dynadot), then ~₹1,260/yr. Cloudflare: ~₹1,100 then ~₹1,000 | cheap first year, then renewal is the trap |
 | `.in` | ~₹90–180 first year on promos, then ~₹510–1,150/yr + 18% GST at Indian registrars | not sold by Cloudflare Registrar, so you'd point nameservers to Cloudflare |
 
-If you add a domain later: Workers & Pages → flat-radar → Settings → Domains & Routes → Add
+If you add a domain later: Workers & Pages → flat-hunt → Settings → Domains & Routes → Add
 Custom Domain. Then set the repository variable `PUBLIC_BASE_URL=https://your.domain` and redeploy.
 
 ## Local dev and self-host fallback
