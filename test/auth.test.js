@@ -77,6 +77,16 @@ test(`rate limit: after ${LOGIN_MAX_FAILS} wrong passwords the IP is locked out,
   assert.equal((await call('POST', '/api/login', { body: { password: PW }, headers: { 'cf-connecting-ip': '198.51.100.1' } })).status, 204, 'other IPs unaffected');
 });
 
+// QA regression: the failure count was read before the (async) password check and written after
+// it, so a burst of parallel guesses all saw "under the limit" and were all checked.
+test('rate limit holds against a burst of parallel guesses (QA)', async () => {
+  const { call } = await harness(pwEnv);
+  const ip = { 'cf-connecting-ip': '203.0.113.77' };
+  const codes = await Promise.all(Array.from({ length: 30 }, (_, i) => call('POST', '/api/login', { body: { password: 'guess' + i }, headers: ip }).then(r => r.status)));
+  assert.equal(codes.filter(c => c === 401).length, LOGIN_MAX_FAILS, codes.join(','));
+  assert.equal(codes.filter(c => c === 429).length, 30 - LOGIN_MAX_FAILS);
+});
+
 test('session cookie verification: tampered, expired, other secret, garbage', async () => {
   const env = { SESSION_SECRET: SECRET };
   const tok = await createSession(env);

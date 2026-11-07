@@ -117,9 +117,11 @@ export async function authenticate(request, env, fetchFn = fetch) {
 export async function attemptLogin(request, env, repo, password, now = Date.now()) {
   if (!(env.APP_PASSWORD && env.SESSION_SECRET)) return { ok: false, status: 503 };
   const ip = clientIp(request);
-  const fails = await repo.loginFailures(ip, now, LOGIN_WINDOW_MS);
-  if (fails >= LOGIN_MAX_FAILS) return { ok: false, status: 429, retryAfter: Math.ceil(LOGIN_WINDOW_MS / 1000) };
-  if (!(await passwordMatches(env, password))) { await repo.recordLoginFailure(ip, now, LOGIN_WINDOW_MS); return { ok: false, status: 401 }; }
-  if (fails) await repo.clearLoginFailures(ip);
+  // Count the attempt *before* checking the password (one atomic upsert), so parallel requests
+  // can't all read "4 failures so far" and get unlimited guesses. A correct password clears it.
+  const attempts = await repo.recordLoginFailure(ip, now, LOGIN_WINDOW_MS);
+  if (attempts > LOGIN_MAX_FAILS) return { ok: false, status: 429, retryAfter: Math.ceil(LOGIN_WINDOW_MS / 1000) };
+  if (!(await passwordMatches(env, password))) return { ok: false, status: 401 };
+  await repo.clearLoginFailures(ip);
   return { ok: true, status: 204, cookie: sessionCookie(await createSession(env, now)) };
 }

@@ -227,15 +227,13 @@ export function createRepo(db) {
     },
 
     // ---------- login rate limit ----------
-    async loginFailures(ip, now, windowMs) {
-      const r = await db.first('SELECT fails, window_start FROM login_attempts WHERE ip = ?', [ip]);
-      if (!r || now - r.window_start > windowMs) return 0;
-      return r.fails;
-    },
+    /** Count one attempt for this IP (window resets after windowMs). Returns the count in the window. */
     async recordLoginFailure(ip, now, windowMs) {
-      await db.run(`INSERT INTO login_attempts (ip, fails, window_start) VALUES (?, 1, ?)
+      const r = await db.first(`INSERT INTO login_attempts (ip, fails, window_start) VALUES (?, 1, ?)
         ON CONFLICT(ip) DO UPDATE SET fails = CASE WHEN ? - window_start > ? THEN 1 ELSE fails + 1 END,
-          window_start = CASE WHEN ? - window_start > ? THEN excluded.window_start ELSE window_start END`, [ip, now, now, windowMs, now, windowMs]);
+          window_start = CASE WHEN ? - window_start > ? THEN excluded.window_start ELSE window_start END
+        RETURNING fails`, [ip, now, now, windowMs, now, windowMs]);
+      return r?.fails ?? 1;
     },
     async clearLoginFailures(ip) { await db.run('DELETE FROM login_attempts WHERE ip = ?', [ip]); },
   };
