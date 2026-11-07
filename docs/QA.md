@@ -145,3 +145,152 @@ Files changed outside QA ownership (SDE files): `src/core/logic.js`, `src/apify.
 - **Deck layout:** whether to shrink the deck on short phones so the action buttons are visible
   without scrolling (a design change to the approved prototype).
 - **Fonts:** keep Google Fonts, or self-host them so the app makes no third-party requests.
+
+---
+
+# Round 2: v2 (accounts, public browse, Reddit, AI, admin, hourly cron)
+
+Date: 2026-11-07. Reviewed: `main` from bb64282 (live in production) to fe93f7b (v2, not pushed).
+Fixes: d6457d1 to 52f3631.
+
+## Verdict: SHIP WITH NOTES
+
+Deploying v2 over production does not lock the founder out. The upgrade and a rollback are both
+safe. The privacy model holds after my fixes: an allowlist serializer on the server, and roles re-read
+on every request. I found and fixed two public leaks (phone formats and society names), one
+upgrade data-ownership bug, an extraction gap that hid call buttons, and a CPU-budget regression.
+The founder has one important decision to make: sign-ups are open by default (see below).
+
+## Lockout and upgrade safety (priority 1)
+
+| Check | Result |
+|---|---|
+| I built a 0001-only DB shaped like production (1 area "Green Glen", 4 groups in `settings.groups`, scheduler and Apify usage settings, one done and one running run, a login_attempts row), then applied 0002 and 0003 | Both apply cleanly. Re-applying is a no-op. Existing rows are kept |
+| `APP_PASSWORD` + `SESSION_SECRET` only. No `ADMIN_EMAILS` (or `--var` failed), no Google secrets | `/healthz` 200, public `/` 200, public areas OK, `/login` shows the password form. Password login gives **admin**, and `/api/admin/*` and `/api/settings` return 200. `/auth/google` goes to `/login?error=google_unconfigured` (no crash) |
+| `ADMIN_EMAILS` added later | Break-glass now signs in as that email, still admin. **Bug: his account had no areas or decisions (fixed, d6457d1).** |
+| Old production code (bb64282) on the migrated 0003 schema (rollback) | Login, area, import, list and patch all work. The migrations are add-only, as documented |
+| Deploy smoke test | `/healthz` 200, `/api/listings` 401 and wrong ingest secret 401 still match the real responses |
+| Failed `--var` / wrangler deploy | The deploy step fails before the smoke test, so no new version goes live. The migrations already applied are safe for the old code (see the rollback row) |
+
+The one-time takeover of global decisions is latched to the first admin who signs in. On the live
+upgrade that is the break-glass password used before `ADMIN_EMAILS` is set, i.e. the placeholder
+`break-glass@flat-hunt.invalid`. Fix: when the latch holder is the placeholder, the first real admin
+account receives a copy of its areas and decisions.
+
+## Privacy (priority 2)
+
+- **Phone fuzzing.** I fed nasty inputs through the public serializer and the public API:
+  - spaced dashes and slashes;
+  - `+91`/`0` prefixes;
+  - numbers split across lines;
+  - zero-width separators;
+  - Devanagari, Arabic-Indic, full-width and mathematical digits;
+  - numbers in group names, area names and notes;
+  - `wa.me`/`tel:`/Maps/Facebook links and emails.
+
+  **Leaked before the fix:** `98765 - 43210`, `98765 / 43210`, `98765_43210`, zero-width-separated
+  numbers and every non-ASCII digit form. The same gaps applied to the redaction before the external
+  AI call (Groq). Fixed in 23b6500.
+- **Area names.** Anyone signed in can create an area. Area names were listed unmasked on the
+  public page, so a name like "Call 98765 43210" would be public. They are now refused at creation
+  and masked in the public API (23b6500).
+- **Society names.** These were hidden only when written exactly as in the newest post. Capitals,
+  or a second merged post naming another building, leaked. Fixed in dd878fb, which also recognises
+  more building suffixes. **Limit:** a building name the regex doesn't recognise as one stays
+  visible, because hiding is detection-based.
+- **Not exposed.** Author names, Facebook post URLs, map links, emails, notes, stage and `phones`
+  are never in the public JSON. The DOM check across 54 screen renders found nothing private for
+  public or pending users.
+- **Roles.**
+  - Pending users get 403 on private APIs and the public view in the UI.
+  - Blocked users count as public.
+  - Role and status are re-read from D1 on every request. The session's role hint is ignored.
+
+## Google OAuth (priority 3)
+
+- **Protocol:** state, nonce and PKCE S256 are used. The flow cookie is `__Host-`, HttpOnly, Secure,
+  SameSite=Lax, 10 minutes, and is cleared after the callback.
+- **id_token verification:** the token is checked locally against Google's JWKS. Only RS256 is
+  accepted (**`none` and HS256 tokens are rejected, new test df6dd9c**). `iss`, `aud`, `azp`, `exp`
+  (with 120 s skew) and `nonce` are checked, and `email_verified` must be true.
+- **Return URLs:** `//evil`, `https://evil`, `/\evil`, a tab prefix and `/login?next=…` all collapse
+  to a same-site path.
+- **Logout:** needs POST plus the origin check.
+
+## Budget and limits (priority 4)
+
+- **D1 cap, worst hour:** new test 4b27e3e combines a scrape that is due, a 300-post sweep backlog,
+  a 100-post Reddit backlog, an AI queue, an area backfill and the daily purge. Every cron
+  invocation stays at or under 50 D1 statements. The webhook plus AI enrich in `waitUntil` is also
+  at or under 50. The `budgeted()` gates hold.
+- **CPU:** v2 fuzzy-matches **every** housing post, not only area matches. The SDE's own timing
+  shows a 25-post page at about 10 ms JS against 3,000 listings (12.8 ms cold). That is at the
+  Workers Free limit: a page that never fits would stall the resumable ingest forever. I lowered
+  the default page to **15 posts** (about 4.5 ms) in 4b27e3e.
+- **AI:**
+  - Every money field must appear in the redacted post text, or it is set to null.
+  - Dates must fall within -31 to +181 days of the post. Enum values and bounds are checked.
+  - Phones and maps always come from the regex, never from AI.
+  - Auto-merge happens only with the same phone, the same BHK and rent within 2 %. Anything else
+    becomes an admin suggestion.
+  - The daily cap is checked only at the start of a pass, so one pass can overshoot by up to about
+    30 posts. Minor.
+
+## UI (priority 5)
+
+My Playwright matrix covered 390×844, 375×667 and 1280×800, light and dark, for public, pending,
+user and admin, across browse, review, signin, shortlist, areas, account and all 6 admin pages.
+That is 108 screenshots, and I looked at a sample of them.
+
+| Check | Result |
+|---|---|
+| Horizontal scroll | None anywhere |
+| Console errors | None |
+| Deck buttons | Above the tab bar on both phone sizes |
+| Charts | Render with data |
+| Empty states | Present |
+| e2e (phone + desktop) | Passes |
+| Touch targets | Several v2 controls were under 44 px (area picker 35 px, "Sign in to call" 33 px, segmented chips, table selects 36 px, row checkboxes 20 px, the sign-in sheet's password link 17 px). Fixed for touch screens in 52f3631. Desktop is unchanged |
+
+**Extraction bug found through the UI.** A signed-in card read "No number in post" for "Call
+98765 - 43210". Extraction used a narrower pattern than the public mask, so the call and WhatsApp
+buttons were missing. Fixed in 52f3631: one matcher now serves both, and "rent 65000 - 70000" is
+treated as a range, not a phone.
+
+## Deploy config (priority 6)
+
+- **wrangler.jsonc:** the `ai` binding `AI` and the hourly `0 * * * *` cron match the code.
+- **deploy.yml:** optional secrets are uploaded only when set, and optional vars are passed with
+  `--var` only when set. The env names match what the code reads.
+- **ai-eval.yml:** valid, and `npm run ai-eval` exists.
+- **YAML:** all workflows parse.
+- **`test-results/`:** it is not tracked in git (`git ls-files test-results` is empty) and is already
+  in `.gitignore`. The PNGs there were local leftovers from a failed e2e run; I deleted them.
+
+## Open risks (round 2), most severe first
+
+1. **High (founder decision): sign-ups are open by default.** Any Google account becomes an active
+   user and sees every third party's phone number. "Require approval" is off until an admin turns
+   it on. I recommend turning it on right after the first admin login, or defaulting it to on.
+2. **Medium: the public rate limiter writes one D1 row per public API request.** A single IP
+   staying under 60 a minute can make about 86k writes a day, close to D1 Free's 100k rows-written
+   cap. That would stop ingest for the day. Consider the Workers Rate Limiting binding or an
+   in-isolate pre-check.
+3. **Medium (carried over): the real Apify dataset shape is still unverified.** The fixture test is
+   still skipped. Also, CPU on real Workers is not measured; if logs show CPU-limit errors, set
+   `INGEST_PAGE_SIZE=10`.
+4. **Low: secrets removed from GitHub are not removed from the Worker.** `--secrets-file` adds and
+   updates secrets. DEPLOY.md says removing `APP_PASSWORD` switches break-glass off; in practice you
+   also need `wrangler secret delete APP_PASSWORD`. Unverified here (no network).
+5. **Low:** society hiding is detection-based; the AI daily cap can overshoot by one pass; and
+   `ADMIN_EMAILS` unset under Cloudflare Access makes every Access user admin (documented).
+
+## Before and after deploy (founder)
+
+- **Before:** nothing is required. To get Google sign-in, set the `GOOGLE_CLIENT_ID` and
+  `GOOGLE_CLIENT_SECRET` secrets and the `ADMIN_EMAILS` variable (your Gmail) first.
+- **After:**
+  1. Log in once with Google using the `ADMIN_EMAILS` address, or with the password, and check that
+     "Green Glen" is under My areas.
+  2. Decide on "Require approval for new users" (Admin → Users).
+  3. After the first scrape, save the dataset export to `test/fixtures/apify-sample.json`.
