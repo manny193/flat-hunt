@@ -327,7 +327,20 @@ export function createRepo(db) {
      */
     async adoptLegacyState(userId, now) {
       const latch = await db.run(`INSERT INTO settings (key, value) VALUES ('legacyStateOwner', ?) ON CONFLICT(key) DO NOTHING`, [JSON.stringify({ userId, at: now })]);
-      if (!latch.changes) return false;
+      if (!latch.changes) {
+        // The break-glass password used before ADMIN_EMAILS was set signs in as a placeholder account
+        // (break-glass@flat-hunt.invalid). If that placeholder took the legacy state, hand a copy of it
+        // to the first real admin account, so the founder's areas and decisions follow him (QA).
+        const owner = await db.first(`SELECT u.id, u.email FROM settings s JOIN users u ON u.id = json_extract(s.value, '$.userId') WHERE s.key = 'legacyStateOwner'`);
+        if (!owner || owner.id === userId || !/@flat-hunt\.invalid$/i.test(owner.email)) return false;
+        await db.batch([
+          { sql: `INSERT OR IGNORE INTO user_listing (user_id, listing_id, status, stage, notes, has_update, decided_at, updated_at)
+                  SELECT ?, listing_id, status, stage, notes, has_update, decided_at, ? FROM user_listing WHERE user_id = ?`, params: [userId, now, owner.id] },
+          { sql: 'INSERT OR IGNORE INTO user_areas (user_id, area_id, created_at) SELECT ?, area_id, created_at FROM user_areas WHERE user_id = ?', params: [userId, owner.id] },
+          { sql: `UPDATE settings SET value = ? WHERE key = 'legacyStateOwner'`, params: [JSON.stringify({ userId, at: now, from: owner.id })] },
+        ]);
+        return true;
+      }
       await db.batch([
         { sql: `INSERT OR IGNORE INTO user_listing (user_id, listing_id, status, stage, notes, has_update, decided_at, updated_at)
                 SELECT ?, id, status, stage, notes, has_update, decided_at, ? FROM listings WHERE status != 'new' OR stage != '' OR notes != ''`, params: [userId, now] },

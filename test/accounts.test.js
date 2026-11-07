@@ -295,3 +295,28 @@ test('migration 0002 keeps existing areas, settings and listings', async () => {
   assert.equal(l.status, 'approved'); assert.equal(l.aiStatus, '');
   for (const m of all) { const sql = m.sql.replace(/--[^\n]*/g, ''); assert.doesNotMatch(sql, /\bBEGIN\b|\bCOMMIT\b/i, m.name); assert.doesNotMatch(sql, /fts5|VIRTUAL TABLE/i, m.name); assert.doesNotMatch(sql, /\bDROP\b|RENAME/i, m.name + ' is add-only'); }
 });
+
+// QA round 2: production upgrade path. The founder logs in with the password before ADMIN_EMAILS is
+// set (placeholder account takes the legacy state), then sets ADMIN_EMAILS: his real account must
+// get the areas and decisions, not an empty deck.
+test('legacy state taken by the break-glass placeholder moves to the first real admin (QA)', async () => {
+  const PW = 'correct horse battery staple';
+  const first = await harness({ APP_PASSWORD: PW, ADMIN_EMAILS: '', GOOGLE_CLIENT_ID: '' });
+  const area = await first.repo.createArea(GREEN_GLEN, Date.now());
+  const { ingestItems } = await import('../src/ingest.js');
+  await ingestItems(first.repo, [{ text: '2BHK available in Green Glen Layout, rent 30000', url: 'https://www.facebook.com/groups/1/posts/9/' }], { source: 'manual' });
+  const [l] = await first.repo.listListings();
+  await first.repo.updateListingFields(l.id, { status: 'approved', stage: 'Visited', notes: 'nice', decidedAt: 1, hasUpdate: false }, Date.now());
+  const c1 = cookies(await first.call('POST', '/api/login', { body: { password: PW } }))[0];
+  assert.equal((await first.jcall('GET', '/api/me', { headers: { cookie: c1 } })).data.user.email, 'break-glass@flat-hunt.invalid');
+  // Same database, ADMIN_EMAILS now set.
+  const app = createApp({ repo: () => first.repo, assets: async () => null });
+  const env = { ...ENV, APP_PASSWORD: PW, ADMIN_EMAILS: 'founder@example.com', GOOGLE_CLIENT_ID: '' };
+  const call = (m, p, body, headers = {}) => app.fetch(new Request(BASE + p, { method: m, headers: { 'content-type': 'application/json', ...headers }, body: body && JSON.stringify(body) }), env, {});
+  const c2 = cookies(await call('POST', '/api/login', { password: PW }))[0];
+  const me = await (await call('GET', '/api/me', undefined, { cookie: c2 })).json();
+  assert.equal(me.user.email, 'founder@example.com');
+  assert.deepEqual((await (await call('GET', '/api/areas', undefined, { cookie: c2 })).json()).areas.map(a => a.id), [area.id]);
+  const mine = (await (await call('GET', '/api/listings?status=approved', undefined, { cookie: c2 })).json()).listings;
+  assert.equal(mine.length, 1); assert.equal(mine[0].notes, 'nice');
+});
