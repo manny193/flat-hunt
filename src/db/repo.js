@@ -358,6 +358,27 @@ export function createRepo(db) {
       const stmts = Object.entries(obj).map(([k, v]) => ({ sql: 'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', params: [k, JSON.stringify(v)] }));
       await db.batch(stmts);
     },
+    /**
+     * Merge a JSON object into one settings key (RFC 7396 json_patch: nested objects merge, null deletes a key,
+     * arrays are replaced). One statement; unlike putSettings it cannot clobber fields another invocation
+     * patched meanwhile (the group planner and the ingest both write groupState).
+     */
+    async patchSettings(key, patch) {
+      await db.run(`INSERT INTO settings (key, value) VALUES (?, json_patch('{}', ?)) ON CONFLICT(key) DO UPDATE SET value = json_patch(CASE WHEN json_valid(settings.value) THEN settings.value ELSE '{}' END, excluded.value)`, [key, JSON.stringify(patch)]);
+    },
+    /**
+     * After a planned cohort ingests: groupState[g].lastRead = max(stored, t) for each group (never backwards when
+     * an older cohort finishes late). r=true (run cut short by its limits): keep lastRead and set recoverNext so
+     * the next slot re-reads the window once. One statement, whatever the number of groups.
+     */
+    async markGroupsRead(items) {
+      if (!items.length) return;
+      const path = "'$.' || json_extract(j.value, '$.g') || '.lastRead'";
+      await db.run(`UPDATE settings SET value = json_patch(value, (SELECT json_group_object(json_extract(j.value, '$.g'), json_object(
+          'lastRead', CASE WHEN json_extract(j.value, '$.r') = 1 THEN json_extract(settings.value, ${path}) ELSE max(coalesce(json_extract(settings.value, ${path}), 0), json_extract(j.value, '$.t')) END,
+          'recoverNext', CASE WHEN json_extract(j.value, '$.r') = 1 THEN json('true') END)) FROM json_each(?) j))
+        WHERE key = 'groupState' AND json_valid(value)`, [JSON.stringify(items.filter(x => /^g[0-9a-z]{1,16}$/.test(x.g)).map(x => ({ g: x.g, t: x.t, r: x.r ? 1 : 0 })))]);
+    },
 
     /** Database size in bytes (one statement), or null where the platform does not allow page-count pragmas. */
     async dbSizeBytes() {
@@ -371,6 +392,18 @@ export function createRepo(db) {
         : await db.all('SELECT * FROM runs ORDER BY at DESC, id DESC LIMIT ?', [limit]);
       return rows.map(rowToRun);
     },
+    /** Per-group report fields of ingested Apify runs since t, for the group planner (only the JSON it needs). */
+    async groupRuns(t, limit = 1000) {
+      const rows = await db.all(`SELECT started_at, cost_usd, actor, json_extract(report, '$.fetchedByGroup') AS f, json_extract(report, '$.newByGroup') AS n,
+          json_extract(report, '$.crossFrom') AS x, json_extract(report, '$.unscrapable') AS u, json_extract(report, '$.caps') AS c
+        FROM runs WHERE source = 'apify' AND status = 'done' AND started_at >= ? ORDER BY started_at LIMIT ?`, [t, limit]);
+      return rows.map(r => ({ startedAt: r.started_at, costUsd: r.cost_usd ?? null, actor: r.actor ?? null, report: { fetchedByGroup: J(r.f) || {}, newByGroup: J(r.n) || {}, crossFrom: J(r.x) || {}, unscrapable: J(r.u) || [], caps: J(r.c) || null } }));
+    },
+    /** What Apify runs started since t cost: the measured cost when known, else the run's charge cap plus a run fee. */
+    async apifySpentSince(t) {
+      const r = await db.first(`SELECT coalesce(sum(coalesce(cost_usd, json_extract(report, '$.caps.maxCharge') + 0.0005, json_extract(report, '$.total') * 0.0012, 0)), 0) AS usd FROM runs WHERE source = 'apify' AND started_at >= ? AND status != 'failed'`, [t]);
+      return Number(r?.usd) || 0;
+    },
     async runsSince(t, limit = 1000) { return (await db.all('SELECT * FROM runs WHERE at >= ? ORDER BY at LIMIT ?', [t, limit])).map(rowToRun); },
     async recordStartedRun({ runId, datasetId, startedAt, actor = null, caps = null }) {
       await db.run(`INSERT OR IGNORE INTO runs (source, dataset_id, run_id, status, started_at, at, report, actor) VALUES ('apify', ?, ?, 'running', ?, ?, ?, ?)`, [datasetId, runId, startedAt, startedAt, JSON.stringify(caps ? { caps } : {}), actor]);
@@ -382,9 +415,10 @@ export function createRepo(db) {
       await db.run('UPDATE runs SET status = ?, at = ?, finished_at = ?, report = ? WHERE dataset_id = ?', [status, now, Date.now(), JSON.stringify(report || {}), datasetId]);
     },
     /** After ingest: store cost (column + report.cost breakdown) and whether the run hit its limits (report.truncated). */
-    async annotateRun(datasetId, { costUsd = null, cost = null, truncated = null }) {
-      await db.run(`UPDATE runs SET cost_usd = coalesce(?, cost_usd), report = json_set(json_set(coalesce(report, '{}'), '$.cost', json(?)), '$.truncated', json(?)) WHERE dataset_id = ?`,
-        [costUsd, JSON.stringify(cost), JSON.stringify(truncated), datasetId]);
+    async annotateRun(datasetId, { costUsd = null, cost = null, truncated = null, caps = null }) {
+      // caps (the limits the run started with, incl. the planner's groupIds and cutoff) stay in the final report.
+      await db.run(`UPDATE runs SET cost_usd = coalesce(?, cost_usd), report = json_set(json_set(json_set(coalesce(report, '{}'), '$.cost', json(?)), '$.truncated', json(?)), '$.caps', json(?)) WHERE dataset_id = ?`,
+        [costUsd, JSON.stringify(cost), JSON.stringify(truncated), JSON.stringify(caps), datasetId]);
     },
     /** Latest successfully ingested Apify run: when it started and whether it was cut short. */
     async lastGoodRun() {
