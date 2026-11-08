@@ -567,14 +567,15 @@ details.how summary{cursor:pointer;font-weight:700;font-size:var(--fs-14);color:
 
 /* Browse card actions (signed in): Reject, Like, Details, Post */
 .lcard.acts{cursor:pointer}
-.lacts{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);margin-top:auto}
-.lacts .ca{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:52px;padding:6px 4px;background:none;border:0;color:var(--muted);font:inherit;font-size:12px;font-weight:600;cursor:pointer;text-decoration:none}
-.lacts .ca + .ca{border-left:1px solid var(--line)}
-.lacts .ca svg{width:22px;height:22px}
-.lacts .ca:hover{background:var(--bg)}
-.lacts .ca.rej{color:var(--tolet-text)}
-.lacts .ca.like{color:var(--keep)}
-.lacts .ca.like.on svg{fill:currentColor}
-.lacts .ca.off{cursor:default}
+.lacts{display:grid;grid-template-columns:1fr 1.25fr 1fr 1fr;gap:8px;padding:12px var(--s4,16px) var(--s4,16px);margin-top:auto}
+.lacts .ca{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:56px;padding:8px 4px;border:0;border-radius:16px;background:var(--sunk);color:var(--ink);font:inherit;font-size:12px;font-weight:700;letter-spacing:.01em;cursor:pointer;text-decoration:none;transition:transform var(--d1) var(--ease),box-shadow var(--d2) var(--ease),background var(--d2) var(--ease)}
+.lacts .ca svg{width:22px;height:22px;stroke-width:2.4}
+.lacts .ca:hover{transform:translateY(-1px);box-shadow:var(--e2)}
+.lacts .ca:active{transform:scale(.94)}
+.lacts .ca:focus-visible{outline:2px solid var(--keep);outline-offset:2px}
+.lacts .ca.rej{background:var(--tolet-soft);color:var(--tolet-text)}
+.lacts .ca.like{background:var(--keep);color:var(--on-keep);box-shadow:0 8px 18px -10px var(--keep)}
+.lacts .ca.like svg{fill:currentColor}
+.lacts .ca.off{visibility:hidden}
 .lcard.leaving{opacity:0;transform:scale(.96);transition:opacity var(--d2) var(--ease),transform var(--d2) var(--ease)}
 .btn.rej{color:var(--tolet-text);border-color:var(--tolet-text)}
