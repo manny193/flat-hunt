@@ -232,10 +232,9 @@ const latestUrlPost = l => (l.posts || []).find(q => origUrl(q.url)) || (l.posts
 
 /** Card actions for signed-in users on Browse: Reject, Like (shortlist), Details, Original post. */
 function cardActs(l) {
-  const st = state.listings.get(l.id)?.status || l.status || 'new'; const liked = st === 'approved';
   const u = origUrl(latestUrlPost(l)?.url);
   return `<div class="lacts"><button class="ca rej" type="button" data-card="reject" aria-label="Reject">${I.x}<span>Reject</span></button>
-    <button class="ca like${liked ? ' on' : ''}" type="button" data-card="like" aria-pressed="${liked}" aria-label="${liked ? 'Liked. Tap to remove from shortlist' : 'Like: add to shortlist'}">${I.heart}<span>${liked ? 'Liked' : 'Like'}</span></button>
+    <button class="ca like" type="button" data-card="like" aria-label="Like: add to shortlist">${I.heart}<span>Like</span></button>
     <button class="ca" type="button" data-card="details" aria-label="Details">${I.cards}<span>Details</span></button>
     ${u ? `<a class="ca" href="${esc(u)}" target="_blank" rel="noopener noreferrer" aria-label="Original post">${LINK_ICON}<span>Post</span></a>` : '<span class="ca off" aria-hidden="true"></span>'}</div>`;
 }
@@ -299,7 +298,8 @@ async function renderBrowse() {
   drawGrid();
 }
 function drawGrid() {
-  const L = signedIn() ? filtered().filter(l => state.listings.get(l.id)?.status !== 'rejected') : filtered();
+  // Signed in: Browse shows only listings not yet liked or rejected (those live on Shortlist / Passed).
+  const L = signedIn() ? filtered().filter(l => !['approved', 'rejected'].includes(state.listings.get(l.id)?.status)) : filtered();
   const groups = new Set(L.flatMap(l => l.groups || []));
   $('#bline').innerHTML = `<b>${L.length}${state.browse.next ? '+' : ''} listing${L.length === 1 ? '' : 's'}</b> from ${groups.size} group${groups.size === 1 ? '' : 's'}, newest first. Reposts are merged into one card.${state.lastIngestMin != null ? ` Checked ${ago(Date.now() - state.lastIngestMin * 60e3)}.` : ''}`;
   const cells = L.map(l => cardHtml(l, { actions: signedIn() }));
@@ -332,13 +332,9 @@ function cardAction(card, act) {
   const id = card?.dataset.id; if (!id) return;
   if (act === 'details') { location.hash = '#listing-' + id; return; }
   if (!state.listings.has(id)) { const b = state.browse.items.find(x => x.id === id); if (b) state.listings.set(id, { ...b, status: 'new' }); }
-  const liked = state.listings.get(id)?.status === 'approved';
-  const status = act === 'reject' ? 'rejected' : liked ? 'new' : 'approved';
-  decide(id, status, { quiet: true });
-  if (status === 'rejected') {
-    const drop = () => { card.hidden = true; card.classList.remove('lcard'); drawCount(); };
-    if (reduceMotion()) drop(); else { card.classList.add('leaving'); setTimeout(drop, 200); }
-  } else card.querySelector('.lacts').outerHTML = cardActs(state.listings.get(id));
+  decide(id, act === 'reject' ? 'rejected' : 'approved', { quiet: true });
+  const drop = () => { card.hidden = true; card.classList.remove('lcard'); drawCount(); };
+  if (reduceMotion()) drop(); else { card.classList.add('leaving'); setTimeout(drop, 200); }
   renderChrome();
 }
 function drawCount() { const n = $$('#grid .lcard').length; const b = $('#bline b'); if (b) b.textContent = `${n}${state.browse.next ? '+' : ''} listing${n === 1 ? '' : 's'}`; }
@@ -364,7 +360,7 @@ async function openListing(id) {
     : `<div class="contact">${p ? `<span class="num">+91 ${esc(phoneFmt(p))}</span><div class="row"><a class="btn sm" href="tel:+91${esc(p)}">${I.phone}Call</a><a class="btn sm keep" href="https://wa.me/91${esc(p)}?text=${encodeURIComponent('Hi, is the flat from your post still available?')}" target="_blank" rel="noopener">${I.wa}WhatsApp</a><button class="btn sm quiet" type="button" data-copy="${esc(p)}">${I.copy}Copy</button></div>` : '<span class="small">No phone number in the post.</span>'}
         ${(l.mapLinks || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${I.pin} Map pin</a>`).join('')}</div>`;
   const imgs = imagesOf(l);
-  const userBtns = signedIn() ? `<div class="field-row section-gap">${l.status !== 'approved' ? `<button class="btn keep" type="button" data-decide="approved">${I.heart}Like</button>` : ''}${l.status !== 'rejected' ? `<button class="btn rej" type="button" data-decide="rejected">${I.x}Reject</button>` : ''}${l.status && l.status !== 'new' ? `<button class="btn quiet" type="button" data-decide="new">${l.status === 'approved' ? 'Remove from shortlist' : 'Undo reject'}</button>` : ''}</div>` : '';
+  const userBtns = signedIn() ? `<div class="field-row section-gap">${l.status !== 'approved' ? `<button class="btn keep" type="button" data-decide="approved">${I.heart}Like</button>` : ''}${l.status !== 'rejected' ? `<button class="btn rej" type="button" data-decide="rejected">${I.x}Reject</button>` : ''}${l.status && l.status !== 'new' ? `<button class="btn quiet" type="button" data-decide="new">${l.status === 'approved' ? 'Remove from shortlist' : 'Restore to Browse'}</button>` : ''}</div>` : '';
   s.innerHTML = `<div class="handle"></div><div class="shead"><h2>${esc(typeName(l))}</h2><button class="btn quiet sm" type="button" data-close>Close</button></div>
     ${boardHtml(l)}${chipsHtml(l)}<dl class="facts">${facts.map(([a, b]) => `<div><dt>${a}</dt><dd>${esc(b)}</dd></div>`).join('')}</dl>
     ${contact}${userBtns}
@@ -403,8 +399,7 @@ async function decide(id, status, { quiet = false } = {}) {
   if (!quiet) render();
   const body = status === 'new' ? { status, stage: '', decidedAt: null } : { status };
   patch(id, body);
-  if (status !== 'new') toast(status === 'approved' ? 'Added to your shortlist' : 'Rejected. You can find it under Passed.', { undo });
-  else if (quiet) toast('Removed from your shortlist');
+  if (status !== 'new') toast(status === 'approved' ? 'Liked. It is on your Shortlist.' : 'Rejected. It is under Passed.', { undo });
 }
 function patch(id, body) {
   const chain = (writeChains.get(id) || Promise.resolve()).catch(() => {}).then(async () => { const r = await api('PATCH', `/api/listings/${encodeURIComponent(id)}`, body); state.listings.set(id, r); return r; });
@@ -431,7 +426,7 @@ function rowHtml(l, passed = false) {
   return `<div class="srow" data-id="${esc(l.id)}"><button class="mini" type="button" data-open="${esc(l.id)}"><b>${l.rent ? k(l.rent) : '–'}</b><span>${esc(typeName(l))}</span></button>
     <div class="body"><span class="t">${esc((l.areas || []).map(areaName).filter(Boolean)[0] || '')}${l.society ? ' · ' + esc(l.society) : ''} ${l.hasUpdate ? '<span class="upd">Updated</span>' : ''}</span>
     <span class="small">${esc((l.posts?.[0]?.text || '').slice(0, 120))}</span>
-    <div class="acts">${origBtn(latestUrlPost(l))}${passed ? `<button class="btn sm" type="button" data-restore>${I.undo}Restore</button>` : `
+    <div class="acts"><button class="btn sm" type="button" data-open="${esc(l.id)}">${I.cards}Details</button>${origBtn(latestUrlPost(l))}${passed ? `<button class="btn sm" type="button" data-restore>${I.undo}Restore</button><button class="btn sm keep" type="button" data-like>${I.heart}Like</button>` : `
       ${p ? `<a class="btn sm" href="tel:+91${esc(p)}" aria-label="Call">${I.phone}</a><a class="btn sm keep" href="https://wa.me/91${esc(p)}" target="_blank" rel="noopener" aria-label="WhatsApp">${I.wa}</a>` : ''}
       <select class="stage-pill" data-stage aria-label="Stage">${STAGES.map(s => `<option${s === l.stage ? ' selected' : ''}>${esc(s)}</option>`).join('')}</select>
       ${STAGES.indexOf(l.stage) < STAGES.length - 1 ? `<button class="btn sm" type="button" data-next>Next: ${esc(STAGES[STAGES.indexOf(l.stage) + 1] || STAGES[0])}</button>` : ''}
@@ -449,7 +444,7 @@ function renderShortlist() {
 }
 function renderPassed() {
   const L = mine().filter(l => l.status === 'rejected').sort((a, b) => (b.decidedAt || 0) - (a.decidedAt || 0));
-  $('#main').innerHTML = `<div class="wrap"><div class="screen-h"><h1>Passed</h1><span class="sub">${L.length}</span></div>${L.length ? `<div class="rows">${L.map(l => rowHtml(l, true)).join('')}</div>` : '<div class="empty"><div class="eboard"></div><p>Listings you pass on show up here, in case you change your mind.</p></div>'}</div>`;
+  $('#main').innerHTML = `<div class="wrap"><div class="screen-h"><h1>Passed</h1><span class="sub">${L.length}</span></div>${L.length ? `<div class="rows">${L.map(l => rowHtml(l, true)).join('')}</div>` : '<div class="empty"><div class="eboard"></div><p>Listings you reject show up here, in case you change your mind.</p></div>'}</div>`;
   rowsEvents();
 }
 function rowsEvents() {
@@ -458,6 +453,7 @@ function rowsEvents() {
     const o = e.target.closest('[data-open]'); if (o) { location.hash = '#listing-' + o.dataset.open; return; }
     const row = e.target.closest('.srow'); if (!row) return; const id = row.dataset.id; const l = state.listings.get(id);
     if (e.target.closest('[data-restore]')) decide(id, 'new');
+    if (e.target.closest('[data-like]')) decide(id, 'approved');
     if (e.target.closest('[data-menu]')) decide(id, 'rejected');
     if (e.target.closest('[data-next]')) { const nx = STAGES[STAGES.indexOf(l.stage) + 1] || STAGES[0]; l.stage = nx; l.hasUpdate = false; patch(id, { stage: nx, hasUpdate: false }); render(); }
   };

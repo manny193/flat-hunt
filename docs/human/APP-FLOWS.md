@@ -37,7 +37,8 @@ What people do in Flat Hunt, step by step. Written for non-technical readers. La
 The separate Review (swipe) screen was removed in Nov 2026: filtering happens on the homepage, so the actions live there too.
 
 1. Signed in, every listing card on **Browse** has four buttons: **Reject** (red cross), **Like** (green heart), **Details** and **Post**.
-2. **Like** adds the flat to your Shortlist (tap again to remove it). **Reject** hides the card from Browse and moves it to **Passed**.
+2. **Like** moves the flat to your **Shortlist**, **Reject** moves it to **Passed**. Either way it leaves Browse, so Browse only shows posts you haven't decided on yet.
+   On Shortlist and Passed, every row has a **Details** button that opens the same full details as on Browse. Passed rows also have **Restore** (back to Browse) and **Like**.
 3. Undo appears for a few seconds if you change your mind. Old `#review` links open Browse.
 4. If a shortlisted flat is posted again with new details, it is flagged as updated.
 5. **Post** opens the Facebook or Reddit post in a new tab (also on each post in the full details). Visitors who are not signed in see no buttons on the cards and "Sign in to view the original post" in the details.
