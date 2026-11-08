@@ -18,6 +18,8 @@ const { chromium } = createRequire(import.meta.url)('playwright');
 const PASSWORD = 'e2e-password-0123456789';
 const ARTIFACTS = 'test-results/e2e';
 const SAMPLES = JSON.parse(readFileSync(new URL('../web/samples.json', import.meta.url), 'utf8'));
+// Listing ids are random hex ('l_' + 16 chars); about 1 in 150 holds 10 digits in a row that look like a mobile number.
+const noIds = html => html.replace(/\bl_[0-9a-f]{16}\b/g, 'l_id');
 const MOBILE = /(?<!\d)(?:91|0)?[6-9]\d{9}(?!\d)|(?<!\d)[6-9]\d{4}[\s-]\d{5}(?!\d)/;
 
 const VIEWPORTS = [
@@ -65,7 +67,7 @@ async function runViewport(browser, vp) {
       assert(await page.locator('#grid .lcard').count() >= 4, 'cards shown');
       assert(await page.locator('#grid .masked').count() >= 1, 'phone shown as the "number hidden" pill');
       assert(await page.locator('#grid .cta-card').count() === 1, 'sign-in card in the grid');
-      const html = await page.content();
+      const html = noIds(await page.content());
       assert(!MOBILE.test(html) && !MOBILE.test(html.replace(/[\s.\-()+]/g, '')), 'no mobile number anywhere in the page');
       assert(!/wa\.me|maps\.app\.goo\.gl|tel:/.test(html), 'no contact links');
     });
@@ -73,7 +75,7 @@ async function runViewport(browser, vp) {
     await step('public: details are locked; Review asks to sign in', async () => {
       await page.locator('#grid .lcard').first().click();
       await page.waitForSelector('.sheet .lock');
-      assert(!MOBILE.test(await page.content()), 'detail sheet has no phone digits');
+      assert(!MOBILE.test(noIds(await page.content())), 'detail sheet has no phone digits');
       await page.keyboard.press('Escape');
       await page.goto('/#review');
       await page.waitForSelector('.sheet .signin-title');
