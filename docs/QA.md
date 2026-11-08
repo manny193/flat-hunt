@@ -294,3 +294,89 @@ treated as a range, not a phone.
      "Green Glen" is under My areas.
   2. Decide on "Require approval for new users" (Admin → Users).
   3. After the first scrape, save the dataset export to `test/fixtures/apify-sample.json`.
+
+---
+
+# Round 3: group rotation (`feat/group-rotation`, issue #28)
+
+Date: 2026-11-08. Branch head 69d6a55. Tested only in the worktree: no push, no APIFY_TOKEN, no production.
+
+## Verdict: SIGN-OFF WITH NOTES (one fix required before the push)
+
+`npm test`: 133 tests, 132 pass, 1 skipped (the known real-fixture skip), 0 fail. Plan off leaves the
+actor request byte-for-byte unchanged (tested). The cron with 3 cohorts plus a 3-page sweep, and the
+allocator tick, are tested at 48 D1 statements or fewer.
+
+## Do the tests cover the rules?
+
+| Rule | Covered? |
+|---|---|
+| minActive, money short (best 6 sampled, not paused) | Yes (`minActive:` test) |
+| minActive after a rotation pause when the pool is empty | **No, and the code does not hold it (issue 1)** |
+| Rotation (low yield, echo, hysteresis, trial verdicts) | Yes |
+| Retry after cool-off | Yes, one group. The re-pause edge in issue 3 is untested |
+| Manual pause, promote and resume survive the allocator | Yes (unit and API) |
+| 3 unscrapable runs pause a group; 2 do not | Yes |
+| Daily allowance never exceeded | Yes for allowance and plan arithmetic; cohort caps are scaled to `tickUsd` |
+| Plan-off body unchanged | Yes |
+| D1 statements at most 48 | Yes |
+| lastRead only after full ingest, failed cohort keeps cutoff, cut-short cohort re-read once | Yes |
+
+## Issues, most severe first
+
+1. **MEDIUM, must fix: minActive is not guaranteed.** `src/groupplan.js:249-251` (and 243-247) pause for
+   low yield or echo with no check on how many groups stay read; the pool (`:259`) holds only queued
+   groups and groups past `retryDays`. I ran 7 watched groups, 3 good and 4 at 5 % yield, all active for
+   30 days: the allocator leaves **3 read** (founder rule: at least 6). Fix: when reading < minActive and
+   the pool is empty, bring back the best-ranked paused (non-manual, non-unscrapable) groups early, as
+   trial or sample, and add a test. The UI already shows "Below the minimum" so it is visible, not silent.
+2. **LOW, deviation 3 (money short, even sharing): acceptable, with a note.** `src/groupplan.js:288-294`.
+   Only the best `minActive` by yield share the money, so a lower-ranked group is never read while a better
+   one is paused. But inside that set, a cheap group is read in full while pricier better ones are sampled.
+   Example run: 5 groups at 6 rows/h (yields 80 to 40 %) sampled at 27 %, the 30 % group at 0.5 rows/h read at 100 %.
+   Spend stays within the allowance, so this is not a spend bug. If wanted later, weight shares by yield.
+3. **LOW: re-pause after retry.** `src/groupplan.js:158-160,239`. `fails` is recomputed from run history
+   in the window (7 days or the cycle). If the three failing runs are still in that window when the
+   30-day retry starts (31-day cycle), the group is paused again the next day without being read. Rare. Fix:
+   count failures only from runs after `since`/`at` of the current status.
+4. **LOW: crash window.** `src/apify.js:~268`. `markGroupsRead` runs after the run is marked done. If the
+   invocation dies between the two, the run is never re-ingested and lastRead stays old: the next read
+   re-fetches the window (extra cost, no loss). The safe direction.
+5. **LOW: allowance exhausted.** `src/apify.js:~337`. A skipped slot does not set `lastStartedAt`, so every
+   cron tick until the next slot calls Apify usage and writes `apifyUsage` (1 subrequest, 1 write a tick).
+   Within limits; same pattern as the existing budget stop.
+6. **INFO:** a manual promote with no money is read at the 1-hour sample, outside the ranking. Capped
+   by the tick allowance. Matches "manual is never overridden".
+
+## Reviewed, no fault found
+
+- Spend: `dailyAllowance` caps at min(budget, Apify limit) x 0.95, subtracts today's runs (cost, or rows
+  x price, or the charge cap of a running run), cohorts are scaled down to the tick. Hard stop is the per-run `maxTotalChargeUsd`.
+- Cutoffs: active groups resume from lastRead minus overlap, no gap; only sample and trial groups skip
+  posts, by design. A start failure or failed ingest moves nothing.
+- Settings: `patchSettings` (json_patch) and `markGroupsRead` cannot clobber each other. Planner patch
+  omits lastRead and recoverNext. The planner's `history` array can lose a manual click made in the same
+  tick (milliseconds; ignored).
+- Privacy and access: `/api/admin/group-plan` is behind the admin gate in `src/app.js:109`; output has group
+  names, group URLs and counts only, no phone, email, author or post URL. Group id is validated
+  (`/^g[0-9a-z]{1,16}$/`), body validated with ranges and types, 400 on bad input.
+- crossFrom in `src/ingest.js`: counts only, no extra query, merged across pages by `mergeReports`.
+
+## UI (dev server on port 8799, scratch DB, no APIFY_TOKEN, stopped afterwards)
+
+Seeded 8 groups, turned the plan on. Desktop and 375 px: page renders, 4 KPIs, plan form, table and log. No
+horizontal scroll at 375 px (scrollWidth 375); cards stack with labels; Pause, Promote and Resume buttons are
+44 px high. Pause set "Paused manual", Resume started a trial (6 d 23 h left), Save plan toasted "Plan saved
+and groups placed". No console errors, no CSP violations. The only `style` attribute is the meter width set
+from JS (CSSOM, allowed by the CSP, same as the other pages).
+
+## Before the push
+
+Must fix: issue 1 (with a test), then re-run `npm test`. Issues 2 to 6 can follow as tickets.
+
+### Fixed (engineer, 8 Nov 2026, commit 8722581)
+
+- Issue 1: when the pool cannot refill to minActive, the best groups paused for low yield or echo are kept early (never manual or unscrapable). Test: 7 groups (3 good, 4 at 5 %) keep 6 read.
+- Issue 2: money-short sharing is now weighted by yield, so a better group is never read less than a weaker cheap one; allowance cap unchanged. Test added.
+- Issue 3: unscrapable failures count only since the group's last status change. Test added.
+- Issues 4 and 5: left as is (accepted). `npm test`: 136 tests, 135 pass, 1 skipped.

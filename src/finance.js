@@ -25,6 +25,8 @@ export const FINANCE = {
   runsShown: 20,
   // Q1 (spec §10): the budget does NOT drive the Apify warn/stop guard yet. The guard stays relative to
   // the Apify credit (startRun in src/apify.js) until the numbers have been checked against one bill.
+  // Exception: with groupPlan on, the daily allowance (src/groupplan.js dailyAllowance) paces runs from
+  // min(budget, Apify limit) x 95 % and replaces the warn/stop guard. The forecast below still shows the guard.
 };
 
 /** PUT body check: a number of dollars from $0.50 to $500, rounded to cents. */

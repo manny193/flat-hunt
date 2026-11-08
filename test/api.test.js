@@ -119,3 +119,47 @@ test('health reports minutes since the last Apify ingest, no listing data', asyn
   const h = (await call('GET', '/healthz')).data;
   assert.equal(h.ok, true); assert.equal(h.lastIngestAgeMin, 30);
 });
+
+test('group plan API: validation, turning it on places every group, manual pause survives the allocator', async () => {
+  const { call, repo } = await harness();
+  const g = n => ({ name: 'Group ' + n, url: `https://www.facebook.com/groups/90${n}`, active: true });
+  assert.equal((await call('PUT', '/api/admin/groups', { groups: [1, 2, 3, 4, 5, 6, 7, 8].map(g) })).status, 200);
+  const v0 = (await call('GET', '/api/admin/group-plan')).data;
+  assert.equal(v0.plan.enabled, false); assert.equal(v0.plan.minActive, 6); assert.equal(v0.groups.length, 8);
+  assert.ok(v0.groups.every(x => x.status === null), 'off: nothing decided');
+  for (const bad of [{ minActive: 0 }, { minActive: 31 }, { minActive: 6.5 }, { minActive: '6' }, { enabled: 'yes' }, { minYield: 2 }, { hotPer6h: 1, normalPer6h: 2 }, { earlyMinYield: 0.5 }, [1]]) {
+    assert.equal((await call('PUT', '/api/admin/group-plan', bad)).status, 400, JSON.stringify(bad));
+  }
+  const on = await call('PUT', '/api/admin/group-plan', { enabled: true, minActive: 6, retryDays: 30 });
+  assert.equal(on.status, 200);
+  const v1 = on.data;
+  assert.equal(v1.summary.enabled, true);
+  assert.ok(v1.summary.reading >= 6, `at least minActive groups read: ${v1.summary.reading}`);
+  assert.ok(v1.groups.every(x => ['trial', 'paused'].includes(x.status) && x.why && x.at), 'every group has a status, why and when');
+  assert.ok(v1.groups.filter(x => x.status === 'trial').every(x => x.trialEndsAt > Date.now()), 'trial countdown');
+  assert.ok(v1.log.length >= 8 && v1.log.every(e => e.name && e.to && e.why), 'rotation log');
+  assert.ok(v1.summary.projectedCycleUsd >= 0 && v1.summary.allowanceUsd > 0);
+  const id = v1.groups.find(x => x.status === 'trial').id;
+  assert.equal((await call('POST', `/api/admin/group-plan/${id}`, { action: 'explode' })).status, 400);
+  assert.equal((await call('POST', '/api/admin/group-plan/gzzzzzz', { action: 'pause' })).status, 404);
+  assert.equal((await call('POST', '/api/admin/group-plan/../x', { action: 'pause' })).status, 404);
+  const p = await call('POST', `/api/admin/group-plan/${id}`, { action: 'pause' });
+  assert.equal(p.data.groups.find(x => x.id === id).status, 'paused'); assert.equal(p.data.groups.find(x => x.id === id).why, 'manual');
+  // the allocator runs again (saving the plan) and keeps the manual pause; another group fills the gap
+  const again = (await call('PUT', '/api/admin/group-plan', { minActive: 6 })).data;
+  const me = again.groups.find(x => x.id === id);
+  assert.equal(me.status, 'paused'); assert.equal(me.why, 'manual'); assert.equal(me.manual, true);
+  assert.ok(again.summary.reading >= 6, 'a pool group replaced it');
+  const r = (await call('POST', `/api/admin/group-plan/${id}`, { action: 'resume' })).data.groups.find(x => x.id === id);
+  assert.equal(r.status, 'trial'); assert.equal(r.manual, false);
+  assert.ok(r.history.length >= 3 && r.history.length <= 10);
+  // Groups page shows the plan status; a new group is placed at once
+  const gl = (await call('GET', '/api/admin/groups')).data;
+  assert.equal(gl.planEnabled, true); assert.ok(gl.groups.every(x => x.plan?.status));
+  await call('POST', '/api/admin/groups', { name: 'Group 9', url: 'https://www.facebook.com/groups/909' });
+  const s = await repo.getSettings();
+  assert.ok(Object.values(s.groupState).length === 9 && Object.values(s.groupState).every(x => x.status), 'new group placed');
+  // removing a group drops its state
+  await call('DELETE', `/api/admin/groups/${id}`);
+  assert.equal((await repo.getSettings()).groupState[id], undefined);
+});

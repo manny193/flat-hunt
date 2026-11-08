@@ -49,7 +49,8 @@ Real usage replaces the estimate once runs exist: `sum(runs.cost_usd)` for the c
 
 Ways to cut it:
 - Drop "Low value" groups. Admin → Groups already flags them.
-- Shorten the 15-minute overlap. It is about 8% of cost; 5 minutes would still cover most late posts.
+- Shorten the 15-minute overlap. It is about 8% of cost; 5 minutes would still cover most late posts. Admin setting `schedule.overlapMin` (default 15; set 5 to save about 5%).
+- Turn on the group plan (Admin → Group performance, `docs/ai/GROUP-SCHEDULING.md`). It never raises spend: a daily allowance of min(budget, Apify limit) × 95% over the days left caps every tick, and the money moves to groups with the best usable yield. Extra cost of the plan itself: up to 3 actor runs per slot instead of 1 (≈ $0.0005 each, worst case ≈ $0.37 a month, typical ≈ $0.18), and new groups' trials (≤ $0.15 each, about $0.08 a week for a busy group). No change to `resultsPerGroup` (still ≤ 50) or the cutoff floor. D1: one extra statement per planned ingest, ~11 statements once a day for the allocator.
 - Prefer groups with fewer reposts.
 Running less often does **not** save money. It only makes posts arrive later.
 

@@ -34,7 +34,7 @@ Every response goes through `secure()` (`src/http.js`): strict CSP (`script-src 
 `GET /api/listings?status&area&since` (user's deck: listings in the user's areas or already decided), `GET|PATCH|DELETE /api/listings/:id` (PATCH sets the user's status/stage/notes in `user_listing`; edits to fields override extraction), `DELETE /api/listings?status=rejected|sample=1` (admin), `POST /api/import` (admin; sources `scraper|phone|manual|sample`, ≤ 3,000 items, ≤ 2 MB), `GET|PUT /api/settings`, `/api/areas` (CRUD; create triggers backfill and links the area to the user), `GET /api/browse` (signed-in twin of public listings, full fields), `GET /api/keywords?name=`, `GET /api/runs` (admin), `POST /api/apify/run` (admin, forced `scheduledJob`), `GET /api/export` (JSON download).
 
 ### Admin API (`adminApi()`)
-`finance` (GET `[?refresh=1]`: spend this Apify cycle, forecast capped at the stop guard, per-group spend, run costs, free services; PUT `{monthlyBudgetUsd}` $0.50–$500 → `settings.budget`; logic in `src/finance.js`, client rules in `web/finance.js`, spec `docs/design/FINANCE.md`), `scraper` (GET view incl. live Apify usage; PUT schedule/resultsPerGroup), `scraper/run`, `sources`, `subreddits`, `runs`, `stats?days=`, `groups` (validate ≤ 50 Facebook URLs; Pages flagged and skipped), `areas`, `users` (role/status), `settings`, `listings` (search, delete), `phone-scan` (POST scan JSON → ingest with `source:'phone'`), `phone-scans` (reports "posts from groups we don't scrape"), `ai` (status, config, run, retry, merge suggestions).
+`finance` (GET `[?refresh=1]`: spend this Apify cycle, forecast capped at the stop guard, per-group spend, run costs, free services; PUT `{monthlyBudgetUsd}` $0.50–$500 → `settings.budget`; logic in `src/finance.js`, client rules in `web/finance.js`, spec `docs/design/FINANCE.md`), `scraper` (GET view incl. live Apify usage; PUT schedule/resultsPerGroup), `scraper/run`, `sources`, `subreddits`, `runs`, `stats?days=`, `groups` (validate ≤ 50 Facebook URLs; Pages flagged and skipped; GET adds each group's `plan` status), `group-plan` (GET Group performance view; PUT policy, validated, runs the allocator when on; POST `/:gid {action: pause|promote|resume}`), `areas`, `users` (role/status), `settings`, `listings` (search, delete), `phone-scan` (POST scan JSON → ingest with `source:'phone'`), `phone-scans` (reports "posts from groups we don't scrape"), `ai` (status, config, run, retry, merge suggestions).
 
 ## 3. Roles and serialization
 
@@ -57,13 +57,21 @@ Admin: /api/import, /api/admin/phone-scan ────────────�
 
 ### 4.1 Apify run lifecycle (`src/apify.js`)
 - **Due?** `isDue(schedule, lastStartedAt, now)`. Mode `times`: start in an IST hour listed in `runHoursIst` (default 6, 9, 11, 13, 15, 17, 19, 21) if not already started in that hour. Mode `interval`: every `intervalHours`.
-- **Cutoff** `cutoffFor()` = max(last successful start − 15 min (`OVERLAP_MS`), now − `backfillDays` (1–5, default 3)). Sent as `apifyTime()` = ISO without milliseconds (the actor rejects ms).
+- **Cutoff** `cutoffFor()` = max(last successful start − overlap (`schedule.overlapMin`, 1–60, default 15 min), now − `backfillDays` (1–5, default 3)). Sent as `apifyTime()` = ISO without milliseconds (the actor rejects ms).
 - **Budget guard** before each start: `GET /v2/users/me/limits`. Usage > `budgetStopPct` (95%) → skip. > `budgetWarnPct` (80%) → halve posts per group (min 5).
 - **Input** `buildInput()`: automly `{groups, resultsPerGroup (default 30, max 50), sortOrder:'new', postsPublishedAfter, includeGroupInfo}`. `includeGroupInfo` only when `groupInfoStale()` (weekly or watched list changed), because group rows are billed like posts.
 - **Run caps**: `maxItems` = groups × perGroup (+ group rows); `maxTotalChargeUsd` = min(natural ceiling × 1.2, `maxRunUsd` default $0.50).
 - **Webhook** registered per run (`?webhooks=` base64), `ACTOR.RUN.SUCCEEDED` → our ingest endpoint with `{datasetId, runId}`.
 - **ingestDataset()**: `claimRun()` (dataset_id UNIQUE → once only), then pages of `pageSize(env)` = `INGEST_PAGE_SIZE` (default 15, 10–500) rows, up to `MAX_PAGES`=4 per webhook call (`SWEEP_PAGES`=3 from cron). Progress (offset + group names) is saved in the same batch as each page's listings. Cut off → `partial` → 503 → Apify retries, or the next sweep resumes. At the end: real run cost from `/actor-runs/:id` via `runCost()` = platform usage + max(charged rows, rows read) × `ROW_PRICE` ($0.0012 automly, $0.005 official), stored in `runs.cost_usd`.
 - **sweep()**: last 3 SUCCEEDED runs on Apify; ingests at most one dataset not `done` per invocation.
+
+### 4.1a Group plan (`src/groupplan.js`, behind `settings.groupPlan.enabled`, default off)
+Design and status: `docs/ai/GROUP-SCHEDULING.md`. Off: `startRun()` is unchanged (tested byte-for-byte). On:
+- **Daily allocator** `runGroupPlan()` (cron tick with no ingest, at most once a day; also on plan save and on any watched-group edit): `repo.groupRuns()` (1 read: per-group report fields of done Apify runs over 7 days and the cycle) → `groupStats()` → `allocate()` → `repo.patchSettings('groupState', …)` (json_patch, never touches `lastRead`) + `groupPlanRun`. Rules are deterministic (no AI): trial for new groups, pause for low smoothed yield, echo (cross-posts) or 3 unscrapable runs, retry in trial after `retryDays`, manual pause/promote never overridden, at least `minActive` groups read (sampled rather than paused when money is short), last 10 status events per group.
+- **Pace**: `dailyAllowance()` = (min(budget, Apify limit) × 0.95 − spent before today) / days left. Replaces the 80/95 % guard. Each tick may spend at most allowance − today's spend (`repo.apifySpentSince`: measured cost, else rows × price, else the charge cap of a running run).
+- **Cohorts** `planCohorts()`: due groups (hot every slot, normal ≥ 3.5 h, cold/sample/trial after 13:00 and 21:00 IST) grouped by cutoff (full: lastRead − overlap; sample: now − lookback 1/2/3/6/12 h; new trial: now − 6 h), cutoffs within 1 h merged, at most 3 runs per tick. `caps.groupIds` recorded per run.
+- **Ingest done**: `repo.markGroupsRead()` sets `lastRead = max(stored, run start)` for the cohort (1 statement); a cut-short cohort keeps its cutoff and sets `recoverNext` (re-read once with 50 posts per group). Group details from a cohort merge into `settings.groupInfo`. `annotateRun` keeps `caps` in the final report.
+- **Cross-posts** (`ingestItems`): report `mergedByGroup` and `crossFrom[group][firstGroup]` from listings already loaded for the merge (no extra query).
 
 ### 4.2 Reddit (`src/reddit.js`)
 App-only OAuth (`client_credentials`), User-Agent `flat-hunt/1.0 by <REDDIT_USERNAME>`. Cycle every `intervalHours`; one subreddit per step; posts newer than cutoff and per-subreddit watermark; pages of 25; resumes across invocations. Off unless `REDDIT_CLIENT_ID`/`SECRET` set. Default subreddits in `DEFAULT_SUBREDDITS`.
@@ -83,8 +91,8 @@ App-only OAuth (`client_credentials`), User-Agent `flat-hunt/1.0 by <REDDIT_USER
 ## 5. Hourly cron: `scheduledJob()`
 
 All steps share one `budgeted(repo, 48)` counter (`repo.left()`):
-1. Apify: start run if due (or forced) → save `settings.scheduler` → `sweep()` one dataset.
-2. `extras()` with what is left: Reddit step (needs ≥ 26 left), AI enrich (≥ 20, 6 calls), area backfill (≥ 12), daily purge (≥ 10).
+1. Apify: start run if due (or forced; with the group plan on, up to 3 cohort runs) → save `settings.scheduler` → `sweep()` one dataset. Measured worst case with 3 cohorts and a 3-page sweep: 46 statements.
+2. `extras()` with what is left: the daily group allocator when due and nothing was ingested this tick (then the rest waits an hour; ~11 statements), else Reddit step (needs ≥ 26 left), AI enrich (≥ 20, 6 calls), area backfill (≥ 12), daily purge (≥ 10).
 3. Save scheduler status and `nextRunAt`.
 A step that throws records its error in the status and does not block later steps or the next run.
 
@@ -97,7 +105,7 @@ A step that throws records its error in the status and does not block later step
 | `listing_match` | (listing_id, area_id) | area 0 = no area. Indexes (area_id, kind, rent) for candidates, (area_id, last_posted_at) for area browse |
 | `post_keys` | key | exact-dedupe keys → listing_id |
 | `runs` | id; dataset_id UNIQUE | source, status (running/ingesting/partial/done/failed), report JSON (counts, per-group stats, progress, cost), actor, cost_usd, started_at, finished_at |
-| `settings` | key | JSON values: groups, subreddits, schedule, resultsPerGroup, scheduler, apifyUsage, groupInfo, unscrapableGroups, areaBackfill, purge, requireApproval, aiConfig, ai, reddit, keywordFilter |
+| `settings` | key | JSON values: groups, subreddits, schedule, resultsPerGroup, scheduler, apifyUsage, groupInfo, groupPlan (policy), groupState (per group id: status, why, at, since, lastRead, mode, coverage, lookbackH, tier, rate, yield, echo, fails, manual, history), groupPlanRun, unscrapableGroups, areaBackfill, purge, requireApproval, aiConfig, ai, reddit, keywordFilter |
 | `users` | id; email UNIQUE | role admin/user, status active/pending/blocked |
 | `user_listing` | (user_id, listing_id) | per-user status new/approved(shortlist)/rejected(passed), stage (To call … Token paid), notes |
 | `user_areas` | (user_id, area_id) | areas a user follows (drives Review deck and AI queue) |

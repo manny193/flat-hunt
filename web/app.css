@@ -542,3 +542,12 @@ details.how summary{cursor:pointer;font-weight:700;font-size:var(--fs-14);color:
 @media (max-width:720px){.tbl tfoot{display:block}.fin .tbl td:empty{display:none}}
 @media (max-width:520px){.fin .ahead .btn{min-height:36px;padding:0 var(--s3);order:3}.fin .ahead .status-line{flex-basis:100%;order:2}.fin .ahead .sp{display:none}}
 @media (max-width:520px) and (pointer:coarse){.fin .ahead .btn{min-height:44px}}
+
+/* #admin-groups-performance */
+.gp details summary{cursor:pointer;font-weight:700;font-size:var(--fs-14);min-height:44px;display:flex;align-items:center;gap:var(--s2)}
+.gp details summary::before{content:"+";display:inline-grid;place-items:center;width:20px;height:20px;border-radius:6px;background:var(--sunk);font-weight:800}
+.gp details[open] summary::before{content:"\2212"}
+.gp .gp-acts{white-space:nowrap}
+.gp .gp-log{list-style:none;margin:0;padding:0;display:grid;gap:var(--s2)}
+.gp .gp-log li{font-size:var(--fs-14);line-height:1.4}
+@media (max-width:720px){.gp .tbl td.gp-acts{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:var(--s2);white-space:normal}.gp .gp-acts .btn{min-height:44px}}
