@@ -35,6 +35,10 @@ export function rowToUserListing(r) {
 export const rowToUser = r => r ? { id: r.id, email: r.email, name: r.name, picture: r.picture, role: r.role, status: r.status, createdAt: r.created_at, lastSeenAt: r.last_seen_at } : null;
 const rowToRun = r => ({ id: r.id, source: r.source, datasetId: r.dataset_id, runId: r.run_id, status: r.status, startedAt: r.started_at, at: r.at, actor: r.actor ?? null, costUsd: r.cost_usd ?? null, finishedAt: r.finished_at ?? null, report: J(r.report) || {} });
 const rowToArea = r => ({ id: r.id, name: r.name, keywords: J(r.keywords) || [], active: !!r.active, createdAt: r.created_at });
+const rowToPrefs = r => r ? { enabled: !!r.enabled, quietStart: r.quiet_start, quietEnd: r.quiet_end, maxListings: r.max_listings, maxDigests: r.max_digests, minGapMin: r.min_gap_min, testAt: r.test_at ?? null } : null;
+const bhkList = s => String(s || '').split(',').filter(Boolean);
+// Push endpoints (address) and keys are never part of this shape: it is what the UI and admin see.
+const rowToTarget = r => ({ id: r.id, channel: r.channel, label: r.label, createdAt: r.created_at, lastOkAt: r.last_ok_at ?? null, failures: r.failures, lastError: r.last_error ?? null });
 function listingToRecord(l, now, writtenAt = now) {
   const data = {}; for (const [k, v] of Object.entries(l)) if (!COLUMN_KEYS.includes(k)) data[k] = v;
   return {
@@ -249,6 +253,7 @@ export function createRepo(db) {
         { sql: 'DELETE FROM listing_match WHERE area_id = ?', params: [id] },
         { sql: 'DELETE FROM areas WHERE id = ?', params: [id] },
         { sql: 'DELETE FROM user_areas WHERE area_id = ?', params: [id] },
+        { sql: 'DELETE FROM alert_areas WHERE area_id = ?', params: [id] },
       ]);
       return res[1].changes > 0;
     },
@@ -262,6 +267,8 @@ export function createRepo(db) {
                 WHERE EXISTS (SELECT 1 FROM json_each(listings.areas) WHERE value = ?)`, params: [from, to, from] },
         { sql: 'INSERT OR IGNORE INTO user_areas (user_id, area_id, created_at) SELECT user_id, ?, created_at FROM user_areas WHERE area_id = ?', params: [to, from] },
         { sql: 'DELETE FROM user_areas WHERE area_id = ?', params: [from] },
+        { sql: 'INSERT OR IGNORE INTO alert_areas (user_id, area_id, max_rent, bhks, created_at) SELECT user_id, ?, max_rent, bhks, created_at FROM alert_areas WHERE area_id = ?', params: [to, from] },
+        { sql: 'DELETE FROM alert_areas WHERE area_id = ?', params: [from] },
         { sql: 'DELETE FROM areas WHERE id = ?', params: [from] },
       ]);
       return this.getArea(to);
@@ -295,7 +302,14 @@ export function createRepo(db) {
       return (await db.all('SELECT a.* FROM areas a JOIN user_areas u ON u.area_id = a.id WHERE u.user_id = ? ORDER BY u.created_at, a.id', [userId])).map(rowToArea);
     },
     async linkArea(userId, areaId, now) { return (await db.run('INSERT OR IGNORE INTO user_areas (user_id, area_id, created_at) VALUES (?, ?, ?)', [userId, areaId, now])).changes > 0; },
-    async unlinkArea(userId, areaId) { return (await db.run('DELETE FROM user_areas WHERE user_id = ? AND area_id = ?', [userId, areaId])).changes > 0; },
+    // Unfollowing an area also stops its alerts.
+    async unlinkArea(userId, areaId) {
+      const res = await db.batch([
+        { sql: 'DELETE FROM user_areas WHERE user_id = ? AND area_id = ?', params: [userId, areaId] },
+        { sql: 'DELETE FROM alert_areas WHERE user_id = ? AND area_id = ?', params: [userId, areaId] },
+      ]);
+      return res[0].changes > 0;
+    },
 
     // ---------- users ----------
     async getUser(id) { return rowToUser(await db.first('SELECT * FROM users WHERE id = ?', [id])); },
@@ -497,6 +511,56 @@ export function createRepo(db) {
       ];
     },
 
+    // ---------- area alerts (src/alerts.js, docs/ai/ALERTS-WEBPUSH.md) ----------
+    async alertPrefs(userId) { return rowToPrefs(await db.first('SELECT * FROM alert_prefs WHERE user_id = ?', [userId])); },
+    /** Upsert a user's alert settings (all fields; callers merge with the current row first). */
+    async putAlertPrefs(userId, p, now) {
+      await db.run(`INSERT INTO alert_prefs (user_id, enabled, quiet_start, quiet_end, max_listings, max_digests, min_gap_min, test_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET enabled = excluded.enabled, quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end, max_listings = excluded.max_listings,
+          max_digests = excluded.max_digests, min_gap_min = excluded.min_gap_min, test_at = excluded.test_at, updated_at = excluded.updated_at`,
+      [userId, p.enabled ? 1 : 0, p.quietStart, p.quietEnd, p.maxListings, p.maxDigests, p.minGapMin, p.testAt ?? null, now, now]);
+      return this.alertPrefs(userId);
+    },
+    async alertAreas(userId) {
+      return (await db.all('SELECT aa.*, a.name FROM alert_areas aa JOIN areas a ON a.id = aa.area_id WHERE aa.user_id = ? ORDER BY aa.created_at, aa.area_id', [userId]))
+        .map(r => ({ areaId: r.area_id, name: r.name, maxRent: r.max_rent ?? null, bhks: bhkList(r.bhks) }));
+    },
+    /**
+     * Replace a user's alert areas (full set) in one batch. Only followed areas are kept (the API checks
+     * first and answers 400). Creates alert_prefs with `defaults` when the user has none yet.
+     */
+    async replaceAlertAreas(userId, areas, now, defaults) {
+      const rows = JSON.stringify(areas.map(a => ({ a: a.areaId, r: a.maxRent ?? null, b: a.bhks?.length ? ',' + a.bhks.join(',') + ',' : '' })));
+      await db.batch([
+        { sql: 'DELETE FROM alert_areas WHERE user_id = ?', params: [userId] },
+        { sql: `INSERT OR IGNORE INTO alert_areas (user_id, area_id, max_rent, bhks, created_at) SELECT ?, ${je('a')}, ${je('r')}, ${je('b')}, ? FROM json_each(?)
+                WHERE ${je('a')} IN (SELECT area_id FROM user_areas WHERE user_id = ?)`, params: [userId, now, rows, userId] },
+        { sql: `INSERT OR IGNORE INTO alert_prefs (user_id, enabled, quiet_start, quiet_end, max_listings, max_digests, min_gap_min, created_at, updated_at) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+          params: [userId, defaults.quietStart, defaults.quietEnd, defaults.maxListings, defaults.maxDigests, defaults.minGapMin, now, now] },
+      ]);
+      return this.alertAreas(userId);
+    },
+    async alertTargets(userId) { return (await db.all('SELECT * FROM alert_targets WHERE user_id = ? ORDER BY id', [userId])).map(rowToTarget); },
+    /** Targets to push to (with address). Internal: only the send step and the test send use it. */
+    async alertTargetsForSend(userIds) {
+      if (!userIds.length) return [];
+      return db.all('SELECT id, user_id, channel, address FROM alert_targets WHERE user_id IN (SELECT value FROM json_each(?)) AND failures < 5 ORDER BY user_id, id', [JSON.stringify(userIds)]);
+    },
+    /**
+     * Store a device. An endpoint already stored (maybe for another account on the same device) moves to
+     * this user and is reset. At most `max` targets per user: the least recently updated ones go.
+     */
+    async upsertAlertTarget({ userId, channel, address, keys, label }, now, max = 5) {
+      await db.batch([
+        { sql: `INSERT INTO alert_targets (user_id, channel, address, keys, label, failures, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+                ON CONFLICT(channel, address) DO UPDATE SET user_id = excluded.user_id, keys = excluded.keys, label = excluded.label, failures = 0, last_error = NULL, updated_at = excluded.updated_at`,
+          params: [userId, channel, address, JSON.stringify(keys || {}), label || '', now, now] },
+        { sql: 'DELETE FROM alert_targets WHERE user_id = ? AND id NOT IN (SELECT id FROM alert_targets WHERE user_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?)', params: [userId, userId, max] },
+      ]);
+      return (await db.first('SELECT id FROM alert_targets WHERE channel = ? AND address = ?', [channel, address]))?.id ?? null;
+    },
+    async deleteAlertTarget(userId, id) { return (await db.run('DELETE FROM alert_targets WHERE id = ? AND user_id = ?', [id, userId])).changes > 0; },
+
     // ---------- retention ----------
     /**
      * Delete listings last posted before `cutoff` (and their keys, match rows and user rows) unless
@@ -513,6 +577,9 @@ export function createRepo(db) {
         { sql: `DELETE FROM listings WHERE id IN (${sel})`, params: [cutoff, max] },
         { sql: 'DELETE FROM rate_limits WHERE window_start < ?', params: [now - 864e5] },
         { sql: 'DELETE FROM login_attempts WHERE window_start < ?', params: [now - 864e5] },
+        // Area alerts: the queue keeps 7 days (the #alerts screen), dead devices go after a week of failures.
+        { sql: 'DELETE FROM alert_queue WHERE created_at < ?', params: [now - 7 * 864e5] },
+        { sql: 'DELETE FROM alert_targets WHERE failures >= 5 AND updated_at < ?', params: [now - 7 * 864e5] },
       ]);
       return res[4].changes;
     },
