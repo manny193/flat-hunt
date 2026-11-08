@@ -197,13 +197,15 @@ function boardHtml(l) {
   const money = [l.deposit ? `Deposit ${k(l.deposit)}` : l.depositMonths ? `Deposit ${l.depositMonths} mo` : '', l.maintenance ? `Maint. ${k(l.maintenance)}` : '', l.availableFrom ? `From ${esc(l.availableFrom)}` : ''].filter(Boolean);
   const wanted = l.kind === 'seeking';
   return `<div class="board"><span class="plate"${wanted ? ' data-wanted' : ''}>${wanted ? 'WANTED' : 'TO-LET'}</span>
-    <div class="rent num">${l.rent ? `${inr(l.rent)}<small>/mo</small>` : '<small>Rent not stated</small>'}</div>
+    <div class="rent num">${l.rent ? `${l.rentEstimated ? '≈' : ''}${inr(l.rent)}<small>/mo${l.type === 'flatmate' && l.totalRent ? ' per room' : ''}</small>` : '<small>Rent not stated</small>'}</div>
+    ${l.type === 'flatmate' && l.totalRent ? `<div class="small">${l.rentEstimated ? 'Estimated share of' : 'Whole flat'} ${inr(l.totalRent)}</div>` : ''}
     <div class="kind">${kindLine(l).map(x => `<span>${esc(x)}</span>`).join('')}</div>
     ${money.length ? `<div class="money2">${money.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
     ${stripHtml(l)}</div>`;
 }
 function chipsHtml(l) {
   const c = [];
+  if (l.kind !== 'seeking' && l.type) c.push(`<span class="chip">${l.type === 'flatmate' ? 'Shared flat' : l.type === 'pg' ? 'PG' : 'Whole home'}</span>`);
   if (l.brokerage === 'no') c.push('<span class="chip keep">No brokerage</span>'); else if (l.brokerage === 'yes') c.push('<span class="chip brok">Brokerage</span>');
   if (l.gender) c.push(`<span class="chip">${{ male: 'Men', female: 'Women', any: 'Anyone' }[l.gender]}</span>`);
   if (l.multiFlat) c.push('<span class="chip">Multiple flats</span>');
@@ -269,7 +271,7 @@ function filtered() {
 const FILTERS = [
   ['bhk', 'BHK', [['', 'Any'], ['1RK', '1 RK'], ['1', '1 BHK'], ['2', '2 BHK'], ['3', '3 BHK'], ['4', '4 BHK']], v => v === '1RK' ? '1 RK' : `${v} BHK`],
   ['maxRent', 'Rent', [['', 'Any'], ['15000', '≤ ₹15k'], ['20000', '≤ ₹20k'], ['30000', '≤ ₹30k'], ['45000', '≤ ₹45k'], ['60000', '≤ ₹60k']], v => `≤ ₹${k(Number(v))}`],
-  ['type', 'Type', [['', 'Any'], ['flat', 'Whole flat'], ['flatmate', 'Room / flatmate'], ['pg', 'PG']], v => ({ flat: 'Whole flat', flatmate: 'Flatmate', pg: 'PG' }[v])],
+  ['type', 'Type', [['', 'Any'], ['flat', 'Whole home'], ['flatmate', 'Shared flat (room)'], ['pg', 'PG']], v => ({ flat: 'Whole home', flatmate: 'Shared flat', pg: 'PG' }[v])],
   ['furnishing', 'Furnishing', [['', 'Any'], ['fully', 'Furnished'], ['semi', 'Semi'], ['unfurnished', 'Unfurnished']], v => ({ fully: 'Furnished', semi: 'Semi', unfurnished: 'Unfurnished' }[v])],
   ['sort', 'Sort', [['new', 'Newest'], ['rent', 'Rent low to high']], v => v === 'rent' ? 'Rent ↑' : 'Newest'],
 ];
@@ -318,7 +320,7 @@ async function openListing(id) {
   try { l = signedIn() ? (state.listings.get(id) && (await api('GET', `/api/listings/${encodeURIComponent(id)}`))) || await api('GET', `/api/listings/${encodeURIComponent(id)}`) : await api('GET', `/api/public/listings/${encodeURIComponent(id)}`); }
   catch (e) { closeSheet(); fail(e); return; }
   const s = $('.sheet'); if (!s) return;
-  const facts = [['Rent', l.rent ? inr(l.rent) : 'Not stated'], ['Deposit', l.deposit ? inr(l.deposit) : l.depositMonths ? `${l.depositMonths} months` : '–'], ['Maintenance', l.maintenance != null ? inr(l.maintenance) : '–'], ['Brokerage', l.brokerage === 'no' ? 'None' : l.brokerage === 'yes' ? (l.brokerageAmount ? inr(l.brokerageAmount) : 'Yes') : '–'],
+  const facts = [['Rent', l.rent ? (l.rentEstimated ? `About ${inr(l.rent)} per room (estimated)` : inr(l.rent)) : 'Not stated'], ...(l.type === 'flatmate' && l.totalRent ? [['Whole flat rent', inr(l.totalRent)]] : []), ['Deposit', l.deposit ? inr(l.deposit) : l.depositMonths ? `${l.depositMonths} months` : '–'], ['Maintenance', l.maintenance != null ? inr(l.maintenance) : '–'], ['Brokerage', l.brokerage === 'no' ? 'None' : l.brokerage === 'yes' ? (l.brokerageAmount ? inr(l.brokerageAmount) : 'Yes') : '–'],
     ['Type', typeName(l)], ['Furnishing', l.furnishing ? { fully: 'Furnished', semi: 'Semi-furnished', unfurnished: 'Unfurnished' }[l.furnishing] : '–'], ['For', l.gender ? { male: 'Men', female: 'Women', any: 'Anyone' }[l.gender] : '–'], ['Available', l.availableFrom || '–'],
     ['Area', (l.areas || []).map(areaName).filter(Boolean).join(', ') || '–'], ['First posted', when(l.firstPostedAt)]];
   if (signedIn() && l.society) facts.push(['Society', l.society]);
@@ -1079,6 +1081,7 @@ async function renderData(q = state.admin.dq || '') {
   const sel = state.admin.sel = new Set();
   $('#main').innerHTML = `<div class="wrap">${adminHead('Data', `<span class="sp"></span><a class="btn" href="/api/admin/listings/export" download>Export JSON</a>`)}
     <div class="panel"><div class="phead"><h2>Retention</h2></div><p class="help">Listings older than this are deleted daily, with their duplicate keys, unless someone shortlisted them.</p><div class="field-row"><span class="lbl">Delete listings older than (days)</span>${stepper('ret', sc.schedule.retentionDays, 7, 365, 5)}<button class="btn" type="button" data-act="ret">Save</button></div>${sc.purge ? `<p class="help">Last purge ${when(sc.purge.at)}: ${sc.purge.deleted} deleted.</p>` : ''}</div>
+    <div class="panel"><div class="phead"><h2>Re-check details</h2></div><p class="help">Runs the latest rules again on stored posts: shared flat or whole home, and room rent vs whole-flat rent. Details you or the AI set are kept.</p><button class="btn" type="button" data-act="reparse">Re-check all listings</button></div>
     <div class="panel"><div class="phead"><h2>Listings</h2><span class="sub">${d.total}</span></div><input class="input" id="dq" placeholder="Search post text" value="${esc(q)}"><div id="bulk"></div>
     <div class="tscroll"><table class="tbl"><thead><tr><th><span class="sr">Select</span></th><th>Rent</th><th>Type</th><th>Areas</th><th>Last posted</th><th class="n">Shortlisted by</th><th>AI</th></tr></thead><tbody>
     ${d.listings.map(l => `<tr data-id="${esc(l.id)}"><td><input type="checkbox" data-sel aria-label="Select"></td><td class="first" data-l="Rent">${l.rent ? inr(l.rent) : '–'}<br><span class="small">${esc((l.posts?.[0]?.text || '').slice(0, 80))}</span></td><td data-l="Type">${esc(typeName(l))}</td><td data-l="Areas">${esc((l.areas || []).map(areaName).filter(Boolean).join(', ') || 'none')}</td><td data-l="Posted">${when(l.lastPostedAt)}</td><td class="n" data-l="Shortlisted">${l.shortlistedBy}</td><td data-l="AI">${esc(l.aiStatus || '–')}</td></tr>`).join('') || '<tr><td>No listings.</td></tr>'}</tbody></table></div></div></div>`;
@@ -1088,6 +1091,11 @@ async function renderData(q = state.admin.dq || '') {
   $('#main').onclick = async e => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     try {
+      if (act === 'reparse') {
+        const btn = e.target.closest('[data-act]'); btn.disabled = true; let after = 0, checked = 0, changed = 0;
+        for (let i = 0; i < 400; i++) { const r = await api('POST', '/api/admin/listings/reparse', { after }); checked += r.checked; changed += r.changed; after = r.next; btn.textContent = `Checked ${checked}…`; if (r.done) break; }
+        toast(`Checked ${checked} listings, ${changed} updated`); renderData(q); return;
+      }
       if (act === 'ret') { await api('PUT', '/api/admin/scraper', { retentionDays: stepVal('ret') }); toast('Retention saved'); }
       if (act === 'del') {
         const sh = openSheet(`<div class="shead"><h2>Delete ${sel.size} listings?</h2></div><p>They disappear for everyone, including from shortlists. Reposts would come back as new listings.</p><div class="field-row"><button class="btn danger" type="button" data-yes>Delete</button><button class="btn" type="button" data-close>Keep</button></div>`, { label: 'Confirm delete', center: true });

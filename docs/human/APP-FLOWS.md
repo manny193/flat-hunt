@@ -114,6 +114,10 @@ Public JSON tested 9 Nov 2026; Reddit requires login (403 from Cloudflare, login
 3. **Test notifications** (works even while alerts are off for everyone): tap **Turn on alerts on this device** once, then **Basic test** ("Alerts work on this device") or **Sample alert**, which looks exactly like a real alert for the newest listing (your alert areas first) and opens that listing when tapped. Tests go only to your own devices, 3 an hour.
 4. The usage table shows devices, people with alert areas, alerts waiting and sent today, devices that stopped answering, and the last error.
 
+### 10b. Shared flat or whole home
+
+Every listing shows a **Shared flat**, **Whole home** or **PG** chip, and the homepage **Type** filter picks one. For a room in a shared flat, the rent shown is the room's share. If the post only gives the whole flat's rent, the card shows an estimate (≈ total ÷ BHK) and the whole-flat rent under it. Admin → Data → **Re-check all listings** applies these rules to posts already stored.
+
 ### 11. Users and data
 
 - Admin → **Users**: approve, block or promote people, and turn "require approval" on or off.

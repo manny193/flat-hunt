@@ -105,6 +105,19 @@ export function moneyMentions(text) {
 export const SOCIETY_RE = /\b([A-Z][A-Za-z0-9&']+(?:\s+[A-Z][A-Za-z0-9&']+){0,3})\s+(Apartments?|Residency|Residences|Enclave|Towers?|Heights|Homes|Nest|Gardens?|Meadows|Elite|Palms|Society|Habitat|Greens|Villas?|Woods|Springs|Manor)\b/;
 /** Society/building name written in a post (null when none). */
 export const societyOf = text => (String(text || '').match(SOCIETY_RE) || [null])[0];
+// A room/bed in a shared flat (type 'flatmate'), as opposed to the whole home.
+export const SHARED_RE = new RegExp([
+  'flat\\s*-?\\s*mates?', 'room\\s*-?\\s*mates?', 'sharing', 'replacement', 'single occupancy', 'private room', 'room available', 'room for rent', '\\bbed\\b(?! ?room)',
+  '\\b(?:one|1|a|single|private|master|spare|extra)\\s+(?:private\\s+|master\\s+|furnished\\s+|big\\s+|spacious\\s+)?(?:bed\\s*)?rooms?\\s+(?:is\\s+)?(?:available|vacant|for rent|up for rent|to let|free)',
+  '\\b(?:bed\\s*)?rooms?\\s+(?:is\\s+)?(?:available\\s+|vacant\\s+)?in\\s+(?:a|an|my|our|the)?\\s*(?:\\d(?:\\.5)?\\s*-?\\s*bhk|shared|furnished|gated)',
+  'master\\s*bed\\s*room\\s+(?:available|vacant|for rent)', 'shared\\s+(?:flat|apartment|accommodation)', '\\bshare\\s+(?:the|a|my|our)\\s+(?:flat|apartment|house)',
+  'looking\\s+for\\s+(?:a\\s+|one\\s+|1\\s+)?(?:female\\s+|male\\s+)?(?:flat|room)\\s*-?\\s*mate',
+].join('|'));
+const ROOM_RENT_MAX = 35000; // a room in Bangalore above this, with a 2+ BHK named, is almost always the whole flat's rent
+const SHARE_BEFORE = /(per\s*(?:person|head|room|bed)|each|your\s*share|share|room\s*rent|rent\s*(?:for|of)\s*(?:the|one|1)?\s*room|individual)\s*(?:rent|is|of|:|-|=|@|₹|rs\.?|\s)*$/;
+const SHARE_AFTER = /^\s*(?:₹|rs\.?|inr)?\s*\d(?:[\d,.]*\d)?\s*(?:k\b|thousand)?\s*(?:rs\.?|inr|rupees)?\s*(?:\/-)?\s*(?:per\s*month|pm\b|\/\s*month|monthly|a\s*month)?\s*(?:per\s*(?:person|head|room|bed)|\/\s*(?:person|head)|each|for\s*(?:the|one|1)\s*room|(?:as\s*)?(?:your|my)\s*share|share)/;
+const TOTAL_BEFORE = /(total|whole|entire|full|overall|complete|flat|apartment|house)\s*(?:flat|house|apartment)?\s*(?:rent|rental)?\s*(?:is|of|:|-|=|@|₹|rs\.?|\s)*$/;
+const TOTAL_AFTER = /^\s*(?:₹|rs\.?|inr)?\s*\d(?:[\d,.]*\d)?\s*(?:k\b|thousand)?\s*(?:rs\.?|inr|rupees)?\s*(?:\/-)?\s*(?:per\s*month|pm\b|\/\s*month|monthly|a\s*month)?\s*(?:total|in total|for\s*(?:the\s*)?(?:whole|entire|full|complete)?\s*(?:flat|house|apartment|\d\s*bhk))/;
 export function extract(text) {
   const t = String(text || ''); const lo = t.toLowerCase(); const ex = {};
   // Phone numbers written with spaces ("98765 43210") must not be read as money.
@@ -118,11 +131,26 @@ export function extract(text) {
   ex.depositMonths = dm ? +dm[1] : null;
   const b = lo.match(/\b(\d(?:\.5)?)\s*-?\s*b\s?h\s?k\b/) || lo.match(/\b(\d)\s*bed\s*rooms?\b/);
   ex.bhk = b ? +b[1] : (/\b1\s*rk\b/.test(lo) ? '1RK' : null);
-  const mateRe = /flat\s*-?\s*mates?|room\s*-?\s*mates?|sharing|replacement|single occupancy|private room|room available|room for rent|\bbed\b(?! ?room)/;
   if (/\bpg\b|paying guest|co-?living/.test(lo)) ex.type = 'pg';
-  else if (mateRe.test(lo)) ex.type = 'flatmate';
+  else if (SHARED_RE.test(lo)) ex.type = 'flatmate';
   else if (ex.bhk != null) ex.type = 'flat';
   else ex.type = null;
+  // A room in a shared flat: the post often gives the whole flat's rent ("1 room in a 3BHK, rent 71k").
+  // Use the per-person share when it is written; otherwise show an estimate (total / BHK) and keep the total.
+  ex.totalRent = null; ex.rentEstimated = null;
+  if (ex.type === 'flatmate' && rent) {
+    const ctx = x => ({ pre: lo.slice(Math.max(0, x.idx - 40), x.idx), post: lo.slice(x.idx, x.idx + 40) });
+    const isShare = x => { const c = ctx(x); return SHARE_BEFORE.test(c.pre) || SHARE_AFTER.test(c.post); };
+    const isTotal = x => { const c = ctx(x); return TOTAL_BEFORE.test(c.pre) || TOTAL_AFTER.test(c.post); };
+    const cands = money.filter(x => (x.label === 'rent' || !x.label) && x.n >= 2000 && x.n <= 400000);
+    const share = cands.find(isShare);
+    const total = cands.find(isTotal) || (!share && Number(ex.bhk) >= 2 && rent.n >= ROOM_RENT_MAX ? rent : null);
+    if (share) ex.rent = share.n;
+    if (total && total !== share) {
+      ex.totalRent = total.n;
+      if (!share) { ex.rent = Number(ex.bhk) >= 2 ? Math.round(total.n / Number(ex.bhk) / 100) * 100 : null; ex.rentEstimated = ex.rent ? true : null; }
+    }
+  }
   const seeking = /\b(looking|searching|need|needed|require|required|want|wanted|in search)\b(\s+for)?(\s+an?)?(\s+\d\s*bhk)?(\s+(fully|semi)[\s-]*furnished)?\s+(flat|room|accommodation|pg|place|house|apartment|1\s*rk|\d\s*bhk|home)\b/.test(lo);
   const offering = /available|vacant|vacating|for rent|to[\s-]let|rent is|rent:|move[\s-]?in|flat\s*-?\s*mates?\b|room\s*-?\s*mates?\b|replacement/.test(lo);
   ex.kind = (seeking && !offering) ? 'seeking' : 'offer';
@@ -377,7 +405,11 @@ export function applyPost(l, p, ex, now) {
   l.posts = [post, ...(l.posts || [])].sort((a, b) => (b.postedAt || b.importedAt) - (a.postedAt || a.importedAt)).slice(0, 15);
   l.seenCount = (l.seenCount || 0) + 1;
   for (const k of FIELDS) { if (ex[k] != null && ex[k] !== '' && (l[k] == null || l[k] === '' || (newer && k !== 'kind'))) l[k] = ex[k]; }
-  if (ex.rent) { if (!l.rent) l.rent = ex.rent; else if (newer && l.rent !== ex.rent) { l.rentHistory = [...(l.rentHistory || []), { rent: l.rent, at: now }].slice(-10); l.rent = ex.rent; } }
+  if (ex.rent) {
+    const before = l.rent;
+    if (!l.rent) l.rent = ex.rent; else if (newer && l.rent !== ex.rent) { l.rentHistory = [...(l.rentHistory || []), { rent: l.rent, at: now }].slice(-10); l.rent = ex.rent; }
+    if (l.rent !== before || !before) { if (ex.rentEstimated) l.rentEstimated = true; else delete l.rentEstimated; if (ex.totalRent) l.totalRent = ex.totalRent; else delete l.totalRent; }
+  }
   l.phones = [...new Set([...(l.phones || []), ...ex.phones])].slice(0, 6);
   l.mapLinks = [...new Set([...(l.mapLinks || []), ...ex.mapLinks])].slice(0, 6);
   l.groups = [...new Set([...(l.groups || []), post.group].filter(Boolean))];
@@ -386,6 +418,21 @@ export function applyPost(l, p, ex, now) {
   const flagged = l.posts.filter(q => q.groupKnown === false).length; l.outsideWatched = flagged > 0 && l.posts.every(q => q.groupKnown !== true);
   l.updatedAt = now; if (l.status === 'approved') l.hasUpdate = true;
   return l;
+}
+/**
+ * Re-run the type and rent rules on a stored listing's latest post (admin "re-check", after a rule change).
+ * Fields a user or the AI set (data.fieldSource) are left alone. Mutates l; returns true when something changed.
+ */
+export function reparseListing(l) {
+  const text = l.posts?.[0]?.text; if (!text || l.isSample) return false;
+  const ex = extract(text); const src = l.fieldSource || {}; const before = JSON.stringify([l.type, l.rent, l.totalRent, l.rentEstimated]);
+  if (src.type !== 'user' && src.type !== 'ai' && ex.type) l.type = ex.type;
+  if (src.rent !== 'user' && src.rent !== 'ai' && ex.rent && (ex.totalRent || ex.rentEstimated || l.totalRent || l.rentEstimated || l.rent === ex.totalRent)) {
+    l.rent = ex.rent;
+    if (ex.totalRent) l.totalRent = ex.totalRent; else delete l.totalRent;
+    if (ex.rentEstimated) l.rentEstimated = true; else delete l.rentEstimated;
+  }
+  return JSON.stringify([l.type, l.rent, l.totalRent, l.rentEstimated]) !== before;
 }
 export const newId = () => 'l_' + crypto.randomUUID().replace(/-/g, '').slice(0, 16);
 export function newListing(p, ex, now, id = newId()) { return applyPost({ id, status: 'new', stage: '', createdAt: now, posts: [], groups: [], phones: [], mapLinks: [], rentHistory: [], areas: [], notes: '', kind: ex.kind }, p, ex, now); }

@@ -176,6 +176,7 @@ whichever source scores higher on each field.
 | `phones`, `mapLinks` | **regex only** (the model never sees them) |
 | `rent`, `deposit`, `maintenance`, `brokerageAmount` | use AI when it is grounded **and** (regex is null **or** AI confidence ≥ 0.7). Otherwise keep regex. If both are present and they disagree, record `data.conflicts.rent = [regex, ai]` so the UI can show a small "?" |
 | `depositMonths`, `bhk` | AI if grounded (the digit appears in the text), else regex |
+| `totalRent`, `rentEstimated` (regex only, Nov 2026) | Room posts: the whole flat's rent goes to `totalRent`; the room's `rent` is the stated share ("per person 24k", "your share 30k"), else total / BHK rounded to ₹100 with `rentEstimated: true`. A room rent ≥ ₹35,000 with a 2+ BHK named is read as the flat total. An AI rent equal to `totalRent` is ignored. Admin → Data → **Re-check all listings** re-runs these rules on stored posts (50 per call, user/AI-set fields kept). |
 | `kind`, `type`, `gender`, `furnishing`, `brokerage` | AI wins when confidence ≥ 0.5 (regex is weakest here: Hinglish, "Looking for flatmate?", "service charge") |
 | `availableFrom` | AI (normalised date) when valid. Keep regex's raw phrase in `data.regex` for display |
 | `society`, `locality`, `summary`, `otherUnits`, `isRental` | AI only (regex has no equivalent, or only a weak one for society) |
@@ -227,6 +228,9 @@ Rules:
   co-living). For seeking posts, use what they want.
 - rent: monthly rent of the first unit listed; per person for flatmate/PG; for seeking posts the budget
   maximum. If the post lists several units or sharing options, put the rest in otherUnits.
+- A room in a flat ("1 room available in 3BHK", "master bedroom available", "replacement for my room") is
+  type "flatmate", not "flat". If such a post gives only the whole flat's rent (e.g. "rent 71k" for a 3BHK
+  when one room is free, or "total rent"), set rent null: never put the whole flat's rent as a room's rent.
 - bhk: "1RK" for 1RK/studio, else the number as a string ("1","1.5","2","2.5","3","4","5"). For flatmate
   posts, the size of the whole flat. null for PG.
 - brokerage: "no" for no/zero brokerage, owner direct, "no brokers"; "yes" for brokerage, agent, commission,
