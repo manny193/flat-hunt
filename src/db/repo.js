@@ -164,8 +164,8 @@ export function createRepo(db) {
     /** Public browse: newest offers in one area (or all), filtered, keyset-paginated by last_posted_at. */
     async publicListings({ area, bhk, maxRent, minRent, type, kind = 'offer', before, limit = 30 }) {
       const where = ['l.is_sample = 0'], p = [];
+      // No area = every stored post in the city (all scraped groups are city-wide); an area narrows it.
       if (area != null) { where.push('l.id IN (SELECT listing_id FROM listing_match WHERE area_id = ?)'); p.push(area); }
-      else where.push('l.id IN (SELECT listing_id FROM listing_match WHERE area_id != 0)');
       if (kind) { where.push('l.kind = ?'); p.push(kind); }
       if (bhk != null) { where.push('l.bhk = ?'); p.push(String(bhk)); }
       if (maxRent != null) { where.push('l.rent <= ?'); p.push(maxRent); }

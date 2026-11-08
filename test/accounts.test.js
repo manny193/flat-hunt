@@ -227,6 +227,23 @@ test('public API: browse by area with filters, detail, no leaks, samples hidden,
   assert.equal((await h.call('GET', '/api/listings')).status, 401, 'the full API still needs sign-in');
 });
 
+test('public API: no area = every post in the city; the area filter narrows it', async () => {
+  const h = await harness();
+  const gg = await h.repo.createArea(GREEN_GLEN, Date.now());
+  const { ingestItems } = await import('../src/ingest.js');
+  await ingestItems(h.repo, [
+    { text: '2BHK available in Green Glen Layout, rent 30000, owner here', url: 'https://www.facebook.com/groups/1/posts/a1/', createdAt: new Date().toISOString() },
+    { text: '1BHK available in Indiranagar, rent 25000, no brokers', url: 'https://www.facebook.com/groups/1/posts/a2/', createdAt: new Date(Date.now() - 60e3).toISOString() },
+  ], { source: 'apify', storeAll: true });
+  const all = await h.jcall('GET', '/api/public/listings?limit=60');
+  assert.equal(all.status, 200);
+  assert.deepEqual(all.data.listings.map(l => l.rent).sort(), [25000, 30000], 'unmatched posts show on the homepage');
+  const one = await h.jcall('GET', `/api/public/listings?area=${gg.id}`);
+  assert.deepEqual(one.data.listings.map(l => l.rent), [30000]);
+  const other = all.data.listings.find(l => l.rent === 25000);
+  assert.equal((await h.call('GET', `/api/public/listings/${other.id}`)).status, 200, 'detail opens for a post with no area');
+});
+
 // ---------- admin API ----------
 test('admin API: schedule settings, groups with Page warning, runs/stats, areas merge, listings search/delete, phone scans', async () => {
   const h = await harness();

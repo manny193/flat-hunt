@@ -1,4 +1,4 @@
-// Public (no login) read-only API: browse listings in any area with filters. Responses go through the
+// Public (no login) read-only API: browse every listing in the city, optionally narrowed to one area. Responses go through the
 // public serializer (src/serialize.js), and every request counts against a per-IP limit in D1.
 //   GET /api/public/areas
 //   GET /api/public/listings?area=&bhk=&minRent=&maxRent=&type=&kind=&before=&limit=
@@ -45,7 +45,7 @@ export async function publicApi(request, env, repo, path, url) {
   if (seg[0] === 'listings' && seg.length === 2) {
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(seg[1])) throw new HttpError(400, 'bad_id');
     const l = await repo.getListing(seg[1]);
-    if (!l || l.isSample || !(l.areas || []).length) return errorJson(404, 'not_found');
+    if (!l || l.isSample || l.kind === 'not_rental') return errorJson(404, 'not_found');
     return json(publicListing(l, { maxPosts: 15 }));
   }
   return errorJson(404, 'not_found', 'No such API route.');

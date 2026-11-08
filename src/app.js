@@ -296,7 +296,7 @@ async function api(request, env, method, path, url, repo, fetchFn, who) {
     if (!Array.isArray(body.items) || !body.items.length) throw new HttpError(400, 'no_items', 'items must be a non-empty array.');
     if (body.items.length > LIMITS.importItems) throw new HttpError(413, 'too_many_items', `At most ${LIMITS.importItems} posts per import.`);
     const items = body.items.filter(x => typeof x === 'string' || (x && typeof x === 'object' && !Array.isArray(x)));
-    const { report, changed } = await ingestItems(repo, items, { source, now, sample: source === 'sample', env });
+    const { report, changed } = await ingestItems(repo, items, { source, now, sample: source === 'sample', storeAll: source !== 'sample', env });
     return json({ report, changed: changed.length });
   }
 

@@ -69,7 +69,7 @@ async function loadAreas() {
   if (signedIn()) { state.myAreas = (await api('GET', '/api/areas').catch(() => ({ areas: [] }))).areas || []; }
   else state.myAreas = [];
   const ids = new Set(state.areas.map(a => a.id));
-  if (!ids.has(state.area)) state.area = state.myAreas[0]?.id ?? state.areas[0]?.id ?? null;
+  if (state.area != null && !ids.has(state.area)) state.area = null; // null = all of the city
 }
 async function syncListings({ full = false } = {}) {
   if (!signedIn()) { state.listings.clear(); return; }
@@ -90,6 +90,8 @@ const dur = ms => ms == null ? '–' : ms < 60e3 ? Math.round(ms / 1000) + ' s' 
 const phoneFmt = p => p && p.length === 10 ? p.slice(0, 5) + ' ' + p.slice(5) : p || '';
 const typeName = l => l.type === 'flatmate' ? 'Room in a shared flat' : l.type === 'pg' ? 'PG / co-living' : l.bhk === '1RK' ? '1 RK' : l.bhk != null ? `${l.bhk} BHK` : 'Flat';
 const kindLine = l => [l.bhk != null && l.type !== 'flat' && l.type ? `${l.bhk === '1RK' ? '1 RK' : l.bhk + ' BHK'}` : '', typeName(l), l.furnishing ? { fully: 'Furnished', semi: 'Semi-furnished', unfurnished: 'Unfurnished' }[l.furnishing] : ''].filter(Boolean);
+// The city every scraped group covers. Areas are optional filters inside it.
+const CITY = 'Bangalore';
 const areaName = id => state.areas.find(a => a.id === id)?.name || state.myAreas.find(a => a.id === id)?.name || '';
 /** Post text for display: escaped, with [[phone]] tokens as the hatched "number hidden" pill. */
 const postHtml = t => esc(t).replace(/\[\[phone\]\]/g, MASKED);
@@ -144,7 +146,7 @@ function renderChrome() {
   const cur = n => (n === r ? ' aria-current="page"' : '');
   const area = areaName(state.area);
   $('#topbar').innerHTML = `<div class="brand"><span class="plate" aria-hidden="true">TO-LET</span><b>Flat Hunt</b></div><span class="sp"></span>
-    ${area ? `<button class="area-chip" type="button" data-act="pick-area">${esc(area)} ${I.chev}</button>` : ''}
+    <button class="area-chip" type="button" data-act="pick-area">${esc(area || 'All ' + CITY)} ${I.chev}</button>
     ${isAdmin() ? `<a class="btn sm" href="#admin-phone">${I.plus}Import</a>` : ''}
     ${signedIn() ? '' : `<a class="btn sm primary" href="#signin">Sign in</a>`}`;
   $('#tabbar').innerHTML = navItems().map(([id, label, icon, n, locked]) => `<a href="#${id}"${cur(id)}>${id === 'account' && signedIn() ? avatar() : icon}<span>${label}</span>${locked ? `<span class="lockg">${I.lock}</span>` : ''}${n ? `<span class="badge">${n}</span>` : ''}</a>`).join('');
@@ -152,10 +154,10 @@ function renderChrome() {
   $('#rail').innerHTML = `<div class="brand"><span class="plate" aria-hidden="true">TO-LET</span><b>Flat Hunt</b></div>
     <nav aria-label="Screens">${navItems().filter(([id]) => id !== 'signin' && id !== 'account').map(([id, label, icon, n, locked]) => `<a href="#${id}"${cur(id)}>${icon}${label}${locked ? ` <span class="lockg">${I.lock}</span>` : ''}${n ? `<span class="badge">${n}</span>` : ''}</a>`).join('')}
     ${signedIn() ? `<a href="#areas"${cur('areas')}>${I.pin}My areas</a>` : ''}</nav>
-    ${signedIn() && my ? `<h3>My areas</h3><nav aria-label="My areas">${my}</nav>` : ''}
+    ${signedIn() && my ? `<h3>My areas</h3><nav aria-label="My areas"><a href="#browse" data-area=""${state.area == null && r === 'browse' ? ' aria-current="page"' : ''}>All ${CITY}</a>${my}</nav>` : ''}
     ${isAdmin() ? `<h3>Admin</h3><nav aria-label="Admin">${ADMIN_PAGES.map(([id, l, ic]) => `<a href="#${id}"${cur(id)}>${ic}${l}</a>`).join('')}</nav>` : ''}
     ${signedIn() ? `<a class="acct" href="#account">${avatar()}<span class="who">${esc(state.me.user?.name || state.me.user?.email || '')}</span></a>` : ctaCard(true)}`;
-  $$('[data-area]', $('#rail')).forEach(a => a.addEventListener('click', () => { setArea(Number(a.dataset.area)); }));
+  $$('[data-area]', $('#rail')).forEach(a => a.addEventListener('click', () => { setArea(a.dataset.area === '' ? null : Number(a.dataset.area)); }));
 }
 function ctaCard(compact = false) {
   return `<div class="cta-card"><span class="plate" aria-hidden="true">TO-LET</span><h2>See the numbers</h2>${compact ? '' : '<p>Sign in free to call or WhatsApp owners directly.</p>'}
@@ -169,9 +171,15 @@ function setArea(id) { state.area = id; store.set('area', id); state.browse.key 
 function areaPicker() {
   const s = openSheet(`<div class="shead"><h2>Pick an area</h2><button class="btn quiet sm" type="button" data-close>Close</button></div>
     <input class="input" id="ap-q" placeholder="Type an area, e.g. HSR Layout" autocomplete="off"><div class="pick-list" id="ap-list"></div>`, { label: 'Pick an area', center: true });
-  const draw = () => { const q = $('#ap-q').value.trim().toLowerCase(); $('#ap-list').innerHTML = state.areas.filter(a => !q || a.name.toLowerCase().includes(q)).map(a => `<button class="pr btn quiet" type="button" data-id="${a.id}"><span class="nm">${esc(a.name)}</span><span class="ct">${a.listings} listings</span></button>`).join('') || '<p class="help">No area matches. Signed-in users can add new areas.</p>'; };
+  const row = (id, name, ct) => `<button class="pr btn quiet" type="button" data-id="${id}" aria-pressed="${(id === '' ? null : id) === state.area}"><span class="nm">${esc(name)}</span><span class="ct">${ct}</span>${(id === '' ? null : id) === state.area ? I.check : ''}</button>`;
+  const draw = () => {
+    const q = $('#ap-q').value.trim().toLowerCase();
+    const all = !q || ('all ' + CITY).toLowerCase().includes(q) ? row('', 'All ' + CITY, 'every post') : '';
+    const list = state.areas.filter(a => !q || a.name.toLowerCase().includes(q)).map(a => row(a.id, a.name, `${a.listings} listings`)).join('');
+    $('#ap-list').innerHTML = (all + list) || '<p class="help">No area matches. Signed-in users can add new areas.</p>';
+  };
   draw(); $('#ap-q').addEventListener('input', draw); $('#ap-q').focus();
-  s.addEventListener('click', e => { if (e.target.closest('[data-close]')) closeSheet(); const b = e.target.closest('[data-id]'); if (b) { closeSheet(); setArea(Number(b.dataset.id)); } });
+  s.addEventListener('click', e => { if (e.target.closest('[data-close]')) closeSheet(); const b = e.target.closest('[data-id]'); if (b) { closeSheet(); setArea(b.dataset.id === '' ? null : Number(b.dataset.id)); } });
 }
 
 // ---------- listing card and board ----------
@@ -246,8 +254,8 @@ const FILTERS = [
 async function renderBrowse() {
   const main = $('#main');
   const area = areaName(state.area);
-  main.innerHTML = `<div class="bhead"><h1>Flats to let in ${area ? `<button class="area-pick" type="button" data-act="pick-area">${esc(area)}</button>` : 'Bangalore'}</h1><p id="bline">Loading listings…</p></div>
-    <div class="filters" role="toolbar" aria-label="Filters">${FILTERS.map(([key, label, , fmt]) => { const v = state.f[key]; const set = key === 'sort' ? v === 'rent' : !!v; return `<button class="fchip${set ? ' set' : ''}" type="button" data-filter="${key}" aria-haspopup="dialog">${esc(set ? fmt(v) : label)} ${I.chev}</button>`; }).join('')}
+  main.innerHTML = `<div class="bhead"><h1>Flats to let in <button class="area-pick" type="button" data-act="pick-area">${esc(area ? `${area}, ${CITY}` : CITY)}</button></h1><p id="bline">Loading listings…</p></div>
+    <div class="filters" role="toolbar" aria-label="Filters"><button class="fchip${area ? ' set' : ''}" type="button" data-act="pick-area" aria-haspopup="dialog">${I.pin}${esc(area || 'All areas')} ${I.chev}</button>${FILTERS.map(([key, label, , fmt]) => { const v = state.f[key]; const set = key === 'sort' ? v === 'rent' : !!v; return `<button class="fchip${set ? ' set' : ''}" type="button" data-filter="${key}" aria-haspopup="dialog">${esc(set ? fmt(v) : label)} ${I.chev}</button>`; }).join('')}
     <button class="fchip${state.f.nobroker ? ' set' : ''}" type="button" data-filter="nobroker" aria-pressed="${state.f.nobroker}">No brokerage</button></div>
     <div class="grid" id="grid">${state.browse.loading || !state.browse.key ? Array.from({ length: 3 }, () => '<div class="skel"><i class="b"></i><i></i><i></i><i></i></div>').join('') : ''}</div><div class="more" id="more"></div>`;
   main.onclick = browseClick;
@@ -261,7 +269,7 @@ function drawGrid() {
   $('#bline').innerHTML = `<b>${L.length}${state.browse.next ? '+' : ''} listing${L.length === 1 ? '' : 's'}</b> from ${groups.size} group${groups.size === 1 ? '' : 's'}, newest first. Reposts are merged into one card.${state.lastIngestMin != null ? ` Checked ${ago(Date.now() - state.lastIngestMin * 60e3)}.` : ''}`;
   const cells = L.map(cardHtml);
   if (!signedIn()) for (let i = 3; i <= cells.length; i += 13) cells.splice(i, 0, ctaCard());
-  $('#grid').innerHTML = cells.join('') || `<div class="empty"><div class="eboard"></div><p>No listings${state.f.bhk ? ` with ${esc(FILTERS[0][3](state.f.bhk))}` : ''}${state.f.maxRent ? ` under ₹${k(Number(state.f.maxRent))}` : ''} in ${esc(areaName(state.area) || 'this area')} yet.</p>${Object.entries(state.f).some(([key, v]) => v && key !== 'sort') ? '<button class="btn" type="button" data-act="clear-filters">Clear filters</button>' : ''}</div>`;
+  $('#grid').innerHTML = cells.join('') || `<div class="empty"><div class="eboard"></div><p>No listings${state.f.bhk ? ` with ${esc(FILTERS[0][3](state.f.bhk))}` : ''}${state.f.maxRent ? ` under ₹${k(Number(state.f.maxRent))}` : ''} in ${esc(areaName(state.area) || CITY)} yet.</p>${state.area != null || Object.entries(state.f).some(([key, v]) => v && key !== 'sort') ? '<button class="btn" type="button" data-act="clear-filters">Clear filters</button>' : ''}</div>`;
   $('#more').innerHTML = state.browse.next ? '<button class="btn" type="button" data-act="more">Show more</button>' : '';
   if (!state.swung && !reduceMotion()) { state.swung = true; $$('#grid .lcard').slice(0, 3).forEach((c, i) => { c.classList.add('swing'); c.style.animationDelay = (i * 60) + 'ms'; }); }
 }
@@ -278,7 +286,7 @@ async function browseClick(e) {
   }
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (act === 'more') { await loadBrowse(true); drawGrid(); }
-  if (act === 'clear-filters') { state.f = { bhk: '', maxRent: '', type: '', nobroker: false, furnishing: '', sort: 'new' }; store.set('filters', state.f); renderBrowse(); }
+  if (act === 'clear-filters') { state.f = { bhk: '', maxRent: '', type: '', nobroker: false, furnishing: '', sort: 'new' }; store.set('filters', state.f); state.area = null; store.set('area', null); state.browse.key = ''; renderBrowse(); }
 }
 
 // ---------- listing detail ----------
@@ -479,7 +487,6 @@ async function renderAreas() {
       if (add || cr) {
         const a = await api('POST', '/api/areas', add ? { areaId: Number(add.dataset.add) } : { name: $('#area-q').value.trim() });
         toast(a.matching ? `Added ${a.name}. Matching existing posts…` : `Added ${a.name}`);
-        if (state.area == null) state.area = a.id;
       }
       if (rm) { await api('DELETE', `/api/areas/${rm.dataset.rm}`); toast('Area removed'); }
       if (add || cr || rm) { await loadAreas(); await syncListings({ full: true }); renderChrome(); renderAreas(); }

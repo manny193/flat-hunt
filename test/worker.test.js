@@ -39,9 +39,9 @@ test('Worker + D1: login, area, import, list, patch; assets only after login', a
   assert.equal(home.status, 200); assert.match(home.headers.get('content-security-policy'), /script-src 'self'/);
   assert.equal((await call('POST', '/api/areas', { name: 'Green Glen' }, cookie)).status, 201);
   const imp = await (await call('POST', '/api/import', { source: 'manual', items: SAMPLES }, cookie)).json();
-  assert.equal(imp.report.newListings, 5); assert.equal(imp.report.merged, 1);
+  assert.equal(imp.report.newListings, 6, 'every housing post is kept, matched or not'); assert.equal(imp.report.merged, 1);
   const again = await (await call('POST', '/api/import', { source: 'manual', items: SAMPLES }, cookie)).json();
-  assert.equal(again.report.dupes, 6);
+  assert.equal(again.report.dupes, 7);
   const { listings } = await (await call('GET', '/api/listings', null, cookie)).json();
   assert.equal(listings.length, 5);
   const p = await (await call('PATCH', `/api/listings/${listings[0].id}`, { status: 'approved' }, cookie)).json();

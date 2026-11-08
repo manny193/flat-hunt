@@ -1,12 +1,14 @@
 # Flat Hunt: handoff
 
-Written 8 Nov 2026, covering 6–8 Nov 2026. The founder is a software engineer in Bangalore (IST) who works at PhonePe, Green Glen Layout, Bellandur. Claude acts as chief of staff and directs specialist agents (SDE, SRE, QA, design head, research analyst). This document is the starting point for whoever picks the project up next.
+Written 8 Nov 2026, covering 6–8 Nov 2026 (updated 8 Nov evening: city-wide homepage and area filter, see D22). The founder is a software engineer in Bangalore (IST) who works at PhonePe, Green Glen Layout, Bellandur. Claude acts as chief of staff and directs specialist agents (SDE, SRE, QA, design head, research analyst). This document is the starting point for whoever picks the project up next.
 
 ---
 
 ## 1. The problem and the goal
 
-- **The problem:**
+> **Scope (founder, 8 Nov):** Flat Hunt is a flat-hunting app for **any city in the world**, not a Green Glen tool. Green Glen was only the founder's own starting need. **Current focus: Bangalore.** The app pulls in every rental post from Bangalore sources and shows them **all on the homepage**; an **area filter** narrows the list to one area (Green Glen, HSR, Indiranagar…).
+
+- **The problem (the founder's origin story):**
   - The founder needs a new flat in Green Glen Layout (near the office and friends) within 2–2.5 months. He has moved 3 times in 3 years.
   - Brokers are expensive, and NoBroker is full of stale listings.
   - The best fresh listings appear in Facebook flat and flatmate groups, and they get taken fast, so speed matters.
@@ -17,12 +19,14 @@ Written 8 Nov 2026, covering 6–8 Nov 2026. The founder is a software engineer 
   - waded through the same posts reposted many times.
 - **The goal:** a fully automated, free app.
   - Posts are pulled from Facebook groups (and now Reddit) automatically.
-  - Only posts mentioning the user's area(s) are shown, with reposts merged.
+  - The homepage shows every rental post in the city (Bangalore for now), newest first, with reposts merged. An area filter narrows it to one area.
+  - Signed-in users still follow their own areas: their swipe deck (Review) only holds posts from those areas.
   - Rent, BHK, deposit, brokerage, contact, map link and photos are extracted.
   - The user approves or rejects listings on a swipe deck and tracks a shortlist.
   - It works on iPhone, Android, Mac and Windows.
 - **Product direction:**
-  - It should work for any area, not just Green Glen: users type area names and the app generates keyword variants.
+  - Worldwide, one city at a time. Bangalore is the only city today; the city name is a single constant in the UI (`CITY` in `web/ui.js`). Multi-city is not built yet (see §9.8).
+  - Areas are filters inside a city, not the scope of the app: users type area names and the app generates keyword variants.
   - It will be shared with other people: a public browse view, Google sign-in for full details, and an admin role for scrapers and data.
 
 ---
@@ -90,7 +94,7 @@ Optional secrets are uploaded only when present. A deploy without them still pas
 | D9 | **Our cron starts the Apify runs (no Apify Schedule)**, with a per-run webhook and an hourly sweep for missed runs. | Gives a dynamic "posts newer than" cutoff and a budget check before every run. |
 | D10 | **Data window:** cutoff = max(last successful start − 1 h, now − `backfillDays`). backfillDays defaults to 3; admin can set 1–5. | Requested by the founder to limit Apify use. |
 | D11 | **Budget guard:** read Apify usage before each run. Above 80%, halve posts per group; above 95%, skip runs until the cycle resets. | Stay inside the $5 credit. |
-| D12 | **Store all posts** (not just matching ones), tagged by area at ingest. A new area triggers a backfill scan of stored posts. Retention is 30 days, except shortlisted listings. | Founder: make it useful for other people and areas. |
+| D12 | **Store all posts** (not just matching ones), tagged by area at ingest. A new area triggers a backfill scan of stored posts. Retention is 30 days, except shortlisted listings. Applies to every source, including the admin's manual import since 8 Nov (samples aside). | Founder: make it useful for other people and areas. |
 | D13 | **Reddit through its official API directly (not Apify).** | Free for non-commercial use, 100 req/min OAuth, adds no Apify cost. Unauthenticated `.json` access has been blocked since mid-2026. |
 | D14 | **Three roles: Public / User (Google sign-in) / Admin (`ADMIN_EMAILS`).** Public gets browse with sensitive data stripped on the server. Users get full details and their own deck, shortlist and areas. Admin gets scrapers, data and users. `APP_PASSWORD` is the break-glass admin login. | Founder's decision. The privacy risk of signed-in users seeing third parties' phone numbers was flagged; an admin "require approval" toggle exists (default off, as the founder asked; Claude and QA recommend on). |
 | D15 | **AI post-reading: Cloudflare Workers AI** `@cf/google/gemma-4-26b-a4b-it`; auto-fallback to `@cf/openai/gpt-oss-20b`, then Groq `openai/gpt-oss-20b` on quota error 3036. | Free (10k neurons/day, about 1,000 posts/day vs ~150 needed), and no training on our data. Gemini free tier was rejected because Google trains on it; OpenRouter (50/day) and Hugging Face (no free credits) were rejected too. Avoid llama-3.1-8b-instruct-fp8 and qwen3-30b-a3b-fp8 (retired 20 Nov 2026). |
@@ -99,6 +103,7 @@ Optional secrets are uploaded only when present. A deploy without them still pas
 | D18 | **Multi-flat broker posts stay one listing (`multiFlat=true`).** After AI corrections, merge automatically only on same phone + same BHK + rent within 2%; otherwise create a merge suggestion on #admin-ai. | Claude's default, open to the founder's view. |
 | D19 | **Same phone number doesn't merge listings on its own.** It also needs rent within 2% or overlapping text. | Keeps a broker's different flats apart. |
 | D20 | **Renamed Flat Radar → Flat Hunt (`flat-hunt`)** everywhere. | Founder's request. |
+| D22 | **City-wide homepage, area as a filter** (8 Nov). Browse with no area returns every stored housing post in the city, including posts that match no area. The area picker (top bar, page heading, and an "All areas" chip at the start of the filter row) offers "All Bangalore" plus every area. The app opens on "All Bangalore"; adding an area no longer switches browse to it. Review/Shortlist stay per-user and area-scoped. | Founder: the app is for the whole city (and later the world), not one area. |
 | D21 | **Visual identity: "enamel To-Let board"**: red tin-board rent plate with rivets, and a dashed strip carrying the phone ("••••• / Sign in to call" when logged out). Cool neutrals, blue-slate dark mode, one red. Fonts: Archivo (condensed rent), Atkinson Hyperlegible Next, Atkinson Mono. | Design head's v2. Swipe review, a separate Shortlist and a separate Passed screen were founder requirements. |
 
 ---
@@ -117,6 +122,7 @@ Phone scan JSON (admin upload) ───────────────┤
               ├─ ingest: housing filter → exact dedupe (post_keys) → candidate fuzzy match
               │          → store listing → tag areas (listing_match) → enqueue AI (ai_queue)
               ├─ auth: Google OIDC (PKCE) or APP_PASSWORD → __Host- HMAC session cookie
+              ├─ browse: no area = all city posts; ?area=<id> narrows via listing_match
               ├─ serializer strips phones/links/maps/authors/society for public
               └─ static UI (web/) via Workers Static Assets, run_worker_first
                                               ▼
@@ -227,7 +233,7 @@ Run reports also show posts labelled with other group names ("…Without Brokers
    - Create a "script" app at reddit.com/prefs/apps: redirect `http://localhost:8080`, read-only non-commercial description.
    - Complete "register to use the API".
    - Add the `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` secrets and the `REDDIT_USERNAME` variable.
-6. **Paste about 6 more Facebook group links** (area-focused groups are cheaper: Bellandur / HSR / Sarjapur / ORR).
+6. **Paste about 6 more Facebook group links.** Since the homepage is now city-wide, Bangalore-wide groups are the better pick; area-focused groups (Bellandur / HSR / Sarjapur / ORR) are cheaper but narrower.
 7. **Optional:** run the phone-scan probe and a scan.
 8. **Optional:** decide on a paid domain.
 
@@ -281,6 +287,8 @@ Run reports also show posts labelled with other group names ("…Without Brokers
 - The phone-layout check at 375×667 only fits when no banner is showing.
 
 ### 9.8 Product questions still open
+- **Multi-city:** how to add a second city. Likely a `city` on groups/subreddits and areas, a city picker in the UI, and `?city=` on browse. Not started; Bangalore is hard-wired as the only city.
+- **Groups should be city-wide:** now that the homepage shows the whole city, prefer large Bangalore-wide groups over area-only ones (this changes the advice in §8 item 6).
 - Should broker multi-flat posts be split into separate listings? (Currently one listing, flagged.)
 - Auto-merge vs suggest after AI changes BHK or rent? (Currently strict auto-merge, otherwise suggest.)
 - How many Facebook groups, and which, within the budget?
@@ -309,3 +317,4 @@ Run reports also show posts labelled with other group names ("…Without Brokers
 - **8 Nov:**
   - 3 scheduled runs succeeded, 94 listings stored, 2 in Green Glen.
   - Found the Apify cost risk (9.1) and the AI failures (9.2).
+  - Founder reset the scope: a worldwide flat-hunt app, Bangalore first. Homepage now shows every Bangalore post with an area filter (D22); manual imports keep unmatched posts too. Not deployed yet.
