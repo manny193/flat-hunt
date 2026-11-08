@@ -7,7 +7,7 @@ import { redditStep, redditConfigured, subredditsOf, validateSubreddits, DEFAULT
 import { validateGroups, groupsView, groupId, classifyFacebookUrl, PAGE_WARNING } from './groups.js';
 import { editArea, areaName, LIMITS } from './app.js';
 import { cleanKeywords } from './core/keywords.js';
-import { watchedGroups, isKnownGroup } from './core/logic.js';
+import { watchedGroups, isKnownGroup, reparseListing } from './core/logic.js';
 import { backfillState } from './backfill.js';
 import { adminEmails } from './auth.js';
 import { aiStatus, acceptSuggestion, aiConfigOf, runEnrich } from './ai.js';
@@ -15,6 +15,7 @@ import { financeView, validateBudget } from './finance.js';
 import { alertsAdminApi } from './alerts.js';
 
 const DAY = 864e5;
+const REPARSE_PAGE = 50; // listings per re-check call: 1 read + one write batch, well inside CPU and D1 limits
 const int = v => (v != null && /^\d{1,15}$/.test(String(v)) ? Number(v) : null);
 const clampInt = (v, lo, hi, def) => { const n = int(v); return n == null ? def : Math.min(hi, Math.max(lo, n)); };
 const dayKey = t => new Date(t + 5.5 * 36e5).toISOString().slice(0, 10); // IST calendar day
@@ -349,6 +350,14 @@ export async function adminApi(request, env, method, path, url, repo, fetchFn, w
       const ids = (await body())?.ids;
       if (!Array.isArray(ids) || !ids.length || ids.length > 500 || !ids.every(x => typeof x === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x))) throw new HttpError(400, 'bad_ids', 'ids: 1 to 500 listing ids.');
       return json({ deleted: await repo.deleteListings(ids) });
+    }
+    // Re-check type (shared/whole) and rent on stored posts after a rule change. Paged by rowid: the UI calls again with `next` until done.
+    if (id === 'reparse' && method === 'POST') {
+      const b = await body(); const after = Number.isInteger(b?.after) && b.after >= 0 ? b.after : 0;
+      const rows = await repo.listingsAfterRowid(after, REPARSE_PAGE);
+      const changed = rows.map(r => r.listing).filter(reparseListing);
+      if (changed.length) await repo.saveIngest({ listings: changed, keys: [], run: null, now });
+      return json({ checked: rows.length, changed: changed.length, next: rows.at(-1)?.rid ?? after, done: rows.length < REPARSE_PAGE });
     }
     if (!id && method === 'GET') {
       const qq = (q.get('q') || '').trim().slice(0, 100); const area = q.get('area');

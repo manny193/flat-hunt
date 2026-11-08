@@ -35,6 +35,9 @@ Rules:
   co-living). For seeking posts, use what they want.
 - rent: monthly rent of the first unit listed; per person for flatmate/PG; for seeking posts the budget
   maximum. If the post lists several units or sharing options, put the rest in otherUnits.
+- A room in a flat ("1 room available in 3BHK", "master bedroom available", "replacement for my room") is
+  type "flatmate", not "flat". If such a post gives only the whole flat's rent (e.g. "rent 71k" for a 3BHK
+  when one room is free, or "total rent"), set rent null: never put the whole flat's rent as a room's rent.
 - bhk: "1RK" for 1RK/studio, else the number as a string ("1","1.5","2","2.5","3","4","5"). For flatmate
   posts, the size of the whole flat. null for PG.
 - brokerage: "no" for no/zero brokerage, owner direct, "no brokers"; "yes" for brokerage, agent, commission,
@@ -170,6 +173,7 @@ export function mergeAi(l, v, { postId, model, now }) {
   if (final >= 0.5) for (const k of MEANING) set(k, f[k]);
   for (const k of MONEY) {
     if (f[k] == null) continue;
+    if (k === 'rent' && l.type === 'flatmate' && l.totalRent && f[k] === l.totalRent) continue; // the whole flat's rent, not the room's
     if (l[k] != null && l[k] !== f[k]) conflicts[k] = [l[k], f[k]];
     if (l[k] == null || final >= 0.7) set(k, f[k]);
   }

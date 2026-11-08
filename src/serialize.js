@@ -36,7 +36,7 @@ export function publicText(s, hide = []) {
     .replace(LINK, '[link]').replace(TEL, '[link]').replace(BARE_LINK, '[link]').replace(EMAIL, '[email]'));
 }
 
-const PUBLIC_SCALARS = ['id', 'kind', 'bhk', 'rent', 'type', 'deposit', 'depositMonths', 'maintenance', 'brokerage', 'brokerageAmount',
+const PUBLIC_SCALARS = ['id', 'kind', 'bhk', 'rent', 'totalRent', 'rentEstimated', 'type', 'deposit', 'depositMonths', 'maintenance', 'brokerage', 'brokerageAmount',
   'furnishing', 'gender', 'availableFrom', 'firstPostedAt', 'lastPostedAt', 'seenCount'];
 const img = u => typeof u === 'string' && /^https:\/\/(?:[a-z0-9.-]+\.fbcdn\.net|i\.redd\.it|preview\.redd\.it)\//i.test(u);
 
