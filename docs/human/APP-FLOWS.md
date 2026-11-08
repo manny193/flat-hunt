@@ -32,13 +32,15 @@ What people do in Flat Hunt, step by step. Written for non-technical readers. La
 1. Go to **Areas** and type the areas you are hunting in.
 2. Flat Hunt finds matching posts it already has, then keeps matching new ones.
 
-### 5. Review (swipe)
+### 5. Like or reject on the homepage
 
-1. Open **Review**. You see one post at a time, from your areas only.
-2. Swipe right (or tap Keep) to shortlist it. Swipe left (or tap Pass) to pass.
-3. Undo appears for a few seconds if you change your mind.
+The separate Review (swipe) screen was removed in Nov 2026: filtering happens on the homepage, so the actions live there too.
+
+1. Signed in, every listing card on **Browse** has four buttons: **Reject** (red cross), **Like** (green heart), **Details** and **Post**.
+2. **Like** adds the flat to your Shortlist (tap again to remove it). **Reject** hides the card from Browse and moves it to **Passed**.
+3. Undo appears for a few seconds if you change your mind. Old `#review` links open Browse.
 4. If a shortlisted flat is posted again with new details, it is flagged as updated.
-5. Tap **View original post** on a card (or on each post in the full details) to open the Facebook or Reddit post in a new tab. Visitors who are not signed in see "Sign in to view the original post" instead.
+5. **Post** opens the Facebook or Reddit post in a new tab (also on each post in the full details). Visitors who are not signed in see no buttons on the cards and "Sign in to view the original post" in the details.
 
 ### 6. Shortlist
 
@@ -148,5 +150,5 @@ In words:
 1. **Scrape.** At each run hour, the server asks Apify for posts newer than the last run, minus a 15-minute overlap. We pay per post, so we never ask for old ones.
 2. **Ingest.** When Apify finishes, it calls our server. The server reads the posts in small batches, so it stays inside the free plan's limits. If it is cut off, it carries on where it stopped.
 3. **Dedupe.** A post we have already seen is ignored. A repost of the same flat, even reworded, is merged into the existing listing. The same phone number alone does not merge two listings, because brokers post many different flats.
-4. **Listing.** The result is one listing per flat, tagged with its areas. It shows on the homepage for everyone, and in the swipe deck of users who follow that area.
+4. **Listing.** The result is one listing per flat, tagged with its areas. It shows on the homepage for everyone, and in the area filter, and in the alerts of users who follow that area.
 5. **Clean-up.** Each day, listings older than 30 days are removed, unless someone shortlisted them.

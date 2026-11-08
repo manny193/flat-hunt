@@ -57,7 +57,8 @@ Routes are hash names. The hash router replaces the v1 `SCREENS` list.
 |---|---|---|---|
 | `#browse` (default) | yes | yes | yes |
 | `#listing-<id>` (detail sheet over current screen) | masked | full | full |
-| `#review` `#shortlist` `#passed` | opens sign-in sheet | yes | yes |
+| `#shortlist` `#passed` | opens sign-in sheet | yes | yes |
+| `#review` (removed Nov 2026; redirects to `#browse`) | – | – | – |
 | `#signin` | sheet | – | – |
 | `#areas` (My areas) | – | yes | yes |
 | `#account` (theme, sign out, areas link, admin links on phone) | – | yes | yes |
@@ -68,8 +69,8 @@ Routes are hash names. The hash router replaces the v1 `SCREENS` list.
 A non-admin who opens an `#admin-*` route goes to `#browse` with the toast "That page is for admins."
 
 **Phone, bottom tabs (64px plus the safe area):**
-- Public: Browse · Review · Shortlist · Sign in. Review and Shortlist show a small lock glyph and open the sign-in sheet with a context line ("Sign in to get your own swipe deck").
-- User and admin: Browse · Review (hot badge) · Shortlist · Passed · Me (avatar). On an admin's Me screen, an "Admin" section lists the six admin pages.
+- Public: Browse · Shortlist · Sign in. Shortlist shows a small lock glyph and opens the sign-in sheet with a context line.
+- User and admin: Browse · Shortlist · Passed · Me (avatar). Signed-in Browse cards end in an action row (`.lacts`, 4 equal cells, ≥ 52px tall): Reject (`--tolet-text` cross), Like (`--keep` heart, filled when liked), Details, Post (original post, new tab). Reject fades the card out (`.leaving`, skipped with reduced motion). On an admin's Me screen, an "Admin" section lists the six admin pages.
 - Top bar: brand on the left; area chip and Import (admin only) on the right.
 
 **Desktop (≥900px), 240px rail:** brand, then the nav group (same items), then the "My areas" list with each area's count, then an "Admin" group for admins only (Scraper, Groups, Phone scans, AI extraction, Data, Users). The account row with avatar and menu sits at the bottom. For the public, the rail ends with the red sign-in card (compact version of `.cta-card`).
