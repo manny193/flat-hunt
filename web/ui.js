@@ -211,6 +211,23 @@ function chipsHtml(l) {
   if (l.hasUpdate) c.push('<span class="chip">Updated</span>');
   return c.length ? `<div class="chips">${c.join('')}</div>` : '';
 }
+// ---------- Original post button ----------
+// Only http(s) Facebook or Reddit URLs become links; anything else (javascript:, data:, other hosts) is dropped.
+function origUrl(u) {
+  try { const x = new URL(String(u)); const h = x.hostname.toLowerCase();
+    if ((x.protocol === 'https:' || x.protocol === 'http:') && ['facebook.com', 'reddit.com'].some(d => h === d || h.endsWith('.' + d))) return x.href;
+  } catch { /* not a URL */ }
+  return '';
+}
+const LINK_ICON = svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>');
+/** "View original post" for a post, or the sign-in prompt for visitors. Empty when a signed-in user has no valid URL. */
+function origBtn(q, sm = true) {
+  const cls = 'btn' + (sm ? ' sm' : '') + ' orig';
+  if (!signedIn()) return `<a class="${cls}" href="#signin">Sign in to view the original post</a>`;
+  const u = origUrl(q?.url); return u ? `<a class="${cls}" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${LINK_ICON}View original post</a>` : '';
+}
+const latestUrlPost = l => (l.posts || []).find(q => origUrl(q.url)) || (l.posts || [])[0];
+
 function cardHtml(l) {
   const imgs = imagesOf(l);
   const group = l.posts?.[0]?.group || l.groups?.[0] || '';
@@ -321,7 +338,7 @@ async function openListing(id) {
     ${contact}${userBtns}
     ${imgs.length ? `<div class="photos">${imgs.map(u => `<img src="${esc(u)}" alt="" loading="lazy" referrerpolicy="no-referrer">`).join('')}</div>` : ''}
     <h3 class="stage-h">${(l.posts || []).length > 1 ? `${l.posts.length} posts merged` : 'Post'}</h3>
-    ${(l.posts || []).map(q => `<div class="post"><div class="pm"><b>${esc(q.group || 'Group not detected')}</b><span>${ago(q.postedAt || q.importedAt)}</span>${signedIn() && q.author ? `<span>${esc(q.author)}</span>` : ''}${signedIn() && q.url ? `<a href="${esc(q.url)}" target="_blank" rel="noopener">Open post</a>` : ''}</div><p class="pt">${postHtml(q.text)}</p></div>`).join('')}
+    ${(l.posts || []).map(q => `<div class="post"><div class="pm"><b>${esc(q.group || 'Group not detected')}</b><span>${ago(q.postedAt || q.importedAt)}</span>${signedIn() && q.author ? `<span>${esc(q.author)}</span>` : ''}</div><p class="pt">${postHtml(q.text)}</p>${origBtn(q, false)}</div>`).join('')}
     ${l.rentHistory?.length ? `<h3 class="stage-h">Rent history</h3><p class="small">${l.rentHistory.map(h => `${inr(h.rent)} (${when(h.at)})`).join(' → ')} → ${inr(l.rent)}</p>` : ''}`;
   s.onclick = async e => {
     if (e.target.closest('[data-close]')) closeSheet();
@@ -349,7 +366,7 @@ function renderReview() {
     const pos = a.length - 1 - i;
     return `<article class="scard ${pos === 0 ? 'top' : 'b' + pos}" data-id="${esc(l.id)}" aria-label="${esc((l.rent ? inr(l.rent) + ' a month' : 'Rent not stated') + ', ' + typeName(l))}"${pos === 0 ? ' tabindex="0"' : ''}>
       <span class="stamp keep">SHORTLIST</span><span class="stamp pass">PASS</span>${boardHtml(l)}${chipsHtml(l)}<p class="excerpt">${postHtml(firstText(l))}</p>
-      <div class="sfoot">${(l.mapLinks || []).length ? `${I.pin}<span class="on">Map pin</span>` : ''}${imagesOf(l).length ? `${I.photo}<span>${imagesOf(l).length} photos</span>` : ''}<span class="sp"></span><button class="btn quiet sm info-btn" type="button" data-open="${esc(l.id)}">Full post</button></div></article>`;
+      <div class="sfoot">${(l.mapLinks || []).length ? `${I.pin}<span class="on">Map pin</span>` : ''}${imagesOf(l).length ? `${I.photo}<span>${imagesOf(l).length} photos</span>` : ''}<span class="sp"></span>${origBtn(latestUrlPost(l))}<button class="btn quiet sm info-btn" type="button" data-open="${esc(l.id)}">Full post</button></div></article>`;
   }).join('')}</div>
     <div class="deck-btns"><button class="rb sm" type="button" data-act="undo" aria-label="Undo"${state.undo.length ? '' : ' disabled'}>${I.undo}</button><button class="rb lg passb" type="button" data-act="pass" aria-label="Pass">${I.x}</button><button class="rb lg keepb" type="button" data-act="keep" aria-label="Shortlist">${I.heart}</button></div>
     <p class="kbdline"><kbd>←</kbd> pass · <kbd>→</kbd> shortlist · <kbd>↓</kbd> details · <kbd>Z</kbd> undo</p></div>` : reviewEmpty()}</div>`;
@@ -435,7 +452,7 @@ function rowHtml(l, passed = false) {
   return `<div class="srow" data-id="${esc(l.id)}"><button class="mini" type="button" data-open="${esc(l.id)}"><b>${l.rent ? k(l.rent) : '–'}</b><span>${esc(typeName(l))}</span></button>
     <div class="body"><span class="t">${esc((l.areas || []).map(areaName).filter(Boolean)[0] || '')}${l.society ? ' · ' + esc(l.society) : ''} ${l.hasUpdate ? '<span class="upd">Updated</span>' : ''}</span>
     <span class="small">${esc((l.posts?.[0]?.text || '').slice(0, 120))}</span>
-    <div class="acts">${passed ? `<button class="btn sm" type="button" data-restore>${I.undo}Restore</button>` : `
+    <div class="acts">${origBtn(latestUrlPost(l))}${passed ? `<button class="btn sm" type="button" data-restore>${I.undo}Restore</button>` : `
       ${p ? `<a class="btn sm" href="tel:+91${esc(p)}" aria-label="Call">${I.phone}</a><a class="btn sm keep" href="https://wa.me/91${esc(p)}" target="_blank" rel="noopener" aria-label="WhatsApp">${I.wa}</a>` : ''}
       <select class="stage-pill" data-stage aria-label="Stage">${STAGES.map(s => `<option${s === l.stage ? ' selected' : ''}>${esc(s)}</option>`).join('')}</select>
       ${STAGES.indexOf(l.stage) < STAGES.length - 1 ? `<button class="btn sm" type="button" data-next>Next: ${esc(STAGES[STAGES.indexOf(l.stage) + 1] || STAGES[0])}</button>` : ''}
