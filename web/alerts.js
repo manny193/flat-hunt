@@ -199,7 +199,7 @@ export function createAlertsUI(ctx) {
     const n = x => (x ?? 0).toLocaleString('en-IN');
     main.innerHTML = `<div class="wrap">${adminHead('Alerts')}
       <div class="panel"><div class="phead"><h2>Switches</h2></div>
-        ${v.configured ? '' : '<p class="help warn-txt">VAPID secrets are not set on the server, so alerts stay off. See docs/DEPLOY.md.</p>'}
+        ${v.configured ? '' : `<p class="help warn-txt">${esc(v.configProblem || 'VAPID secrets are not set.')} Alerts stay off until this is fixed. See docs/DEPLOY.md.</p>`}
         <div><label class="toggle"><span>Alerts on</span><input type="checkbox" role="switch" id="aa-en"${v.enabled ? ' checked' : ''}></label></div>
         <div><label class="toggle"><span>Admins only (soft launch)</span><input type="checkbox" role="switch" id="aa-ao"${v.adminOnly ? ' checked' : ''}></label></div>
         <p class="help">While “Admins only” is on, only admins see alerts and receive them.</p>

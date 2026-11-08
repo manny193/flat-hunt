@@ -40,7 +40,9 @@ test('VAPID JWT: 3 base64url parts, ES256, aud = endpoint origin, exp within 24 
 
 test('importVapid refuses malformed secrets', async () => {
   const { env } = await testVapid();
-  for (const bad of [{ VAPID_PUBLIC_KEY: 'abc' }, { VAPID_PRIVATE_KEY: 'abc' }, { VAPID_SUBJECT: '' }, { VAPID_PUBLIC_KEY: b64u(new Uint8Array(65)) }]) await assert.rejects(importVapid({ ...env, ...bad }), /vapid_invalid/);
+  for (const bad of [{ VAPID_PUBLIC_KEY: 'abc' }, { VAPID_PRIVATE_KEY: 'abc' }, { VAPID_PUBLIC_KEY: b64u(new Uint8Array(65)) }]) await assert.rejects(importVapid({ ...env, ...bad }), /vapid_invalid/);
+  for (const sub of ['', 'alerts@flat-hunt.invalid', 'http://flat-hunt.example', 'mailto:', 'ftp://x']) await assert.rejects(importVapid({ ...env, VAPID_SUBJECT: sub }), /vapid_subject/, sub);
+  for (const sub of ['mailto:alerts@flat-hunt.invalid', 'https://flat-hunt.example.workers.dev']) await importVapid({ ...env, VAPID_SUBJECT: sub });
 });
 
 test('send: one bodiless POST with VAPID, TTL, Urgency and Topic headers; responses classified', async () => {

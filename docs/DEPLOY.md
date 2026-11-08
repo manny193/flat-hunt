@@ -69,7 +69,8 @@ else works as before. Design: `docs/ai/ALERTS-WEBPUSH.md`.
    ```
 2. Add three GitHub Actions secrets: `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` (the two printed values) and
    `VAPID_SUBJECT`: `mailto:` and an alias you control, or the app URL (`https://flat-hunt.<subdomain>.workers.dev`).
-   Push services may contact this address; do not use a personal email. Keep a copy of the key pair in your password
+   Push services may contact this address; do not use a personal email. It must start with `mailto:` or `https://`;
+   otherwise alerts stay off and Admin → Alerts says "VAPID_SUBJECT must be mailto: or https:". Keep a copy of the key pair in your password
    manager: a new key pair invalidates every subscription (everyone has to turn alerts on again).
 3. Redeploy (**Actions → Deploy → Run workflow**). Then in the app: Admin → **Alerts** → turn **Alerts on**. Keep
    **Admins only** on while you test, turn alerts on under Me → Alerts and press **Send a test**. On iPhone (iOS 16.4+)
@@ -206,6 +207,9 @@ this needs the VAPID secrets). If any check fails, the deploy rolls back.
   job and would otherwise run it every 10 minutes. Code from the alerts release onwards ignores cron strings it
   does not know, so later rollbacks are safe. **[unverified: whether `wrangler rollback` restores the trigger list;
   check `wrangler triggers` / the dashboard after a rollback.]**
+- **After any rollback past the alerts release (manual or the automatic one after a failed smoke test)** (QA N1):
+  open Cloudflare → Workers & Pages → flat-hunt → Settings → Triggers (or run `wrangler triggers`). If the
+  running version is older than the alerts release and `*/10 * * * *` is still listed, delete that trigger.
 
 ## Rotating secrets
 

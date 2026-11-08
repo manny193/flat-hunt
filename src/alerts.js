@@ -58,7 +58,9 @@ export const MAX_TARGETS = 5;
 export const BHK_VALUES = ['1RK', '1', '1.5', '2', '2.5', '3', '3.5', '4', '4.5', '5', '6'];
 const KB = 1024;
 
-export const vapidConfigured = env => !!(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && env.VAPID_SUBJECT);
+export const vapidConfigured = env => !!(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && env.VAPID_SUBJECT) && channels.webpush.validSubject(env.VAPID_SUBJECT);
+/** Admin status line for the VAPID secrets (never includes their values). */
+const vapidStatus = env => !(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && env.VAPID_SUBJECT) ? 'VAPID secrets are not set.' : !channels.webpush.validSubject(env.VAPID_SUBJECT) ? channels.webpush.SUBJECT_MSG : null;
 /** Why this caller cannot use alerts right now, or null. Admin switch, VAPID secrets, soft launch. */
 export function alertsBlocked(cfg, env, role) {
   if (!vapidConfigured(env)) return 'not_configured';
@@ -163,7 +165,7 @@ async function adminView(repo, env, now) {
   const c = (await repo.alertAdminCounts(istDayStart(now))) || {};
   const today = run.day === istDayStart(now);
   return {
-    configured: vapidConfigured(env), enabled: cfg.enabled, adminOnly: cfg.adminOnly, maxPushesPerDay: cfg.maxPushesPerDay,
+    configured: vapidConfigured(env), configProblem: vapidStatus(env), enabled: cfg.enabled, adminOnly: cfg.adminOnly, maxPushesPerDay: cfg.maxPushesPerDay,
     defaults: { quietStart: cfg.quietStart, quietEnd: cfg.quietEnd, maxListings: cfg.maxListings, maxDigests: cfg.maxDigests, minGapMin: cfg.minGapMin },
     targets: { webpush: c.webpush || 0 }, failingTargets: c.failing || 0, usersWithAlerts: c.users || 0, areasWithAlerts: c.areas || 0,
     queue: { pending: c.pending || 0, sentToday: c.sent_today || 0, cappedToday: c.capped_today || 0, expired7d: c.expired || 0 },
@@ -272,7 +274,7 @@ const isAdminRow = (u, env) => u.role === 'admin' || adminEmails(env).includes(S
  * pending for the next run, oldest first. Returns a small status object (no personal data).
  */
 export async function alertStep(repo, env, { fetchFn = fetch, now = Date.now(), maxSends = MAX_SENDS } = {}) {
-  if (!vapidConfigured(env)) return { action: 'off', reason: 'not_configured' };
+  if (!vapidConfigured(env)) return { action: 'off', reason: vapidStatus(env) === channels.webpush.SUBJECT_MSG ? 'bad_subject' : 'not_configured' };
   if (repo.left && repo.left() < 10) return { action: 'skipped', reason: 'budget' };
   const settings = await repo.getSettings();
   const cfg = alertsConfig(settings);

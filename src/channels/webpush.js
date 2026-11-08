@@ -38,17 +38,21 @@ export function allowedEndpoint(endpoint) {
 export const cleanLabel = v => String(typeof v === 'string' ? v : '').replace(/[^\p{L}\p{N} ·()./,+-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 40);
 
 // ---------- VAPID ----------
+/** VAPID `sub` must be a mailto: or https: URL (Apple rejects anything else with 403). Never echo the value. */
+export const validSubject = s => typeof s === 'string' && /^(mailto:\S+@\S+|https:\/\/\S+)$/i.test(s.trim());
+export const SUBJECT_MSG = 'VAPID_SUBJECT must be mailto: or https:';
 /**
  * Import the VAPID key pair once per invocation. VAPID_PUBLIC_KEY is the base64url 65-byte uncompressed
  * P-256 point, VAPID_PRIVATE_KEY the base64url 32-byte scalar d. Throws 'vapid_invalid' on bad secrets.
  */
 export async function importVapid(env) {
   const pub = b64uDecode(env.VAPID_PUBLIC_KEY); const d = b64uDecode(env.VAPID_PRIVATE_KEY);
-  if (!pub || pub.length !== 65 || pub[0] !== 4 || !d || d.length !== 32 || !env.VAPID_SUBJECT) throw new Error('vapid_invalid');
+  if (!validSubject(env.VAPID_SUBJECT)) throw new Error('vapid_subject');
+  if (!pub || pub.length !== 65 || pub[0] !== 4 || !d || d.length !== 32) throw new Error('vapid_invalid');
   const jwk = { kty: 'EC', crv: 'P-256', x: b64uEncode(pub.slice(1, 33)), y: b64uEncode(pub.slice(33, 65)), d: b64uEncode(d) };
   let key;
   try { key = await crypto.subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']); } catch { throw new Error('vapid_invalid'); }
-  return { key, publicKey: b64uEncode(pub), subject: String(env.VAPID_SUBJECT), cache: new Map(), signs: 0 };
+  return { key, publicKey: b64uEncode(pub), subject: String(env.VAPID_SUBJECT).trim(), cache: new Map(), signs: 0 };
 }
 export const JWT_TTL_S = 3600; // under every push service's 24 h maximum; tokens live for one invocation only
 

@@ -624,3 +624,16 @@ test('admin alerts: admin only, counts only, switches validated and stored, test
   assert.equal(t.status, 202); assert.deepEqual(t.data, { sent: 1, failed: 0 });
   assert.deepEqual(push.calls.map(c => c.url), ['https://web.push.apple.com/BOSS-DEVICE'], "only the admin's own device");
 });
+
+test('VAPID_SUBJECT that is not mailto: or https: keeps alerts idle and admin shows a clear status without the value (QA N3)', async () => {
+  const h = await apiHarness();
+  h.env.VAPID_SUBJECT = 'owner-secret-subject@example.com';
+  const boss = await h.sessionFor('boss@example.com');
+  const v = await h.call('GET', '/api/admin/alerts', undefined, boss.cookie);
+  assert.equal(v.data.configured, false); assert.equal(v.data.configProblem, 'VAPID_SUBJECT must be mailto: or https:');
+  assert.ok(!v.text.includes('owner-secret-subject'), 'value never printed');
+  assert.equal((await h.call('GET', '/api/alerts/config', undefined, boss.cookie)).data.reason, 'not_configured');
+  const push = fakePush();
+  assert.deepEqual(await alertStep(budgeted(h.repo), h.env, { fetchFn: push.fn }), { action: 'off', reason: 'bad_subject' });
+  assert.equal(push.calls.length, 0);
+});
