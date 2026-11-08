@@ -120,6 +120,10 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE/api/listings")
           echo "unauthenticated GET /api/listings -> $code"
           [ "$code" = "401" ] || { echo "::error::Listings API is not behind login (got $code, want 401)"; exit 1; }
+          # web/ui.js imports /finance.js as a module: if it is missing, the whole app (public page too) is blank.
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE/finance.js")
+          echo "GET /finance.js -> $code"
+          [ "$code" = "200" ] || { echo "::error::/finance.js is not served (got $code); the UI would not load"; exit 1; }
           code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST \
             -H 'Content-Type: application/json' -H 'X-Ingest-Secret: wrong' \
             --data '{"datasetId":"smoke-test"}' "$BASE/api/ingest/apify")
