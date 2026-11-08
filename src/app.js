@@ -15,6 +15,7 @@ import { startBackfill, backfillState } from './backfill.js';
 import { generateKeywords, cleanKeywords } from './core/keywords.js';
 import { esc } from './core/logic.js';
 import { STAGES, STATUSES } from './db/repo.js';
+import { alertsApi } from './alerts.js';
 
 const KB = 1024;
 export const LIMITS = { importBytes: 2 * KB * KB, webhookBytes: 16 * KB, smallBytes: 64 * KB, importItems: 3000 };
@@ -360,6 +361,8 @@ async function api(request, env, method, path, url, repo, fetchFn, who) {
     return json({ listings: rows.map(out), next: rows.length === limit ? rows[rows.length - 1].lastPostedAt : null });
   }
 
+  // Area alerts (src/alerts.js): config, prefs, areas, devices, inbox, test send.
+  if (res === 'alerts') return alertsApi(request, env, method, seg.slice(1), url, repo, fetchFn, who);
   if (res === 'keywords' && !id && method === 'GET') return json({ keywords: generateKeywords(areaName(url.searchParams.get('name'))) });
   if (res === 'runs' && !id && method === 'GET') { adminOnly(who); return json({ runs: await repo.listRuns(20) }); }
   if (res === 'apify' && id === 'run' && method === 'POST') {

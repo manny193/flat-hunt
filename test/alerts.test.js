@@ -10,6 +10,8 @@ import { createRepo } from '../src/db/repo.js';
 import { ingestItems } from '../src/ingest.js';
 import { runBackfill, startBackfill } from '../src/backfill.js';
 import { budgeted, ingestDataset } from '../src/apify.js';
+import { createApp } from '../src/app.js';
+import { createUserSession, COOKIE } from '../src/auth.js';
 
 const DAY = 864e5;
 const DEFAULTS = { quietStart: 22, quietEnd: 8, maxListings: 30, maxDigests: 6, minGapMin: 60 };
@@ -178,4 +180,131 @@ test('a full webhook dataset ingest (all pages) with alerts on stays within the 
   assert.equal(res.status, 'partial');
   assert.ok(r.used() <= 48, `used ${r.used()}`);
   assert.ok((await w.queue()).length > 0, 'alerts were queued');
+});
+
+// ---------- user API ----------
+const BASE = 'https://hunt.test';
+const b64u = b => Buffer.from(b).toString('base64url');
+/** A throwaway VAPID key pair made with WebCrypto for this test run. Never a real key. */
+async function testVapid() {
+  const kp = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const raw = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
+  const jwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
+  return { VAPID_PUBLIC_KEY: b64u(raw), VAPID_PRIVATE_KEY: jwk.d, VAPID_SUBJECT: 'mailto:alerts@flat-hunt.invalid', publicKey: kp.publicKey };
+}
+const subKeys = () => ({ p256dh: b64u(Uint8Array.from([4, ...Array.from({ length: 64 }, (_, i) => i + 1)])), auth: b64u(new Uint8Array(16).fill(7)) });
+const sub = (endpoint, keys = subKeys()) => ({ channel: 'webpush', subscription: { endpoint, keys }, label: 'Android · Chrome' });
+
+async function apiHarness({ alerts = { enabled: true, adminOnly: false }, vapid = true, fetchFn } = {}) {
+  const t = await memoryDb();
+  const keys = vapid ? await testVapid() : {};
+  const env = { RUNTIME: 'worker', SESSION_SECRET: 'session-secret-0123456789abcdef0123', ADMIN_EMAILS: 'boss@example.com', GOOGLE_CLIENT_ID: 'cid.apps.googleusercontent.com', GOOGLE_CLIENT_SECRET: 'gsecret', PUBLIC_BASE_URL: BASE, ...keys };
+  delete env.publicKey;
+  const app = createApp({ repo: () => t.repo, assets: async () => null, fetch: fetchFn });
+  if (alerts) await t.repo.putSettings({ alerts });
+  const sessionFor = async (email, role = 'user', status = 'active') => {
+    const u = await t.repo.upsertUser({ email, name: email.split('@')[0], role, status }, Date.now());
+    return { user: u, cookie: `${COOKIE}=${await createUserSession(env, u.id, role)}` };
+  };
+  const call = async (method, path, body, cookie) => {
+    const headers = { ...(cookie ? { cookie } : {}), ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(method !== 'GET' ? { 'sec-fetch-site': 'same-origin' } : {}) };
+    const r = await app.fetch(new Request(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }), env, {});
+    const text = await r.text(); let data; try { data = JSON.parse(text); } catch { data = text; }
+    return { status: r.status, data, text, headers: r.headers };
+  };
+  return { ...t, app, env, keys, call, sessionFor };
+}
+
+test('alerts API: public 401 and pending 403 on every route', async () => {
+  const h = await apiHarness();
+  const pending = await h.sessionFor('p@example.com', 'user', 'pending');
+  const routes = [['GET', '/api/alerts/config'], ['PUT', '/api/alerts/prefs', {}], ['PUT', '/api/alerts/areas', { areas: [] }], ['POST', '/api/alerts/targets', sub(FCM(1))], ['DELETE', '/api/alerts/targets/1'], ['GET', '/api/alerts/inbox'], ['POST', '/api/alerts/test']];
+  for (const [m, p, b] of routes) {
+    assert.equal((await h.call(m, p, b)).status, 401, `public ${m} ${p}`);
+    assert.equal((await h.call(m, p, b, pending.cookie)).status, 403, `pending ${m} ${p}`);
+  }
+});
+
+test('alerts API: soft launch and kill switch (off by default, admins only, VAPID missing); DELETE always works', async () => {
+  const h = await apiHarness({ alerts: null });
+  const u = await h.sessionFor('u@example.com'), boss = await h.sessionFor('boss@example.com');
+  let c = await h.call('GET', '/api/alerts/config', undefined, u.cookie);
+  assert.equal(c.status, 200); assert.equal(c.data.enabled, false); assert.equal(c.data.reason, 'off'); assert.equal(c.data.vapidPublicKey, null);
+  assert.equal((await h.call('PUT', '/api/alerts/prefs', { enabled: true }, u.cookie)).data.error, 'alerts_off');
+  await h.repo.putSettings({ alerts: { enabled: true } }); // adminOnly defaults to true
+  c = await h.call('GET', '/api/alerts/config', undefined, u.cookie); assert.equal(c.data.reason, 'admin_only');
+  const r = await h.call('PUT', '/api/alerts/prefs', { quietStart: 23 }, u.cookie); assert.equal(r.status, 403); assert.equal(r.data.reason, 'admin_only');
+  const a = await h.call('GET', '/api/alerts/config', undefined, boss.cookie);
+  assert.equal(a.data.enabled, true); assert.equal(a.data.vapidPublicKey, h.env.VAPID_PUBLIC_KEY);
+  assert.equal((await h.call('PUT', '/api/alerts/prefs', { quietStart: 23 }, boss.cookie)).data.prefs.quietStart, 23);
+  const tid = (await h.call('POST', '/api/alerts/targets', sub(FCM(1)), boss.cookie)).data.id;
+  await h.repo.putSettings({ alerts: { enabled: false } });
+  assert.equal((await h.call('POST', '/api/alerts/targets', sub(FCM(2)), boss.cookie)).status, 403);
+  assert.equal((await h.call('DELETE', `/api/alerts/targets/${tid}`, undefined, boss.cookie)).status, 204, 'removing a device works with alerts off');
+  const nov = await apiHarness({ vapid: false });
+  const x = await nov.sessionFor('boss@example.com');
+  assert.equal((await nov.call('GET', '/api/alerts/config', undefined, x.cookie)).data.reason, 'not_configured');
+});
+
+test('alerts API: prefs validation, areas must be followed, at most 10, filters validated', async () => {
+  const h = await apiHarness();
+  const u = await h.sessionFor('u@example.com');
+  for (const b of [{ quietStart: 24 }, { maxListings: 0 }, { maxDigests: 13 }, { minGapMin: 10 }, { enabled: 'yes' }]) assert.equal((await h.call('PUT', '/api/alerts/prefs', b, u.cookie)).status, 400, JSON.stringify(b));
+  const p = await h.call('PUT', '/api/alerts/prefs', { quietStart: 23, quietEnd: 7, maxListings: 10 }, u.cookie);
+  assert.deepEqual([p.data.prefs.quietStart, p.data.prefs.quietEnd, p.data.prefs.maxListings, p.data.prefs.maxDigests], [23, 7, 10, 6]);
+  const ids = [];
+  for (let i = 0; i < 11; i++) ids.push((await h.repo.createArea({ name: 'Area ' + i, keywords: ['area' + i] }, NOW)).id);
+  const other = (await h.repo.createArea({ name: 'Other', keywords: ['other'] }, NOW)).id;
+  for (const id of ids) await h.repo.linkArea(u.user.id, id, NOW);
+  assert.equal((await h.call('PUT', '/api/alerts/areas', { areas: [{ areaId: other }] }, u.cookie)).data.error, 'not_followed');
+  assert.equal((await h.call('PUT', '/api/alerts/areas', { areas: ids.map(areaId => ({ areaId })) }, u.cookie)).data.error, 'too_many_areas');
+  assert.equal((await h.call('PUT', '/api/alerts/areas', { areas: [{ areaId: ids[0], bhks: ['7'] }] }, u.cookie)).status, 400);
+  assert.equal((await h.call('PUT', '/api/alerts/areas', { areas: [{ areaId: ids[0], maxRent: 5 }] }, u.cookie)).status, 400);
+  const ok = await h.call('PUT', '/api/alerts/areas', { areas: [{ areaId: ids[0], maxRent: 30000, bhks: ['1RK', '2'] }, { areaId: ids[1] }] }, u.cookie);
+  assert.equal(ok.status, 200);
+  assert.deepEqual(ok.data.areas, [{ areaId: ids[0], name: 'Area 0', maxRent: 30000, bhks: ['1RK', '2'] }, { areaId: ids[1], name: 'Area 1', maxRent: null, bhks: [] }]);
+  assert.equal((await h.call('DELETE', `/api/areas/${ids[1]}`, undefined, u.cookie)).status, 204);
+  assert.deepEqual((await h.call('GET', '/api/alerts/config', undefined, u.cookie)).data.areas.map(a => a.areaId), [ids[0]], 'unfollow removed the alert');
+});
+
+test('alerts API: endpoint allowlist (SSRF guard) and key checks', async () => {
+  const h = await apiHarness();
+  const u = await h.sessionFor('u@example.com');
+  const bad = ['http://fcm.googleapis.com/fcm/send/x', 'https://localhost/push', 'https://127.0.0.1/push', 'https://[::1]/push', 'https://169.254.169.254/latest', 'https://evil.example.com/fcm',
+    'https://fcm.googleapis.com:8443/fcm/send/x', 'https://user:pw@fcm.googleapis.com/fcm/send/x', 'https://fcm.googleapis.com.evil.com/x', 'https://push.apple.com.evil.com/x', 'https://' + 'a'.repeat(1100) + '.push.apple.com/x', 'not a url', ''];
+  for (const e of bad) assert.equal((await h.call('POST', '/api/alerts/targets', sub(e), u.cookie)).status, 400, e);
+  assert.equal((await h.call('POST', '/api/alerts/targets', sub(FCM(1), { p256dh: b64u(new Uint8Array(65)), auth: subKeys().auth }), u.cookie)).data.error, 'bad_keys', 'p256dh must start 0x04');
+  assert.equal((await h.call('POST', '/api/alerts/targets', sub(FCM(1), { p256dh: subKeys().p256dh, auth: b64u(new Uint8Array(8)) }), u.cookie)).data.error, 'bad_keys');
+  const good = [FCM(1), 'https://updates.push.services.mozilla.com/wpush/v2/gAAAA', 'https://web.push.apple.com/QGuQyavXutnMH', 'https://wns2-par02p.notify.windows.com/w/?token=BQYAAAB', 'https://fcm.googleapis.com:443/fcm/send/y'];
+  for (const e of good) assert.equal((await h.call('POST', '/api/alerts/targets', sub(e), u.cookie)).status, 201, e);
+});
+
+test('alerts API: 6th device replaces the oldest; a device moves to the account that registers it; no deleting others', async () => {
+  const h = await apiHarness();
+  const a = await h.sessionFor('a@example.com'), b = await h.sessionFor('b@example.com');
+  const ids = [];
+  for (let i = 1; i <= 6; i++) { ids.push((await h.call('POST', '/api/alerts/targets', sub(FCM(i)), a.cookie)).data.id); await new Promise(r => setTimeout(r, 2)); }
+  let cfg = (await h.call('GET', '/api/alerts/config', undefined, a.cookie)).data;
+  assert.equal(cfg.targets.length, 5); assert.ok(!cfg.targets.some(t => t.id === ids[0]));
+  const moved = (await h.call('POST', '/api/alerts/targets', sub(FCM(6)), b.cookie)).data.id;
+  assert.equal(moved, ids[5]);
+  assert.equal((await h.call('DELETE', `/api/alerts/targets/${ids[1]}`, undefined, b.cookie)).status, 404, "another user's device");
+  assert.equal((await h.call('DELETE', '/api/alerts/targets/abc', undefined, b.cookie)).status, 400);
+  cfg = (await h.call('GET', '/api/alerts/config', undefined, a.cookie)).data;
+  assert.equal(cfg.targets.length, 4);
+});
+
+test('no endpoint or key ever leaves the server: config and export', async () => {
+  const h = await apiHarness();
+  const u = await h.sessionFor('u@example.com');
+  const endpoint = 'https://fcm.googleapis.com/fcm/send/SECRET-DEVICE-TOKEN-123';
+  const s = sub(endpoint);
+  await h.call('POST', '/api/alerts/targets', s, u.cookie);
+  for (const p of ['/api/alerts/config', '/api/export']) {
+    const r = await h.call('GET', p, undefined, u.cookie);
+    assert.equal(r.status, 200);
+    for (const secret of ['SECRET-DEVICE-TOKEN-123', s.subscription.keys.p256dh, s.subscription.keys.auth, h.env.VAPID_PRIVATE_KEY]) assert.ok(!r.text.includes(secret), `${p} leaks ${secret.slice(0, 12)}`);
+  }
+  const cfg = (await h.call('GET', '/api/alerts/config', undefined, u.cookie)).data;
+  assert.deepEqual(Object.keys(cfg.targets[0]).sort(), ['channel', 'createdAt', 'failing', 'id', 'label', 'lastOkAt']);
 });
