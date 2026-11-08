@@ -62,6 +62,16 @@ npm run migrate     # apply migrations to the local SQLite file
 - **QA:** testing and quality checks; signs off before a push.
 - **Designer:** UI specs and mockups.
 
+### Usage rules for the chief of staff (founder, 8 Nov 2026: Claude usage limits run out fast)
+
+The founder's Claude plan is shared by every agent, so the chief of staff manages usage:
+1. **One agent at a time.** No parallel agents unless the founder asks for it.
+2. **Model by role:** Sonnet for engineer, QA, designer and docs work; Opus only for architect design and senior-engineer review; Haiku for lookups and board updates.
+3. **Effort by job:** set `effort` low for mechanical work (board, docs, small fixes), medium for normal builds, high only for design or hard debugging. Never turn on Fast mode.
+4. **Small briefs:** one build step per agent (e.g. "steps 1-2", not "the whole feature"), name the exact files to read, and ask for a short report.
+5. **Do quick things directly** instead of spawning an agent.
+6. **Fresh sessions:** offer a new session for each new, unrelated task; keep this file, the board and memory current so nothing is lost.
+
 ## Docs and ownership
 
 - Index and update rules: `docs/README.md`. Who owns which files: `docs/OWNERS.md`.
