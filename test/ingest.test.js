@@ -240,3 +240,19 @@ test('timing: store-all page (no area filter) against 3,000 stored listings', as
   console.log(`# ingest timing, store-all page vs 3,000 listings: 25 posts JS median ${med(25).toFixed(1)} ms, 15 posts ${med(15).toFixed(1)} ms (cold first page ${js[0].ms.toFixed(1)} ms)`);
   assert.ok(med(25) < 25, `store-all 25-post page JS ${med(25).toFixed(1)} ms (loose ceiling for CI)`);
 });
+
+test('cross-posts: merges into a listing first seen in another group are counted per group pair (no extra query)', async () => {
+  const { repo } = await setup();
+  const text = 'Spacious 2BHK for rent in Green Glen Layout, rent 32000, deposit 2 lakh, semi furnished, east facing, call 9876543210';
+  const p = (g, i) => ({ text, groupName: g, url: `https://www.facebook.com/groups/${g.length}/posts/${i}/` });
+  // Same page: A posts first, B reposts the same text
+  const r1 = (await ingestItems(repo, [p('Group A', 1), p('Group BB', 2)], { source: 'apify', now: NOW, storeAll: true })).report;
+  assert.equal(r1.newListings, 1); assert.equal(r1.merged, 1);
+  assert.deepEqual(r1.crossFrom, { 'Group BB': { 'Group A': 1 } });
+  assert.deepEqual(r1.mergedByGroup, { 'Group BB': 1 });
+  // Later run: the listing is stored. C reposts it; A's own post read again is an exact duplicate (not a cross-post)
+  const r2 = (await ingestItems(repo, [p('Group CCC', 3), p('Group A', 1)], { source: 'apify', now: NOW + 1000, storeAll: true })).report;
+  assert.deepEqual(r2.crossFrom, { 'Group CCC': { 'Group A': 1 } }, 'the first group of a stored listing');
+  assert.deepEqual(r2.mergedByGroup, { 'Group CCC': 1, 'Group A': 1 });
+  assert.equal(r2.dupes, 1);
+});

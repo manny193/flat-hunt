@@ -397,7 +397,9 @@ export function emptyReport(source, now, total) {
 export function mergeReports(a, b) {
   if (!a) return structuredClone(b);
   for (const k of ['total', 'noText', 'offTopic', 'seeking', 'dupes', 'newListings', 'merged', 'known', 'outside', 'notHousing', 'offArea']) a[k] = (a[k] || 0) + (b[k] || 0);
-  for (const k of ['outsideGroups', 'knownGroups', 'byArea', 'fetchedByGroup', 'matchedByGroup', 'newByGroup']) { if (!a[k] && !b[k]) continue; a[k] = a[k] || {}; for (const [g, n] of Object.entries(b[k] || {})) a[k][g] = (a[k][g] || 0) + n; }
+  for (const k of ['outsideGroups', 'knownGroups', 'byArea', 'fetchedByGroup', 'matchedByGroup', 'newByGroup', 'mergedByGroup']) { if (!a[k] && !b[k]) continue; a[k] = a[k] || {}; for (const [g, n] of Object.entries(b[k] || {})) a[k][g] = (a[k][g] || 0) + n; }
+  // crossFrom[group][firstGroup]: posts from `group` merged into a listing first seen in another group.
+  if (b.crossFrom) { a.crossFrom = a.crossFrom || {}; for (const [g, by] of Object.entries(b.crossFrom)) { const t = a.crossFrom[g] ||= {}; for (const [g2, n] of Object.entries(by)) t[g2] = (t[g2] || 0) + n; } }
   const seen = new Set((a.unscrapable || []).map(u => u.url || u.name));
   a.unscrapable = [...(a.unscrapable || []), ...(b.unscrapable || []).filter(u => !seen.has(u.url || u.name))];
   return a;

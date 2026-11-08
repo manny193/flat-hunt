@@ -88,13 +88,17 @@ export async function ingestItems(repo, raw, opts) {
   const dbMerges = [];                         // [listingId, s]
   const newKeys = [];
   const idFn = opts.idFn || newId;
+  // Cross-posts (docs/ai/GROUP-SCHEDULING.md 4.6): a merge into a listing whose first post came from another
+  // group. The first group is read from listings already in memory, so this costs no extra query.
+  const cross = (g, first) => { if (!first || first === g || g === 'Group not detected') return; const t = ((report.crossFrom ||= {})[g] ||= {}); t[first] = (t[first] || 0) + 1; };
   const remember = (p, id) => { for (const k of keysOf(p)) if (!keyMap.has(k)) { keyMap.set(k, id); newKeys.push({ k, l: id }); } };
 
   posts.forEach((s, i) => {
     const { p, ex } = s;
     const k = keysOf(p);
     // exact duplicate: same post url, or same text in the same group with no url
-    if (keyMap.has(k[0])) { report.dupes++; return; }
+    const pg = p.group || 'Group not detected';
+    if (keyMap.has(k[0])) { report.dupes++; (report.mergedByGroup ||= {})[pg] = (report.mergedByGroup[pg] || 0) + 1; return; }
     let target = keyMap.get(k[1]) || null;      // same text elsewhere -> repost
     if (!target) {
       const tok = toks.get(i) || tokens(p.text); const psk = psks.get(i) || postSketch(tok); let best = 0;
@@ -116,9 +120,9 @@ export async function ingestItems(repo, raw, opts) {
       const ng = p.group || 'Group not detected'; (report.newByGroup ||= {})[ng] = (report.newByGroup[ng] || 0) + 1;
       return;
     }
-    report.merged++;
+    report.merged++; (report.mergedByGroup ||= {})[pg] = (report.mergedByGroup[pg] || 0) + 1;
     remember(p, target);
-    if (local.has(target)) { const l = applyPost(local.get(target), p, ex, now); localSlim.set(l.id, slimOf(l)); return; }
+    if (local.has(target)) { cross(pg, local.get(target).groups?.[0]); const l = applyPost(local.get(target), p, ex, now); localSlim.set(l.id, slimOf(l)); return; }
     dbMerges.push([target, s]);
     // keep the slim copy roughly current for later posts in this batch
     const c = slim.get(target);
@@ -134,7 +138,7 @@ export async function ingestItems(repo, raw, opts) {
 
   // Replay merges into stored listings (one query to load them).
   const loaded = await db(() => repo.loadListings([...new Set(dbMerges.map(m => m[0]))]));
-  for (const [id, s] of dbMerges) { const l = loaded.get(id); if (l) applyPost(l, s.p, s.ex, now); }
+  for (const [id, s] of dbMerges) { const l = loaded.get(id); if (l) { cross(s.p.group || 'Group not detected', l.groups?.[0]); applyPost(l, s.p, s.ex, now); } }
   const changed = [...local.values(), ...loaded.values()];
   // AI extraction is a separate pass over ai_queue (src/ai.js), not part of ingest.
   const tDecide = performance.now();
