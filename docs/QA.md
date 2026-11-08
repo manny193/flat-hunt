@@ -457,3 +457,17 @@ Verdict: **sign-off with notes.** No blocker. `npm test`: 148 tests, 147 pass, 1
 ## QA round: Reddit public JSON (#33)
 
 Public JSON tested 9 Nov 2026; Reddit requires login (403 from Cloudflare, login redirect elsewhere); removed in favour of the official API (#35).
+
+## QA round: Reddit API only + deleted-post clean-up (#35, branch chore/reddit-api-only)
+
+Verdict: **do not push yet. One must-fix (data safety).** `npm test`: 179 tests, 178 pass, 1 skipped, 0 fail.
+
+Passed:
+- Public JSON mode is gone: no `redditPublic`, `redditMode`, `redditPublicStep` or `redditStatus` in src/, web/ or admin output. The only reddit.com fetches are the OAuth token URL and `oauth.reddit.com`. Reddit does not run without `REDDIT_CLIENT_ID`/`REDDIT_CLIENT_SECRET` (cron, manual run returns 503, clean-up returns `not_configured`; tested).
+- `redditStep` (OAuth path) has no removed lines against the commit before #33.
+- Clean-up: HTTP errors (500/429/401), non-JSON bodies and a missing `data.children` array throw before any write, so the cursor does not move. Facebook posts in a mixed listing are kept (`p.source !== 'reddit'`). 1 token call plus 1 info call per tick. The cron only starts it at `repo.left() >= 14`, and the D1 budget is respected.
+- Docs use the one-line wording; nothing about accepting a terms risk.
+
+MUST-FIX (src/reddit.js:187, 193): "missing from the response" counts as gone (`isGone(undefined)` is true), and only `Array.isArray(children)` is checked. Probed with a mocked HTTP 200 `{"data":{"children":[]}}`: 2 of 2 stored posts and listings were deleted. A partial response deletes every id it omits. Needed: if the response is empty or returns fewer than some safe fraction of the ids asked, throw and leave the cursor alone. The best fix is to remove only on an explicit signal (author `[deleted]`, selftext `[removed]`/`[deleted]`, `removed_by_category`) and never on absence alone, or to require children.length > 0 and the id be missing in a response that otherwise looks complete. Add tests for an empty and a partial 200.
+
+Minor: the stray repo.putSettings of `done` at the end of a cycle is fine; no other issues.
