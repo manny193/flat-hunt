@@ -74,6 +74,8 @@ Design and status: `docs/ai/GROUP-SCHEDULING.md`. Off: `startRun()` is unchanged
 - **Cross-posts** (`ingestItems`): report `mergedByGroup` and `crossFrom[group][firstGroup]` from listings already loaded for the merge (no extra query).
 
 ### 4.2 Reddit (`src/reddit.js`)
+**Public JSON mode (no key, issue #33):** when `REDDIT_CLIENT_ID/SECRET` are absent and `schedule.redditPublic` is true (off by default; `redditEnabled` stays the master switch), `redditPublicStep()` does one GET per subreddit to `https://old.reddit.com/r/<name>/new.json?limit=50&raw_json=1` (UA `FlatHunt/1.0 (+https://flat-hunt.19mnsh.workers.dev)`, no cookies/proxies), at most 3 subreddits per cron tick with a 2 s pause between requests, resumable through `settings.reddit.cycle`. Per-subreddit watermark (`settings.reddit.watermarks`) moves only after a page was ingested. A subreddit with search words keeps only posts containing one of them. Any 403/429/5xx or non-JSON response stops Reddit for that run (never retried), is recorded in `settings.redditStatus {mode, ok, code, error, at, lastSuccessAt, consecutiveFails, postsRead, backoffUntil}`, and after 3 consecutive failures Reddit is skipped for 6 h. Admin shows mode, last success, last error code and posts read (sources table, `#admin-groups` subreddits panel). OAuth mode below is unchanged and wins when secrets exist.
+
 App-only OAuth (`client_credentials`), User-Agent `flat-hunt/1.0 by <REDDIT_USERNAME>`. Cycle every `intervalHours`; one subreddit per step; posts newer than cutoff and per-subreddit watermark; pages of 25; resumes across invocations. Off unless `REDDIT_CLIENT_ID`/`SECRET` set. Default subreddits in `DEFAULT_SUBREDDITS`.
 
 ### 4.3 ingestItems() (`src/ingest.js`), ~4–6 queries per call regardless of batch size

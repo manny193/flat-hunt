@@ -88,6 +88,12 @@ What a notification shows: the size, rent and area, nothing else. No phone numbe
 5. Paused groups (not manual) are tried again after 30 days. If fewer than the minimum are being read, the next queued or cooled-off group starts a trial.
 6. **Recent rotations** lists every status change with the reason. Rotation off: every enabled group is read on each run, as before.
 
+### 8b. Turn Reddit on (no API key)
+1. Admin, **Scraper**, open the schedule. Make sure **Reddit source on** and **Reddit without an API key (public JSON)** are both on, then save. (Public JSON is off until you do this.)
+2. Admin, **Groups**: the **Subreddits** panel lists the subreddits to read (one per line). The panel shows the mode, last success, last result and posts read.
+3. The hourly job reads up to 3 subreddits per run, a few seconds apart. Use **Run** on the Sources table to try it now.
+4. If Reddit blocks us (HTTP 403/429 or a web page instead of data), the run stops and the status shows the error. After 3 failures in a row Reddit pauses for 6 hours. Nothing is broken on our side; turn the switch off if you want to stop trying.
+
 ### 9. Phone scans (private-group experiment)
 
 1. On an Android phone, the admin runs a helper script while searching an area in Facebook Lite. The script reads the visible posts without touching anything.
