@@ -33,12 +33,12 @@ test('clean-up removes deleted, removed and missing posts, keeps live ones, dele
   const a = api(tokenOr(() => info([
     { id: 'a1', author: '[deleted]', selftext: 'text' },
     { id: 'a2', author: 'u', selftext: '[removed]' },
-    // a3 missing from the response
+    // a3 missing from the response: kept
     { id: 'a4', author: 'u', selftext: 'still here' },
   ])));
   const r = await run(t, a);
-  assert.equal(r.action, 'checked'); assert.equal(r.removed, 3); assert.equal(r.listingsDeleted, 3);
-  assert.deepEqual(await idsLeft(t), ['a4']);
+  assert.equal(r.action, 'checked'); assert.equal(r.removed, 2); assert.equal(r.listingsDeleted, 2);
+  assert.deepEqual(await idsLeft(t), ['a3', 'a4']);
   const infos = a.calls.filter(c => c.url.includes('/api/info'));
   assert.equal(infos.length, 1);
   assert.match(infos[0].url, /^https:\/\/oauth\.reddit\.com\/api\/info\?id=/);
@@ -93,4 +93,18 @@ test('no public JSON mode: Reddit does not run without secrets and redditPublic 
   assert.equal(a.calls.length, 0); assert.equal(st.reddit, undefined); assert.equal(st.redditClean, undefined);
   const mod = await import('../src/reddit.js');
   assert.equal(mod.redditPublicStep, undefined); assert.equal(mod.redditMode, undefined);
+});
+
+test('empty or partial 200 never deletes: only explicit signals remove posts', async () => {
+  const t = await setup(['e1', 'e2']);
+  const empty = api(tokenOr(() => info([])));
+  await assert.rejects(() => run(t, empty), /no posts returned/);
+  assert.deepEqual(await idsLeft(t), ['e1', 'e2']);
+  assert.equal((await t.repo.getSettings()).redditClean, undefined, 'cursor unchanged');
+  const partial = api(tokenOr(() => info([{ id: 'e1', author: 'u', selftext: 'ok' }])));
+  const r = await run(t, partial);
+  assert.equal(r.removed, 0); assert.deepEqual(await idsLeft(t), ['e1', 'e2']);
+  const t2 = await setup(['f1', 'f2', 'f3']);
+  const rm = api(tokenOr(() => info([{ id: 'f1', author: 'u', selftext: '', removed_by_category: 'moderator' }, { id: 'f2', author: '[deleted]', selftext: 'x' }, { id: 'f3', author: 'u', selftext: '[removed]' }])));
+  assert.equal((await run(t2, rm)).removed, 3); assert.deepEqual(await idsLeft(t2), []);
 });

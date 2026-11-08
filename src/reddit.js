@@ -150,7 +150,8 @@ export async function redditStep(repo, env, { fetchFn = fetch, now = Date.now(),
 // settings.redditClean), one /api/info call per cron tick, and starts again 23 h after the last start.
 const INFO_IDS = 100, CLEAN_LISTINGS = 40, CLEAN_MIN_BUDGET = 14;
 export const redditPostId = url => /\/comments\/([a-z0-9]+)(?:\/|$|\?)/i.exec(String(url || ''))?.[1]?.toLowerCase() || null;
-const isGone = d => !d || d.author === '[deleted]' || /^\s*\[(removed|deleted)\]\s*$/i.test(d.selftext || '') || d.removed_by_category === 'deleted';
+// Only an explicit signal in a returned post counts; a post absent from the response is kept and re-checked next cycle.
+const isGone = d => !!d && (d.author === '[deleted]' || /^\s*\[(removed|deleted)\]\s*$/i.test(d.selftext || '') || /^\s*\[(removed|deleted)\]\s*$/i.test(d.body || '') || !!d.removed_by_category);
 
 export async function redditCleanStep(repo, env, { fetchFn = fetch, now = Date.now(), settings, budget = 30, force = false }) {
   if (!redditConfigured(env)) return { action: 'not_configured' };
@@ -175,7 +176,7 @@ export async function redditCleanStep(repo, env, { fetchFn = fetch, now = Date.n
     if (r.status === 401) resetRedditToken();
     if (!r.ok) throw new Error('Reddit info: HTTP ' + r.status); // cursor stays put: retried next tick
     const j = await r.json();
-    if (!Array.isArray(j?.data?.children)) throw new Error('Reddit info: unexpected response');
+    if (!Array.isArray(j?.data?.children) || !j.data.children.length) throw new Error('Reddit info: no posts returned'); // no writes, cursor unchanged
     for (const c of j.data.children) if (c?.data?.id) live.set(String(c.data.id).toLowerCase(), c.data);
   }
   const drop = [], update = []; let removed = 0;
