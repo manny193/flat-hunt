@@ -61,7 +61,9 @@ Routes are hash names. The hash router replaces the v1 `SCREENS` list.
 | `#signin` | sheet | – | – |
 | `#areas` (My areas) | – | yes | yes |
 | `#account` (theme, sign out, areas link, admin links on phone) | – | yes | yes |
-| `#admin-scraper` `#admin-groups` `#admin-phone` `#admin-ai` `#admin-data` `#admin-users` | – | – | yes |
+| `#alerts` (latest area alerts; only while alerts are enabled for the caller) | opens sign-in sheet | yes | yes |
+| `#area-<id>` (from a notification: sets the area filter, then shows `#browse`) | yes | yes | yes |
+| `#admin-scraper` `#admin-groups` `#admin-phone` `#admin-ai` `#admin-data` `#admin-users` `#admin-alerts` | – | – | yes |
 
 A non-admin who opens an `#admin-*` route goes to `#browse` with the toast "That page is for admins."
 
@@ -93,6 +95,14 @@ Keep the v1 behaviour, keys and stages, restyled with the new tokens. The board 
 
 ### My areas `#areas`
 A search field: "Type an area, e.g. HSR Layout". Matches show as rows (name, listing count, Add). When nothing matches, the row reads "Create '<text>'". Below the list: "New areas are scanned from the next scrape (about every 4 h)." Selected areas are removable chips, each with a status: "Scanning", or "Waiting for first scrape" in amber. Browse defaults to the user's first area.
+
+### Area alerts (`web/alerts.js`; engineer-built from docs/ai/ALERTS-WEBPUSH.md §10, designer review pending)
+Shown only when alerts are enabled for the caller (during the soft launch: admins only).
+- **My areas:** each area chip gets a round bell button before the remove button; keep-filled when that area alerts. It opens a centred sheet: "Alert me about new flats here" toggle, optional "Max rent" field, BHK `.seg` chips (1 RK, 1, 2, 3, 4+; none = any), the line "Posts with no rent or BHK in them are included", Save.
+- **Me → Alerts panel:** this device's state (Turn on alerts / On + Send a test + Turn off on this device / blocked help / unsupported / iOS needs Home Screen install card / iOS < 16.4), alert areas line with a link to My areas, quiet hours (two hour selects, IST), daily limit ("At most [30] flats in [6] alerts a day"), "All alerts on" switch, devices list with Remove, and one privacy line.
+- **iOS install card:** numbered steps: Share → Add to Home Screen; open Flat Hunt from the Home Screen; sign in again there, then Turn on alerts. The sign-in sheet inside the iOS Home Screen app adds an amber-bordered note about Google sign-in possibly opening Safari.
+- **`#alerts`:** batches newest first, each headed "Sent 8 Nov, 2:10 pm" or "Not pushed (daily limit reached or no device)", cards from the Browse grid.
+- **`#admin-alerts`:** Switches panel (Alerts on, Admins only, max pushes per day, defaults line, Send a test to my devices) and a Usage table (counts only).
 
 ### Admin `#admin-scraper` (mockup section 4)
 - **Header:** h1, then a status dot with "Every 4 h, next run 18:30" (or "Paused" in pass grey), then Schedule (opens a sheet) and Run now (primary).

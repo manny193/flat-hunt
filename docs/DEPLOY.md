@@ -57,6 +57,25 @@ reddit.com/prefs/apps → "create another app" → type **script** → redirect 
 GitHub secrets `REDDIT_CLIENT_ID` (the string under the app name) and `REDDIT_CLIENT_SECRET`, and the variable
 `REDDIT_USERNAME` (used in the User-Agent). Without them the Reddit source shows as "not connected".
 
+### Area alerts setup (optional, Web Push, about 5 minutes)
+
+Alerts need three secrets. Without them the 10-minute alert step stays idle and the app hides alerts; everything
+else works as before. Design: `docs/ai/ALERTS-WEBPUSH.md`.
+
+1. **Generate a VAPID key pair on your own computer** (Node 22, no packages). Never commit the output, never
+   paste it into chat, an issue or a doc:
+   ```sh
+   node -e "(async()=>{const s=crypto.subtle;const k=await s.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign']);const j=await s.exportKey('jwk',k.privateKey);const p=Buffer.from(await s.exportKey('raw',k.publicKey)).toString('base64url');console.log('VAPID_PUBLIC_KEY='+p);console.log('VAPID_PRIVATE_KEY='+j.d)})()"
+   ```
+2. Add three GitHub Actions secrets: `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` (the two printed values) and
+   `VAPID_SUBJECT`: `mailto:` and an alias you control, or the app URL (`https://flat-hunt.<subdomain>.workers.dev`).
+   Push services may contact this address; do not use a personal email. Keep a copy of the key pair in your password
+   manager: a new key pair invalidates every subscription (everyone has to turn alerts on again).
+3. Redeploy (**Actions → Deploy → Run workflow**). Then in the app: Admin → **Alerts** → turn **Alerts on**. Keep
+   **Admins only** on while you test, turn alerts on under Me → Alerts and press **Send a test**. On iPhone (iOS 16.4+)
+   first add Flat Hunt to the Home Screen and sign in there.
+4. When QA has signed off on real devices, switch **Admins only** off to open alerts to every approved user.
+
 ## One-time setup (founder, about 15 minutes)
 
 1. **Cloudflare account**: sign up at dash.cloudflare.com (free, email only). Open
@@ -125,6 +144,7 @@ there is no second cron. Status, failures, the confidence histogram and merge su
 |---|---|---|
 | Unit + e2e (Playwright) tests, Worker dry-run bundle, Docker build + healthcheck | every PR and every push to `main` | `ci.yml` |
 | Apply D1 migrations → deploy Worker + secrets → smoke test → auto-rollback on failure | every push to `main` | `deploy.yml` |
+| Area alerts: send queued alerts (payload-less Web Push), at most 40 pushes per run; idle without VAPID secrets or while switched off | every 10 minutes (second Cron Trigger `*/10 * * * *`) | Worker `scheduled()` → `alertStep()` |
 | Hourly tick: start the Apify run if due (admin interval, default 4 h; budget check; cutoff = max(last good start − 1 h, now − backfillDays)), sweep one missed or partial run, then with the remaining D1 budget: one Reddit step, area backfill chunks, AI extraction, and the daily retention purge (default 30 days, shortlisted listings kept) | every hour at :00 UTC (:30 IST) | Worker `scheduled()` |
 | Ingest a finished run | when Apify's webhook fires | `POST /api/ingest/apify` |
 | Encrypted D1 export, kept 30 days | Mondays 03:17 IST | `backup.yml` |
@@ -132,8 +152,9 @@ there is no second cron. Status, failures, the confidence histogram and merge su
 | AI extraction eval (regex vs AI vs merged, per field) | on demand | `ai-eval.yml` |
 | Action version bumps | weekly PRs | Dependabot |
 
-The smoke test checks that `/healthz` returns 200, that `GET /api/listings` without login returns **401**, and
-that the ingest endpoint rejects a wrong secret. If any check fails, the deploy rolls back.
+The smoke test checks that `/healthz` returns 200, that `GET /api/listings` without login returns **401**, that
+`/finance.js`, `/alerts.js` and `/sw.js` are served, and that the ingest endpoint rejects a wrong secret (none of
+this needs the VAPID secrets). If any check fails, the deploy rolls back.
 
 ## Security
 
@@ -180,6 +201,11 @@ that the ingest endpoint rejects a wrong secret. If any check fails, the deploy 
   and import it with `wrangler d1 execute flat-hunt --remote --file restore.sql`.
 - Write migrations as add-only (new tables/columns), so the previous code version still works
   after a code rollback.
+- **Rolling back past the area-alerts release** (migration 0004): also remove `"*/10 * * * *"` from the `crons`
+  list in `wrangler.jsonc` (revert that line and push). Code from before alerts treats every cron as the hourly
+  job and would otherwise run it every 10 minutes. Code from the alerts release onwards ignores cron strings it
+  does not know, so later rollbacks are safe. **[unverified: whether `wrangler rollback` restores the trigger list;
+  check `wrangler triggers` / the dashboard after a rollback.]**
 
 ## Rotating secrets
 
@@ -195,6 +221,7 @@ Worker within a minute.
 | `APIFY_TOKEN` | regenerate in Apify first, then update the secret and redeploy |
 | `CLOUDFLARE_API_TOKEN` | use **Roll** on the token page, then update the secret |
 | `BACKUP_PASSPHRASE` | keep the old one until the old artifacts expire (30 days) |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | rotate both together; every device stops receiving alerts until its user turns alerts on again (old subscriptions fail with 403 and are dropped after 5 failures). `VAPID_SUBJECT` can change freely |
 
 ## Costs and free-tier limits we live within
 
