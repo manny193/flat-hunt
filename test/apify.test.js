@@ -9,7 +9,7 @@ const BASE = 'https://hunt.test';
 const SECRET = 'ingest-secret-0123456789abcdef0123456789';
 const ENV = { RUNTIME: 'worker', APP_PASSWORD: 'pw-pw-pw-pw-pw-pw', SESSION_SECRET: 'session-secret-0123456789abcdef0123', INGEST_SECRET: SECRET, APIFY_TOKEN: 'apify_api_TOKEN', PUBLIC_BASE_URL: 'https://hunt.test/' };
 
-const post = (i, area = 'Green Glen') => ({ type: 'post', groupId: '111', text: `${1 + (i % 3)}BHK available in ${area}, rent ${20000 + i * 1000}. ${['tower', 'villa', 'corner', 'garden', 'lake', 'metro', 'school', 'market', 'temple', 'park'].map(w => w + 'x' + i).join(' ')}. Call 90000${String(10000 + i)}`, url: `https://www.facebook.com/groups/111/posts/${i}/`, createdAt: new Date(Date.UTC(2026, 10, 7) - i * 60e3).toISOString() });
+const post = (i, area = 'Green Glen') => ({ type: 'post', groupId: '111', text: `${1 + (i % 3)}BHK available in ${area}, rent ${20000 + i * 1000}. ${['tower', 'villa', 'corner', 'garden', 'lake', 'metro', 'school', 'market', 'temple', 'park'].map(w => w + 'x' + i).join(' ')}. Call 90000${String(10000 + i)}`, url: `https://www.facebook.com/groups/111/posts/${i}/`, source: 'https://www.facebook.com/groups/111/', createdAt: new Date(Date.UTC(2026, 10, 7) - i * 60e3).toISOString() });
 const DATASET = [{ type: 'group', id: '111', name: 'Bellandur Flats', url: 'https://www.facebook.com/groups/111', privacy: 'public' }, ...Array.from({ length: 24 }, (_, i) => post(i))];
 
 /** Fake Apify API. Records requests; `fail` can make a given request number throw. */
@@ -267,6 +267,37 @@ test('Apify 4xx errors include the reason from the response body, without the to
   const fetchFn = async (url) => url.includes('/users/me/limits')
     ? new Response(JSON.stringify({ data: { current: { monthlyUsageUsd: 0 }, limits: { maxMonthlyUsageUsd: 5 } } }), { status: 200 })
     : new Response(JSON.stringify({ error: { type: 'invalid-input', message: 'Input is not valid: field postsPublishedAfter apify_api_SECRET' } }), { status: 400 });
-  const repo = { getSettings: async () => ({ groups: [{ url: 'https://www.facebook.com/groups/111', active: true }] }), putSettings: async () => {}, lastSuccessfulStart: async () => null, recordStartedRun: async () => {} };
+  const repo = { getSettings: async () => ({ groups: [{ url: 'https://www.facebook.com/groups/111', active: true }] }), putSettings: async () => {}, lastSuccessfulStart: async () => null, lastGoodRun: async () => null, recordStartedRun: async () => {} };
   await assert.rejects(sr(repo, { APIFY_TOKEN: 't' }, { fetchFn }), e => /HTTP 400 \(invalid-input: Input is not valid/.test(e.message) && !/apify_api_SECRET/.test(e.message));
+});
+
+test('group details refresh even when unchanged, so they stop being stale (QA)', async () => {
+  const api = fakeApify();
+  const { hook, repo } = await harness(api, { INGEST_PAGE_SIZE: '50' });
+  await repo.putSettings({ groups: [{ name: 'Bellandur', url: 'https://www.facebook.com/groups/111', active: true }] });
+  await hook({ datasetId: 'dsGINFO0001', runId: 'runGINFO001' });
+  const first = (await repo.getSettings()).groupInfo;
+  await repo.putSettings({ groupInfo: { ...first, at: first.at - 8 * 864e5 } }); // a week later
+  await hook({ datasetId: 'dsGINFO0002', runId: 'runGINFO002' }); // same group rows again
+  const again = (await repo.getSettings()).groupInfo;
+  assert.ok(again.at > first.at - 864e5, 'refreshed');
+  assert.deepEqual(again.urls, ['https://www.facebook.com/groups/111']);
+  assert.equal((await repo.listListings())[0].posts[0].group, 'Bellandur', "the admin's name for a watched group wins");
+});
+
+test('a run cut short by its limits is re-read once with the largest posts-per-group (QA)', async () => {
+  const api = fakeApify({ usage: 1 });
+  const { app, env, repo, hook } = await harness(api, { INGEST_PAGE_SIZE: '50' });
+  await repo.putSettings({ groups: [{ name: 'A', url: 'https://www.facebook.com/groups/111', active: true }], resultsPerGroup: 10, groupInfo: { at: Date.now(), urls: ['https://www.facebook.com/groups/111'], groups: [] } });
+  const after = Date.UTC(2026, 10, 7, 1);
+  // A finished run that asked for 10 posts per group and got 24 from group A: it hit its limit.
+  await repo.recordStartedRun({ runId: 'runCAP00001', datasetId: 'dsCAP000001', startedAt: Date.UTC(2026, 10, 7, 3), caps: { perGroup: 10, maxItems: 100, maxCharge: 0.5, after, recover: false } });
+  await hook({ datasetId: 'dsCAP000001', runId: 'runCAP00001' });
+  const run = await repo.getRunByDataset('dsCAP000001');
+  assert.deepEqual(run.report.truncated.groups, ['A']); assert.equal(run.report.truncated.after, after);
+  const st = await app.scheduled({}, env);
+  assert.equal(st.action, 'started'); assert.match(st.detail, /re-reads its window with 50 posts per group/);
+  const body = JSON.parse(api.calls.filter(c => c.init.method === 'POST').at(-1).init.body);
+  assert.equal(body.resultsPerGroup, 50); assert.equal(body.postsPublishedAfter, '2026-11-07T01:00:00Z');
+  assert.equal((await repo.getRunByDataset('dsNEW000001')).report.caps.recover, true, 'a second cut-short run is accepted, not re-read again');
 });

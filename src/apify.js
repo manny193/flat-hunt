@@ -127,6 +127,18 @@ export function buildInput(actor, { groups, resultsPerGroup, after, groupInfo = 
   return { groups: urls, resultsPerGroup, sortOrder: 'new', postsPublishedAfter: at, includeGroupInfo: !!groupInfo };
 }
 /**
+ * Was a run cut short by its own limits? Then posts older than the ones it returned may be missing.
+ * caps = {perGroup, maxItems, maxCharge, after, recover} as started. Returns null, or what was hit.
+ */
+export function truncation(report, caps, rowsRead, cost) {
+  if (!caps) return null;
+  const groups = Object.entries(report?.fetchedByGroup || {}).filter(([, n]) => n >= caps.perGroup).map(([g]) => g);
+  const rows = caps.maxItems > 0 && rowsRead >= caps.maxItems;
+  const charge = caps.maxCharge > 0 && (cost?.resultsUsd || 0) >= 0.95 * caps.maxCharge;
+  if (!groups.length && !rows && !charge) return null;
+  return { groups: groups.slice(0, 50), rows, charge, perGroup: caps.perGroup, after: caps.after ?? null, recover: !!caps.recover };
+}
+/**
  * What a finished run cost, from GET /v2/actor-runs/{id}: platform usage plus the actor's per-event charges.
  * Right after a run, Apify can still report 0 charged rows (measured 8 Nov), so rows are at least the
  * rows we read from the dataset (rowsRead).
@@ -178,12 +190,14 @@ export async function ingestDataset(repo, env, { datasetId, runId, startedAt, co
   }
   const prev = await repo.getRunByDataset(datasetId);
   let report = prev?.report?.progress ? prev.report : null; // resume after a cut-off invocation
+  // The limits this run was started with (stored by startRun), to tell whether it was cut short.
+  const caps = prev?.report?.caps || prev?.report?.progress?.caps || null;
   if (report) delete report.error;
   let offset = report?.progress?.offset || 0;
   const [areas, settings] = await Promise.all([repo.listAreas(), repo.getSettings()]);
   // Group names: rows seen on earlier pages of this dataset, else the weekly stored group details.
   let groups = report?.progress?.groups || settings.groupInfo?.groups || [];
-  let fresh = []; // group rows found in this dataset (a group-details run)
+  const groupRows = []; // "group" rows in this dataset: present only when the run asked for group details
   const limit = pageSize(env);
   const mergeGroups = more => [...new Map([...groups, ...more].map(g => [g.id, g])).values()].slice(0, 200);
   let partial = false;
@@ -197,10 +211,10 @@ export async function ingestDataset(repo, env, { datasetId, runId, startedAt, co
       const nextOffset = offset + items.length;
       // Progress is saved in the same batch as this page's listings; it must include the group rows
       // found on this page, so it is built after the page's rows are parsed.
-      const progress = last ? null : pageGroups => ({ offset: nextOffset, groups: mergeGroups(pageGroups) });
+      const progress = last ? null : pageGroups => ({ offset: nextOffset, groups: mergeGroups(pageGroups), ...(caps ? { caps } : {}) });
+      for (const r of items) if (r && typeof r === 'object' && String(r.type).toLowerCase() === 'group' && r.id != null) groupRows.push({ id: String(r.id), name: String(r.name || r.title || '').slice(0, 200), url: String(r.url || ''), privacy: String(r.privacy || '').toLowerCase() });
       const res = await ingestItems(repo, items, { source: 'apify', now, datasetId, areas, settings, groups, storeAll: true, env, run: { status: last ? 'done' : partial ? 'partial' : 'ingesting', report, progress } });
       report = res.runReport;
-      fresh = [...fresh, ...res.groups.filter(g => !groups.some(x => x.id === g.id && x.name === g.name))];
       groups = mergeGroups(res.groups);
       offset = nextOffset;
       if (last || partial) break;
@@ -216,11 +230,15 @@ export async function ingestDataset(repo, env, { datasetId, runId, startedAt, co
   let cost = null;
   if (runId) { try { cost = runCost((await apify(env, `/actor-runs/${encodeURIComponent(runId)}`, {}, fetchFn))?.data, actorId(env), offset); } catch { /* cost stays unknown */ } }
   if (!cost && typeof costUsd === 'number' && isFinite(costUsd)) cost = { totalUsd: Math.round(costUsd * 10000) / 10000 };
-  if (cost) { await repo.setRunCost(datasetId, cost.totalUsd, cost); report.cost = cost; }
+  const truncated = truncation(report, caps, offset, cost);
+  if (cost || truncated) await repo.annotateRun(datasetId, { costUsd: cost?.totalUsd ?? null, cost, truncated });
+  if (cost) report.cost = cost;
+  if (truncated) report.truncated = truncated;
   const patch = { unscrapableGroups: { at: now, datasetId, groups: (report.unscrapable || []).slice(0, 50) } };
-  if (fresh.length) {
+  // A group-details run refreshes the stored details even when nothing changed, so they stop being stale.
+  if (groupRows.length) {
     const watched = (Array.isArray(settings.groups) ? settings.groups : []).filter(g => g.url && !isPage(g)).map(g => g.url);
-    patch.groupInfo = { at: now, urls: watched, groups: mergeGroups(fresh).map(({ id, name, url, privacy }) => ({ id, name, url, privacy })) };
+    patch.groupInfo = { at: now, urls: watched, groups: [...new Map(groupRows.map(g => [g.id, g])).values()].slice(0, 200) };
   }
   await repo.putSettings(patch);
   return { status: 'done', report };
@@ -262,7 +280,17 @@ export async function startRun(repo, env, { fetchFn = fetch, now = Date.now(), s
   } catch (e) { detail += 'Could not read Apify usage (' + e.message + '); started anyway. '; }
   if (usage && usage.ratio > sch.budgetStopPct / 100) return { action: 'skipped', detail: `Apify credit ${Math.round(usage.ratio * 100)}% used ($${usage.usedUsd} of $${usage.limitUsd}). Runs resume when the monthly cycle resets.` };
   if (usage && usage.ratio > sch.budgetWarnPct / 100) { perGroup = Math.max(5, Math.floor(perGroup / 2)); detail += `Credit ${Math.round(usage.ratio * 100)}% used, so ${perGroup} posts per group. `; }
-  const after = cutoffFor(await repo.lastSuccessfulStart(), sch, now);
+  // Normal: posts since the last good run. If that run was cut short by its limits, fetch its window
+  // again once with the largest posts-per-group, so the posts it could not return are picked up.
+  // A recovery run that is cut short too is accepted (shown in the run report) to avoid paying in a loop.
+  const lastRun = await repo.lastGoodRun();
+  let after = cutoffFor(lastRun?.startedAt ?? null, sch, now), recover = false;
+  const tr = lastRun?.truncated;
+  if (tr && !tr.recover && tr.after) {
+    after = Math.max(tr.after, cutoffFor(null, sch, now)); recover = true;
+    perGroup = MAX_RESULTS_PER_GROUP;
+    detail += `The last run hit its limits, so this run re-reads its window with ${perGroup} posts per group. `;
+  }
   const actor = actorId(env);
   const groupInfo = groupInfoStale(settings, groups, now);
   const input = buildInput(actor, { groups, resultsPerGroup: perGroup, after, groupInfo });
@@ -274,7 +302,7 @@ export async function startRun(repo, env, { fetchFn = fetch, now = Date.now(), s
   const qs = new URLSearchParams({ maxItems: String(maxItems), maxTotalChargeUsd: String(maxCharge) });
   if (hook) qs.set('webhooks', hook);
   const { data } = await apify(env, `/acts/${actor}/runs?${qs}`, { method: 'POST', body: JSON.stringify(input) }, fetchFn);
-  if (data?.id && isDatasetId(data.defaultDatasetId)) await repo.recordStartedRun({ runId: data.id, datasetId: data.defaultDatasetId, startedAt: Date.parse(data.startedAt) || now, actor });
+  if (data?.id && isDatasetId(data.defaultDatasetId)) await repo.recordStartedRun({ runId: data.id, datasetId: data.defaultDatasetId, startedAt: Date.parse(data.startedAt) || now, actor, caps: { perGroup, maxItems, maxCharge, after, recover } });
   if (!hook) detail += 'PUBLIC_BASE_URL or INGEST_SECRET is not set, so results arrive with the next sweep instead of a webhook. ';
   if (groupInfo) detail += 'Group details refreshed this run. ';
   return { action: 'started', runId: data?.id, groups: groups.length, skippedPages: pages.length, resultsPerGroup: perGroup, after, maxItems, maxChargeUsd: maxCharge, groupInfo, detail: detail.trim() };

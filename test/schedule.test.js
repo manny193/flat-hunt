@@ -140,7 +140,8 @@ test('every cron step together stays under 50 D1 queries per invocation', async 
   await c.repo.putSettings({ groups: [{ name: 'G', url: 'https://www.facebook.com/groups/111', active: true }], areaBackfill: { 1: { next: 0, max: 50000, startedAt: 1 } } });
   const posts = { bangalorerentals: Array.from({ length: 100 }, (_, i) => rpost(i, 'bangalorerentals', 0.5 + i * 0.1)) };
   const env = { ...ENV, REDDIT_CLIENT_ID: 'cid', REDDIT_CLIENT_SECRET: 'sec', REDDIT_USERNAME: 'tester' };
-  await c.repo.putSettings({ subreddits: [{ name: 'bangalorerentals' }], scheduler: { lastStartedAt: Date.now() - H } });
+  // Interval mode keeps this independent of the time of day (IST run hours would vary the steps run).
+  await c.repo.putSettings({ subreddits: [{ name: 'bangalorerentals' }], scheduler: { lastStartedAt: Date.now() - H }, schedule: { ...SCHEDULE_DEFAULTS, mode: 'interval' } });
   const app = createApp({ repo: () => c.repo, assets: async () => null, fetch: fakeApis({ redditPosts: posts }).fn });
   for (let i = 0; i < 4; i++) {
     c.reset();
@@ -170,7 +171,7 @@ test('worst-case hour (sweep backlog + Reddit + AI + backfill + purge) stays und
   };
   const AI = { run: async (model, { messages }) => { const ids = [...messages.at(-1).content.matchAll(/id="(P\d+)"/g)].map(m => m[1]); return { response: JSON.stringify({ results: ids.map(id => ({ id, isRental: true, kind: 'offer', type: 'flat', bhk: null, rent: null, deposit: null, depositMonths: null, maintenance: null, brokerage: null, brokerageAmount: null, furnishing: null, gender: null, availableFrom: null, society: null, locality: null, otherUnits: [], summary: 'x', confidence: 0.9 })) }) }; } };
   const env = { ...ENV, AI, REDDIT_CLIENT_ID: 'cid', REDDIT_CLIENT_SECRET: 'sec', REDDIT_USERNAME: 'tester' };
-  await c.repo.putSettings({ groups: [{ name: 'G', url: 'https://www.facebook.com/groups/111', active: true }], subreddits: [{ name: 'bangalorerentals' }], areaBackfill: { 1: { next: 0, max: 50000, startedAt: 1 } }, scheduler: { lastStartedAt: Date.now() - 2 * H } });
+  await c.repo.putSettings({ groups: [{ name: 'G', url: 'https://www.facebook.com/groups/111', active: true }], subreddits: [{ name: 'bangalorerentals' }], areaBackfill: { 1: { next: 0, max: 50000, startedAt: 1 } }, scheduler: { lastStartedAt: Date.now() - 2 * H }, schedule: { ...SCHEDULE_DEFAULTS, mode: 'interval', intervalHours: 1 } });
   const app = createApp({ repo: () => c.repo, assets: async () => null, fetch: fn });
   for (let i = 0; i < 3; i++) {
     c.reset();

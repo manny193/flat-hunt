@@ -28,7 +28,7 @@ export function runView(r) {
     startedAt: r.startedAt || null, finishedAt: finished, durationMs: r.startedAt && finished ? Math.max(0, finished - r.startedAt) : null,
     postsFetched: total, matchedArea: matched, newListings: p.newListings || 0, merged: p.merged || 0, duplicates: p.dupes || 0,
     offArea, notHousing: p.notHousing || 0, seeking: p.seeking || 0, unscrapableGroups: Array.isArray(p.unscrapable) ? p.unscrapable : [],
-    outsideGroups: p.outsideGroups || {}, costUsd: r.costUsd ?? null, cost: p.cost || null, progressOffset: p.progress?.offset ?? null, error: p.error || (p.errors || [])[0] || null,
+    outsideGroups: p.outsideGroups || {}, costUsd: r.costUsd ?? null, cost: p.cost || null, truncated: p.truncated || null, progressOffset: p.progress?.offset ?? null, error: p.error || (p.errors || [])[0] || null,
   };
 }
 

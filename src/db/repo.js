@@ -367,14 +367,24 @@ export function createRepo(db) {
       return rows.map(rowToRun);
     },
     async runsSince(t, limit = 1000) { return (await db.all('SELECT * FROM runs WHERE at >= ? ORDER BY at LIMIT ?', [t, limit])).map(rowToRun); },
-    async recordStartedRun({ runId, datasetId, startedAt, actor = null }) {
-      await db.run(`INSERT OR IGNORE INTO runs (source, dataset_id, run_id, status, started_at, at, report, actor) VALUES ('apify', ?, ?, 'running', ?, ?, '{}', ?)`, [datasetId, runId, startedAt, startedAt, actor]);
+    async recordStartedRun({ runId, datasetId, startedAt, actor = null, caps = null }) {
+      await db.run(`INSERT OR IGNORE INTO runs (source, dataset_id, run_id, status, started_at, at, report, actor) VALUES ('apify', ?, ?, 'running', ?, ?, ?, ?)`, [datasetId, runId, startedAt, startedAt, JSON.stringify(caps ? { caps } : {}), actor]);
     },
     async createRun({ source, datasetId, startedAt, actor = null }) {
       await db.run(`INSERT OR IGNORE INTO runs (source, dataset_id, status, started_at, at, report, actor) VALUES (?, ?, 'ingesting', ?, ?, '{}', ?)`, [source, datasetId, startedAt, startedAt, actor]);
     },
     async finishRun(datasetId, { status = 'done', report, now }) {
       await db.run('UPDATE runs SET status = ?, at = ?, finished_at = ?, report = ? WHERE dataset_id = ?', [status, now, Date.now(), JSON.stringify(report || {}), datasetId]);
+    },
+    /** After ingest: store cost (column + report.cost breakdown) and whether the run hit its limits (report.truncated). */
+    async annotateRun(datasetId, { costUsd = null, cost = null, truncated = null }) {
+      await db.run(`UPDATE runs SET cost_usd = coalesce(?, cost_usd), report = json_set(json_set(coalesce(report, '{}'), '$.cost', json(?)), '$.truncated', json(?)) WHERE dataset_id = ?`,
+        [costUsd, JSON.stringify(cost), JSON.stringify(truncated), datasetId]);
+    },
+    /** Latest successfully ingested Apify run: when it started and whether it was cut short. */
+    async lastGoodRun() {
+      const r = await db.first(`SELECT started_at, json_extract(report, '$.truncated') AS tr FROM runs WHERE source = 'apify' AND status = 'done' AND started_at IS NOT NULL ORDER BY started_at DESC LIMIT 1`);
+      return r ? { startedAt: r.started_at, truncated: J(r.tr) } : null;
     },
     /** Store a run's cost; the breakdown (platform, per-row charges, rows) goes into report.cost. */
     async setRunCost(datasetId, costUsd, breakdown = null) {

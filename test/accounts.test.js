@@ -183,6 +183,7 @@ const LEAKY = [
 ];
 const MOBILE = /(?<!\d)(?:\+?91|0)?[\s.-]{0,2}[6-9](?:[\s.-]{0,2}\d){9}(?!\d)/;
 function assertNoLeak(s, label) {
+  s = s.replace(/"id":"[^"]*"/g, '"id":""'); // random hex listing ids can look like a 10-digit number (QA)
   assert.doesNotMatch(s, MOBILE, label + ': mobile number');
   assert.doesNotMatch(s.replace(/[\s.\-()+]/g, ''), /(?<!\d)(?:91|0)?[6-9]\d{9}(?!\d)/, label + ': mobile with separators stripped');
   for (const bad of [/maps\.app\.goo\.gl/i, /google\.[a-z.]+\/maps/i, /maps\.google/i, /goo\.gl/i, /wa\.me/i, /tel:/i, /facebook\.com/i, /@example\.com/i, /Ravi Kumar/, /Sobha Elite/]) assert.doesNotMatch(s, bad, label + ': ' + bad);

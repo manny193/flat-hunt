@@ -199,6 +199,10 @@ export function prepareItems(rows, hints = {}) {
     if (t === 'group') continue;
     if (t === 'report' || t === 'summary' || t === 'error') { unscrapable.push(...reportFailures(r)); continue; }
     if (t && t !== 'post') continue;
+    // The admin's name for a watched group wins (stats and the Groups table are keyed by it).
+    if (r && typeof r === 'object' && !r.groupTitle && !r.groupName && isUrl(r.source) && byUrl.has(normUrl(r.source))) {
+      items.push({ ...r, groupName: byUrl.get(normUrl(r.source)), groupUrl: r.source }); continue;
+    }
     if (r && typeof r === 'object' && r.groupId != null && !r.groupTitle && !r.groupName) {
       const g = groups.get(String(r.groupId));
       if (g) { items.push({ ...r, groupName: g.name, groupUrl: r.groupUrl || g.url || (isUrl(r.source) ? r.source : '') }); continue; }
