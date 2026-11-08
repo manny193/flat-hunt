@@ -11,7 +11,7 @@ import { ingestItems } from '../src/ingest.js';
 import { runBackfill, startBackfill } from '../src/backfill.js';
 import { budgeted, ingestDataset } from '../src/apify.js';
 import { createApp, HOURLY_CRONS } from '../src/app.js';
-import { alertStep, ALERT_CRON, inQuiet, istHourOf, istDayStart } from '../src/alerts.js';
+import { alertStep, ALERT_CRON, inQuiet, istHourOf, istDayStart, alertText, GENERIC_NOTE, TEST_NOTE } from '../src/alerts.js';
 import { readFileSync } from 'node:fs';
 import { createUserSession, COOKIE } from '../src/auth.js';
 
@@ -497,4 +497,84 @@ test('cron dispatch: */10 runs only the alert step; the hourly string runs the h
   const crons = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '')).triggers.crons;
   assert.deepEqual(crons.filter(c => !HOURLY_CRONS.includes(c) && c !== ALERT_CRON), [], 'every Worker cron trigger is one scheduled() handles');
   assert.ok(crons.includes(ALERT_CRON));
+});
+
+// ---------- inbox and test send ----------
+const LEAKY = ['Call 9876543210 now', 'WhatsApp +91-98765-43210', 'wa.me/919876543210', 'https://wa.me/919876543210?text=hi', 'tel:+919876543210',
+  'location https://maps.app.goo.gl/AbC123', 'see https://www.facebook.com/groups/1/posts/77/', 'mail owner@example.com'];
+const MOBILE = /(?<!\d)(?:\+?91|0)?[\s.-]{0,2}[6-9](?:[\s.-]{0,2}\d){9}(?!\d)/;
+
+/** API harness plus a user who follows Green Glen with alerts on, one device, and a pushed batch of `n` listings. */
+async function inboxWorld(n = 5) {
+  const h = await apiHarness();
+  const u = await h.sessionFor('u@example.com');
+  const gg = await h.repo.createArea(GREEN_GLEN, Date.now());
+  await h.repo.linkArea(u.user.id, gg.id, Date.now());
+  assert.equal((await h.call('PUT', '/api/alerts/areas', { areas: [{ areaId: gg.id }] }, u.cookie)).status, 200);
+  assert.equal((await h.call('POST', '/api/alerts/targets', sub(FCM(1)), u.cookie)).status, 201);
+  const items = Array.from({ length: n }, (_, i) => ({ text: `${1 + (i % 3)}BHK available in Green Glen Layout, rent ${20000 + i * 1000}. ${LEAKY[i % LEAKY.length]}. At Sobha Elite Apartments. ${'abcdefghijklmnopq'[i]}xyz${i} unique words ${i}`,
+    url: `https://www.facebook.com/groups/1/posts/${i}/`, author: 'Ravi Kumar', groupName: 'Bellandur Flats', createdAt: new Date(Date.now() - (i + 1) * 60e3).toISOString() }));
+  await ingestItems(h.repo, items, { source: 'apify', storeAll: true });
+  const push = fakePush();
+  const st = await alertStep(budgeted(h.repo), h.env, { fetchFn: push.fn });
+  assert.equal(st.pushes, 1);
+  return { ...h, u, gg, push };
+}
+
+test('inbox: notification text uses only type, rent and area; no phones, emails, links, society, author or group; <= 3 lines + "+N more"', async () => {
+  const w = await inboxWorld(5);
+  const r = await w.call('GET', '/api/alerts/inbox', undefined, w.u.cookie);
+  assert.equal(r.status, 200); assert.equal(r.data.count, 5);
+  const n = r.data.notification;
+  assert.equal(n.title, '5 new flats in your areas'); assert.equal(n.tag, 'flat-hunt-alerts');
+  const lines = n.body.split('\n');
+  assert.equal(lines.length, 4); assert.equal(lines[3], '+2 more');
+  for (const l of lines.slice(0, 3)) assert.match(l, /^\d BHK · ₹\d{2},\d{3} · Green Glen$/, l);
+  assert.equal(n.url, `/#area-${w.gg.id}`, 'one area: the homepage filtered to it');
+  assert.doesNotMatch(r.text, MOBILE); assert.doesNotMatch(r.text, /@|https?:|wa\.me|tel:|maps|facebook|Sobha|Ravi|Bellandur Flats/i);
+  // One listing: opens that listing.
+  const one = alertText([{ listing_id: 'abc_123', area_id: 3, area_name: 'HSR Layout', bhk: '1RK', rent: 16500, type: null }]);
+  assert.deepEqual(one, { title: 'New flat in HSR Layout', body: '1 RK · ₹16,500', url: '/#listing-abc_123', tag: 'flat-hunt-alerts' });
+  assert.equal(alertText([{ listing_id: 'x', area_id: 3, area_name: 'HSR', type: 'pg' }]).title, 'New PG in HSR');
+  const two = alertText([{ listing_id: 'a', area_id: 1, area_name: 'A', bhk: '2', rent: 1 }, { listing_id: 'b', area_id: 2, area_name: 'B', type: 'flatmate' }]);
+  assert.equal(two.url, '/#alerts', 'several areas: the alerts list'); assert.equal(two.body, '2 BHK · ₹1 · A\nRoom · B');
+  assert.equal(alertText([{ listing_id: '../x?y', area_id: 1 }]).url, '/#alerts', 'odd ids never reach the URL');
+});
+
+test('inbox: latest batch only; full=1 lists batches; generic after 24 h; public 401, pending 403, blocked 401', async () => {
+  const w = await inboxWorld(2);
+  // A second, newer batch of one listing.
+  await ingestItems(w.repo, [{ text: '3BHK in Green Glen Layout near the lake, rent 52,000, call 9000099999 quietword', url: 'https://www.facebook.com/groups/1/posts/999/', createdAt: new Date(Date.now() - 30e3).toISOString() }], { source: 'apify', storeAll: true });
+  await w.db.run('UPDATE alert_queue SET sent_at = sent_at - 7200000 WHERE status = \'sent\''); // first batch went out 2 h ago
+  assert.equal((await alertStep(budgeted(w.repo), w.env, { fetchFn: fakePush().fn })).pushes, 1);
+  const r = await w.call('GET', '/api/alerts/inbox', undefined, w.u.cookie);
+  assert.equal(r.data.count, 1); assert.equal(r.data.notification.body, '3 BHK · ₹52,000'); assert.match(r.data.notification.url, /^\/#listing-[\w-]+$/);
+  const full = await w.call('GET', '/api/alerts/inbox?full=1', undefined, w.u.cookie);
+  assert.deepEqual(full.data.batches.map(b => b.items.length), [1, 2]);
+  assert.ok(full.data.batches[0].items[0].posts, 'full listing for a signed-in user (via serializeListing)');
+  assert.equal(full.data.batches[0].items[0].fp, undefined, 'storage internals stripped');
+  await w.db.run('UPDATE alert_queue SET sent_at = sent_at - 2 * 86400000');
+  assert.deepEqual((await w.call('GET', '/api/alerts/inbox', undefined, w.u.cookie)).data.notification, GENERIC_NOTE);
+  assert.equal((await w.call('GET', '/api/alerts/inbox')).status, 401);
+  const p = await w.sessionFor('p@example.com', 'user', 'pending');
+  assert.equal((await w.call('GET', '/api/alerts/inbox', undefined, p.cookie)).status, 403);
+  await w.repo.updateUser(w.u.user.id, { status: 'blocked' });
+  assert.equal((await w.call('GET', '/api/alerts/inbox', undefined, w.u.cookie)).status, 401, 'blocked = signed out');
+});
+
+test('test send: one push per own device, inbox shows the test text for 10 minutes, 3 per hour, needs a device', async () => {
+  const push = fakePush();
+  const h = await apiHarness({ fetchFn: push.fn });
+  const u = await h.sessionFor('u@example.com'), other = await h.sessionFor('o@example.com');
+  assert.equal((await h.call('POST', '/api/alerts/test', undefined, u.cookie)).data.error, 'no_devices');
+  await h.call('POST', '/api/alerts/targets', sub(FCM(1)), u.cookie);
+  await h.call('POST', '/api/alerts/targets', sub('https://web.push.apple.com/QGuQyav'), u.cookie);
+  await h.call('POST', '/api/alerts/targets', sub(FCM(9)), other.cookie);
+  const r = await h.call('POST', '/api/alerts/test', undefined, u.cookie);
+  assert.equal(r.status, 202); assert.deepEqual(r.data, { sent: 2, failed: 0 });
+  assert.deepEqual(push.calls.map(c => c.url).sort(), [FCM(1), 'https://web.push.apple.com/QGuQyav'].sort(), "only the caller's devices");
+  assert.deepEqual((await h.call('GET', '/api/alerts/inbox', undefined, u.cookie)).data.notification, TEST_NOTE);
+  assert.equal((await h.call('POST', '/api/alerts/test', undefined, u.cookie)).status, 202);
+  assert.equal((await h.call('POST', '/api/alerts/test', undefined, u.cookie)).status, 202);
+  assert.equal((await h.call('POST', '/api/alerts/test', undefined, u.cookie)).status, 429, '4th test in an hour');
 });

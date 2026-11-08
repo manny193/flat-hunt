@@ -560,6 +560,19 @@ export function createRepo(db) {
       return (await db.first('SELECT id FROM alert_targets WHERE channel = ? AND address = ?', [channel, address]))?.id ?? null;
     },
     async deleteAlertTarget(userId, id) { return (await db.run('DELETE FROM alert_targets WHERE id = ? AND user_id = ?', [id, userId])).changes > 0; },
+    /** Inbox (service worker): the user's latest pushed batch, only the public-safe columns the text needs. */
+    async alertInbox(userId, limit = 50) {
+      return db.all(`SELECT q.listing_id, q.sent_at, q.area_id, a.name AS area_name, l.bhk, l.rent, json_extract(l.data, '$.type') AS type, l.last_posted_at
+        FROM alert_queue q JOIN listings l ON l.id = q.listing_id LEFT JOIN areas a ON a.id = q.area_id
+        WHERE q.user_id = ? AND q.status = 'sent' AND q.sent_at = (SELECT MAX(sent_at) FROM alert_queue WHERE user_id = ? AND status = 'sent')
+        ORDER BY l.last_posted_at DESC, q.listing_id LIMIT ?`, [userId, userId, limit]);
+    },
+    /** #alerts screen: the user's latest alerted listings (pushed or not pushed), full rows, newest first. */
+    async alertHistory(userId, limit = 20) {
+      const rows = await db.all(`SELECT l.*, q.status AS q_status, q.sent_at AS q_sent_at, q.created_at AS q_created_at FROM alert_queue q JOIN listings l ON l.id = q.listing_id
+        WHERE q.user_id = ? AND q.status IN ('sent', 'capped') ORDER BY coalesce(q.sent_at, q.created_at) DESC, q.listing_id LIMIT ?`, [userId, limit]);
+      return rows.map(r => ({ listing: rowToListing(r), status: r.q_status, sentAt: r.q_sent_at ?? null, queuedAt: r.q_created_at }));
+    },
     /**
      * Send step, one query: users with pending alerts (active accounts, alerts not paused), oldest first,
      * with their caps and today's counts (dayStart = IST midnight). Role and email decide the admin-only soft launch.

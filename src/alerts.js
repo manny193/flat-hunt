@@ -6,6 +6,7 @@
 import { HttpError, json, errorJson, readJson } from './http.js';
 import { channels } from './channels/index.js';
 import { adminEmails } from './auth.js';
+import { serializeListing, publicText } from './serialize.js';
 
 const HOUR = 36e5;
 const DAY = 24 * HOUR;
@@ -123,6 +124,27 @@ export async function alertsApi(request, env, method, seg, url, repo, fetchFn, w
     });
     return json({ areas: await repo.replaceAlertAreas(uid, areas, now, defaultPrefs(cfg)) });
   }
+  if (res === 'inbox' && !id && method === 'GET') {
+    if (url.searchParams.get('full') === '1') {
+      const rows = await repo.alertHistory(uid, 20);
+      const batches = [];
+      for (const r of rows) {
+        const key = r.status === 'sent' ? r.sentAt : null;
+        let b = batches.at(-1);
+        if (!b || b.sentAt !== key) batches.push(b = { sentAt: key, pushed: r.status === 'sent', items: [] });
+        b.items.push(serializeListing(r.listing, who.role));
+      }
+      return json({ batches });
+    }
+    const [prefs, rows] = await Promise.all([repo.alertPrefs(uid), repo.alertInbox(uid)]);
+    const latest = rows[0]?.sent_at ?? null;
+    if (prefs?.testAt && now - prefs.testAt < TEST_SHOW_MS && (!latest || prefs.testAt > latest)) return json({ notification: TEST_NOTE, count: 0 });
+    if (!rows.length || now - latest > DAY) return json({ notification: GENERIC_NOTE, count: 0 });
+    return json({ notification: alertText(rows), count: rows.length });
+  }
+  if (res === 'test' && !id && method === 'POST') {
+    return json(await testSend(repo, env, uid, { fetchFn, now }), 202);
+  }
   if (res === 'targets' && !id && method === 'POST') {
     const b = await readJson(request, 4 * KB);
     const ch = channels[b?.channel || 'webpush'];
@@ -132,6 +154,60 @@ export async function alertsApi(request, env, method, seg, url, repo, fetchFn, w
     return json({ id: tid }, 201);
   }
   return errorJson(404, 'not_found', 'No such API route.');
+}
+
+// ---------- notification text (inbox) ----------
+// Built from an allowlist only: type/BHK, rent, area name. Every one of these is public on #browse, so a
+// lock-screen preview shows nothing the public site does not. Never post text, phones, emails, links,
+// author, society or group names.
+export const ALERT_TAG = 'flat-hunt-alerts';
+export const GENERIC_NOTE = { title: 'Flat Hunt', body: 'New flats in your areas. Open Flat Hunt to see them.', url: '/#alerts', tag: ALERT_TAG };
+export const TEST_NOTE = { title: 'Flat Hunt test', body: 'Alerts work on this device.', url: '/#alerts', tag: ALERT_TAG };
+const TEST_SHOW_MS = 10 * 60e3;
+const TESTS_PER_HOUR = 3;
+const MAX_LINES = 3;
+const typeLabel = it => it.type === 'flatmate' ? 'Room' : it.type === 'pg' ? 'PG' : it.bhk === '1RK' ? '1 RK' : it.bhk != null && it.bhk !== '' ? `${it.bhk} BHK` : 'Flat';
+const rentLabel = r => Number.isFinite(Number(r)) && Number(r) > 0 ? '₹' + Math.round(Number(r)).toLocaleString('en-IN') : '';
+// Area names are validated against phones/links/emails when created; publicText() again as a backstop.
+const areaLabel = s => publicText(String(s || '')).replace(/\[\w+\]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+const safeId = id => /^[A-Za-z0-9_-]{1,64}$/.test(String(id)) ? String(id) : null;
+
+/**
+ * Notification for one pushed batch. items: [{listing_id, area_id, area_name, bhk, rent, type}].
+ * One item opens that listing; several open the homepage filtered to their area when they share one
+ * ("+N more" too), otherwise the #alerts list of the batch.
+ */
+export function alertText(items) {
+  const n = items.length;
+  const line = (it, withArea) => [typeLabel(it), rentLabel(it.rent), withArea ? areaLabel(it.area_name) : ''].filter(Boolean).join(' · ');
+  if (n === 1) {
+    const it = items[0]; const area = areaLabel(it.area_name); const t = typeLabel(it);
+    const noun = t === 'Room' ? 'room' : t === 'PG' ? 'PG' : 'flat';
+    const id = safeId(it.listing_id);
+    return { title: area ? `New ${noun} in ${area}` : `New ${noun} in your areas`, body: line(it, false), url: id ? `/#listing-${id}` : '/#alerts', tag: ALERT_TAG };
+  }
+  const areas = [...new Set(items.map(it => it.area_id))];
+  const lines = items.slice(0, MAX_LINES).map(it => line(it, true));
+  if (n > MAX_LINES) lines.push(`+${n - MAX_LINES} more`);
+  return { title: `${n} new flats in your areas`, body: lines.join('\n'), url: areas.length === 1 && Number.isInteger(areas[0]) && areas[0] > 0 ? `/#area-${areas[0]}` : '/#alerts', tag: ALERT_TAG };
+}
+
+/** Test push to the caller's own devices (3 an hour). Sets prefs.test_at first so the inbox answers with the test text. */
+export async function testSend(repo, env, uid, { fetchFn = fetch, now = Date.now() } = {}) {
+  const targets = await repo.alertTargetsForSend([uid]);
+  if (!targets.length) throw new HttpError(409, 'no_devices', 'Turn on alerts on this device first.');
+  if ((await repo.hitRate(`alert-test:${uid}`, now, HOUR)) > TESTS_PER_HOUR) throw new HttpError(429, 'too_many_tests', 'You can send 3 tests an hour. Try again later.');
+  let vapid;
+  try { vapid = await channels.webpush.importVapid(env); } catch { throw new HttpError(503, 'alerts_not_configured', 'Alerts are not set up on this server.'); }
+  const prefs = (await repo.alertPrefs(uid)) || defaultPrefs(alertsConfig(await repo.getSettings()));
+  await repo.putAlertPrefs(uid, { ...prefs, testAt: now }, now);
+  const ctx = { fetchFn, vapid, now, skipOrigins: new Set() };
+  const results = await Promise.all(targets.slice(0, MAX_TARGETS).map(async t => ({ t, r: await (channels[t.channel]?.send(t, null, ctx) ?? { ok: false, error: 'no_channel' }) })));
+  const okIds = results.filter(x => x.r.ok).map(x => x.t.id);
+  const goneIds = results.filter(x => x.r.gone).map(x => x.t.id);
+  const failed = results.filter(x => !x.r.ok && !x.r.gone && x.r.error !== 'http_429').map(x => ({ id: x.t.id, error: x.r.error || 'error' }));
+  await repo.alertWriteBack({ now, goneIds, failed, okIds });
+  return { sent: okIds.length, failed: results.length - okIds.length };
 }
 
 // ---------- cron send step ----------
