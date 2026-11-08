@@ -15,13 +15,17 @@ import { startBackfill, backfillState } from './backfill.js';
 import { generateKeywords, cleanKeywords } from './core/keywords.js';
 import { esc } from './core/logic.js';
 import { STAGES, STATUSES } from './db/repo.js';
+import { alertsApi, alertStep, ALERT_CRON } from './alerts.js';
 
 const KB = 1024;
 export const LIMITS = { importBytes: 2 * KB * KB, webhookBytes: 16 * KB, smallBytes: 64 * KB, importItems: 3000 };
 const IMPORT_SOURCES = ['scraper', 'phone', 'manual', 'sample'];
 // Paths reachable without a session. Static files here hold no data: the login page needs the
 // stylesheet and icon, and browsers fetch the web manifest without cookies.
-const PUBLIC_ASSETS = new Set(['/ui.js', '/finance.js', '/app.css', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.webmanifest', '/favicon.ico']);
+// Cron strings that run the hourly scheduledJob(): the Worker trigger and the Node in-process timer.
+export const HOURLY_CRONS = ['30 * * * *', 'node-interval'];
+// /sw.js (alerts service worker) must be public too: the browser's update check carries no guarantee of a session.
+const PUBLIC_ASSETS = new Set(['/ui.js', '/finance.js', '/alerts.js', '/sw.js', '/app.css', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.webmanifest', '/favicon.ico']);
 
 /**
  * @param deps {repo(env) -> repository, assets(request, env) -> Response|null, fetch?}
@@ -40,6 +44,16 @@ export function createApp(deps) {
     },
     async scheduled(event, env) {
       const repo = deps.repo(env);
+      // Two Cron Triggers (wrangler.jsonc): the hourly job, and the 10-minute alert step, which runs alone
+      // so it has the whole per-invocation budget. Unknown cron strings are ignored, so a trigger list
+      // that runs ahead of (or behind) the code never runs the hourly job every 10 minutes.
+      const cron = event?.cron;
+      if (cron === ALERT_CRON) {
+        const a = await alertStep(budgeted(repo), env, { fetchFn });
+        console.log('alerts', JSON.stringify(a));
+        return a;
+      }
+      if (cron && !HOURLY_CRONS.includes(cron)) { console.log('scheduled: ignoring unknown cron', String(cron).slice(0, 40)); return { action: 'ignored' }; }
       const r = await scheduledJob(repo, env, { fetchFn });
       console.log('scheduled', JSON.stringify({ action: r.action, swept: r.swept?.length, detail: r.detail }));
       return r;
@@ -83,7 +97,14 @@ async function route(request, env, ctx, deps, fetchFn) {
   if (path === '/auth/google/callback' && method === 'GET') return googleCallback(request, env, repo(), fetchFn);
   if (path === '/api/me' && method === 'GET') return json(meView(await identify(request, env, repo(), fetchFn), env));
   if (path.startsWith('/api/public/')) return publicApi(request, env, repo(), path, url);
-  if ((method === 'GET' || method === 'HEAD') && PUBLIC_ASSETS.has(path)) return (await deps.assets(request, env)) || errorJson(404, 'not_found');
+  if ((method === 'GET' || method === 'HEAD') && PUBLIC_ASSETS.has(path)) {
+    const res = await deps.assets(request, env);
+    if (!res) return errorJson(404, 'not_found');
+    if (path !== '/sw.js') return res;
+    // Service worker updates must roll out at once: revalidate on every check.
+    const h = new Headers(res.headers); h.set('cache-control', 'no-cache');
+    return new Response(res.body, { status: res.status, headers: h });
+  }
   // The app shell is public (the public can browse); it holds no data. Fails closed when login is unconfigured.
   if ((method === 'GET' || method === 'HEAD') && (path === '/' || path === '/index.html') && (request.headers.get('accept') || '').includes('text/html') && authMode(env) !== 'unconfigured') {
     return (await deps.assets(new Request(new URL('/', url), { method, headers: request.headers }), env)) || errorJson(404, 'not_found');
@@ -360,6 +381,8 @@ async function api(request, env, method, path, url, repo, fetchFn, who) {
     return json({ listings: rows.map(out), next: rows.length === limit ? rows[rows.length - 1].lastPostedAt : null });
   }
 
+  // Area alerts (src/alerts.js): config, prefs, areas, devices, inbox, test send.
+  if (res === 'alerts') return alertsApi(request, env, method, seg.slice(1), url, repo, fetchFn, who);
   if (res === 'keywords' && !id && method === 'GET') return json({ keywords: generateKeywords(areaName(url.searchParams.get('name'))) });
   if (res === 'runs' && !id && method === 'GET') { adminOnly(who); return json({ runs: await repo.listRuns(20) }); }
   if (res === 'apify' && id === 'run' && method === 'POST') {

@@ -8,6 +8,7 @@
 
 import { pick, asName, GROUP_KEYS, prepareItems, emptyReport, screenItem, makeContext, tokens, compatible, scoreCandidate, applyPost, newListing, newId, fingerprint, sameAreas, mergeReports, sketches, postSketch, plausible, MATCH_THRESHOLD, RENT_WINDOW } from './core/logic.js';
 import { bhkKey } from './db/repo.js';
+import { ingestAlertStatements } from './alerts.js';
 
 const DAY = 864e5;
 export const CANDIDATE_DAYS = 60;
@@ -148,7 +149,9 @@ export async function ingestItems(repo, raw, opts) {
   if (opts.datasetId) runReport.datasetId = opts.datasetId;
   const progress = typeof opts.run?.progress === 'function' ? opts.run.progress(prepared.groups) : opts.run?.progress;
   if (progress) runReport.progress = progress; else delete runReport.progress;
-  await db(() => repo.saveIngest({ listings: changed, keys: newKeys, mergedIds: [...loaded.keys()], run: { source, datasetId: opts.datasetId, status: opts.run?.status || 'done', report: runReport }, now }));
+  // Area alerts: +1 statement in the same batch, only for brand-new listings from live sources (src/alerts.js).
+  const extra = ingestAlertStatements({ source, sample: opts.sample, settings, newListings: [...local.values()], now });
+  await db(() => repo.saveIngest({ listings: changed, keys: newKeys, mergedIds: [...loaded.keys()], run: { source, datasetId: opts.datasetId, status: opts.run?.status || 'done', report: runReport }, now, extra }));
   const t1 = performance.now();
   return {
     report, runReport, groups: prepared.groups, changed: changed.map(l => l.id),

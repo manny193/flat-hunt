@@ -380,3 +380,76 @@ Must fix: issue 1 (with a test), then re-run `npm test`. Issues 2 to 6 can follo
 - Issue 2: money-short sharing is now weighted by yield, so a better group is never read less than a weaker cheap one; allowance cap unchanged. Test added.
 - Issue 3: unscrapable failures count only since the group's last status change. Test added.
 - Issues 4 and 5: left as is (accepted). `npm test`: 136 tests, 135 pass, 1 skipped.
+
+---
+
+# Round 3: area alerts over Web Push (branch feat/web-push-alerts, issue #30)
+
+Verdict: **sign-off with notes.** No blocker. `npm test`: 148 tests, 147 pass, 1 skipped, 0 fail.
+
+## What was checked and how
+
+1. **Tests judged.** test/alerts.test.js and test/webpush.test.js cover the risky parts for real: public 401 and
+   pending 403 on every alerts route; soft launch (`adminOnly`), kill switch and missing VAPID; delete always works;
+   10 devices cap; quiet hours incl. IST wrap-around; minimum gap, digests/day, listings/day (rows capped), admin
+   ceiling, global pushes/day; samples, imports, seeking, old posts, no-area and reposts never queue; backfill never
+   alerts; 404/410 delete the device, 429 not counted as a failure and the origin is skipped, 5xx keep rows pending;
+   endpoint allowlist (SSRF) at subscribe time and again at send time; D1 budget (<= 10 queries per run, idle run 2,
+   a full webhook ingest stays within 48); inbox text leak test; /sw.js public with `no-cache`. The VAPID JWT test
+   verifies the signature with WebCrypto (raw r||s, aud, sub, exp = now + 3600). Gap: nothing checks that
+   `VAPID_SUBJECT` is a `mailto:` or `https:` URL (see N3).
+2. **Privacy.** Notification text is built from type/BHK, rent and area name only. The inbox is session-scoped,
+   so a signed-out device gets 401 and the service worker shows the generic line. Endpoints and keys never leave the
+   server (`rowToTarget` omits them; tested for config and export). `DELETE /api/alerts/targets/:id` is scoped by
+   `user_id` (other user's id gives 404, tested). The admin card has counts only; the admin test send only
+   reaches the admin's own devices. No `console.*` in alerts.js, channels or web code; the cron logs only the status
+   object (counts and error codes). `lastError` and `alert_targets.last_error` hold short codes.
+3. **Workers Free CPU (measured, scratch script, not committed).** Real crypto is cheap: first `importKey` 0.5 ms,
+   first ES256 sign 0.65 ms, each further origin 0.12 ms, steady state 0.07 ms per import or sign. 39 more
+   mocked sends cost 0.6 ms. The "29 ms cold" the engineer saw is **Node's lazy load of `Response`**: the first
+   `new Response(null, {status: 201})` in a fresh Node process costs about 30 ms CPU, the second 0.01 ms. That is the
+   test mock, not app code; Workers has `Response` built in and the real `fetch` replaces it. Estimated real cold cost
+   of the send step: crypto about 1.2 ms + JSON/D1 glue about 1 ms. What is **not** measured is workerd's own CPU per
+   real `fetch` (headers, TLS bookkeeping); worst case guess 0.1 to 0.3 ms each, so 40 sends could reach 4 to 12 ms.
+   Risk is low in the soft launch (a handful of admin devices) and rises only when it opens to everyone.
+   Mitigations if the dashboard shows CPU near 10 ms: lower `MAX_SENDS` from 40 to 20 (rows wait for the next run,
+   no code design change). No key cache needed: import is 0.08 ms.
+4. **Cron safety.** `scheduled()` runs the alert step only for `*/10 * * * *`, the hourly job only for
+   `30 * * * *`, `node-interval` or no cron string, and ignores anything else (tested, and the test also checks
+   wrangler.jsonc lists only known crons). **Residual risk (N1):** the guard is only in the new code. If the deploy
+   auto-rolls back to the current production version, that old code runs the full hourly job on every `*/10` tick
+   unless `wrangler rollback` also restores the trigger list (documented as unverified in docs/DEPLOY.md).
+   Apify spend is still protected by `isDue(lastStartedAt)`, but the Reddit step, AI extraction (Workers AI
+   neurons) and backfill/purge steps would run 6x as often and use D1 budget.
+5. **deploy.yml.** The three VAPID secrets are optional (the node script only writes secrets that are set; the
+   Worker reports alerts "not set up" and the cron returns `off`). Smoke test adds only two GETs (/alerts.js,
+   /sw.js, both public static) and does not need VAPID. Secrets go through a 077-umask file that is removed;
+   nothing echoes them. CSP unchanged.
+6. **UI** (npm run dev, scratch DB, throw-away VAPID keys generated in the scratchpad, not committed). Checked
+   My areas bell and sheet, Account alerts panel, #alerts, Admin -> Alerts on desktop and at 375 px: all render,
+   no horizontal scroll (375 vs 375), no `style=""` attributes, no CSP violations. The only console error is
+   "An unknown error occurred when fetching the script": the browser pane refuses service worker registration
+   (`/sw.js` itself returns 200 with `no-cache`), and notification permission shows as blocked, so the UI's
+   "blocked" branch rendered. Subscribe, push and notification click could not be exercised here: real device.
+
+## Findings, most severe first
+
+| # | Severity | Where | Finding | Fix before push? |
+|---|---|---|---|---|
+| N1 | Medium | wrangler.jsonc triggers, .github/workflows/deploy.yml:146, docs/DEPLOY.md:207 | Auto-rollback to the pre-alerts version could leave the `*/10` trigger live against old code (hourly job every 10 min). Unverified whether `wrangler rollback` restores triggers. | No, but the founder must know: after any rollback, check `wrangler triggers` / dashboard and delete the `*/10` cron. Better: confirm behaviour once, or add a rollback-step note/redeploy of crons. |
+| N2 | Low | src/alerts.js (MAX_SENDS, alertStep) | Real workerd CPU per push fetch unmeasured. | No. Watch CPU in the dashboard after the first admin test send; lower MAX_SENDS if needed before opening to all users. |
+| N3 | Low | src/channels/webpush.js importVapid | `VAPID_SUBJECT` format is not validated. Apple rejects tokens whose `sub` is not `mailto:` or `https:`, which would show as 403 and count failures against every Safari/iOS device. | No. Cheap to add a check and a test. |
+| N4 | Info | web/alerts.js, src/app.js | Shared device: the inbox answers for whoever's session cookie is current, so user B can see B's alert text on a push meant for A. Signing out calls `beforeSignOut` to remove the device. Acceptable, documented. | No |
+| N5 | Info | test/alerts.test.js:472 | CPU test passes at < 15 ms JS time (loose for CI) and excludes the mock-Response warm-up, so it guards regressions but does not prove the 10 ms budget. | No |
+
+## Real-device checklist (founder)
+
+1. Set the three VAPID secrets (generate a fresh key pair; never reuse test keys), deploy, then Admin -> Alerts: turn Alerts on, keep "Admins only" on.
+2. Android Chrome: follow an area, tap the bell, allow notifications, "Send a test to my devices". Notification arrives, tap opens the app.
+3. iPhone: Add to Home Screen first (the install card explains), open from the icon, turn alerts on, send test. Check it is not a 403 (N3).
+4. Desktop Chrome/Edge/Firefox, one each if possible: test arrives while the tab is closed.
+5. Lock-screen preview shows only type, rent and area (no phone, link, name).
+6. Sign out in the browser: the device disappears from Alerts; sign in as a non-admin: alerts panel says admins only.
+7. Quiet hours: set quiet to cover now, wait for a real new post, confirm nothing arrives until quiet ends.
+8. After the first run, read Workers dashboard CPU time for the `*/10` trigger (N2).
+9. Before pushing: note the rollback runbook item (N1).

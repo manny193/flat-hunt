@@ -8,6 +8,7 @@ import { mkdirSync } from 'node:fs';
 import { normalize, extname, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
+import { ALERT_CRON } from './alerts.js';
 import { sqliteDriver } from './db/drivers.js';
 import { openSqlite, migrateSqlite } from './db/node-sqlite.js';
 import { loadMigrations } from './db/fs-migrations.js';
@@ -92,12 +93,19 @@ export async function startServer(opts = {}) {
     if (!opts.quiet) console.log(`scheduler: every ${minutes} min (first run in 2 min)`);
   }
 
+  // Area alerts (docs/ai/ALERTS-WEBPUSH.md): the 10-minute send step, like the Worker's second Cron Trigger.
+  let alertTimer = null;
+  if (env.CRON_ENABLED === '1' && env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && env.VAPID_SUBJECT) {
+    alertTimer = setInterval(() => app.scheduled({ cron: ALERT_CRON, scheduledTime: Date.now() }, env).catch(e => console.error('alert step failed', e?.message || e)), 10 * 60e3); alertTimer.unref();
+    if (!opts.quiet) console.log('alerts: send step every 10 min');
+  }
+
   const port = opts.port ?? (parseInt(env.PORT, 10) || 8787);
   const host = opts.host ?? env.HOST ?? '0.0.0.0';
   await new Promise((ok, fail) => { server.once('error', fail); server.listen(port, host, ok); });
   const addr = server.address();
   const url = `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${addr.port}`;
-  const close = () => new Promise(ok => { clearInterval(timer); server.close(() => { try { raw.close(); } catch { /* already closed */ } ok(); }); server.closeAllConnections?.(); });
+  const close = () => new Promise(ok => { clearInterval(timer); clearInterval(alertTimer); server.close(() => { try { raw.close(); } catch { /* already closed */ } ok(); }); server.closeAllConnections?.(); });
   return { server, url, repo, close, env };
 }
 

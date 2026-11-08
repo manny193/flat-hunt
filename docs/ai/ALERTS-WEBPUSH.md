@@ -1,6 +1,6 @@
 # Area alerts over Web Push: high-level design
 
-Written 8 Nov 2026 by the architect against the code at that date (no commit hash: working tree). Tracking issue: manny193/flat-hunt#30. Status: **design, nothing built**. Channel research and the earlier channel-neutral sketch: `docs/ai/ALERTS.md` (this doc supersedes its §6.1 schema and §6.3 send step for Web Push). Items marked **[unverified]** were not checked against a live browser or vendor page; QA or the engineer must confirm them before rollout.
+Written 8 Nov 2026 by the architect against the code at that date (no commit hash: working tree). Tracking issue: manny193/flat-hunt#30. Status: **built on branch `feat/web-push-alerts`** (soft launch: off by default, admins only); see §19 for where the code differs from this design. Channel research and the earlier channel-neutral sketch: `docs/ai/ALERTS.md` (this doc supersedes its §6.1 schema and §6.3 send step for Web Push). Items marked **[unverified]** were not checked against a live browser or vendor page; QA or the engineer must confirm them before rollout.
 
 ## 1. Goal and scope
 
@@ -462,3 +462,21 @@ Ordered; each is one reviewable PR (or commit) with its tests. Run `npm test` gr
 10. **Deploy wiring and docs.** `.github/workflows/deploy.yml` optional secrets (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`); `docs/DEPLOY.md`; `docs/ai/ARCHITECTURE.md` routes/tables/invariants; `docs/ai/COSTS.md`; `docs/human/APP-FLOWS.md` and privacy copy; rollback note in `docs/DEPLOY.md`.
 
 Size: about **M** overall (tasks 1 to 7 are S each; the UI task is M).
+
+## 19. Implementation notes (engineer, 8 Nov 2026)
+
+Built as designed except for these points (chief-of-staff decisions on §17 applied: HLD default caps, admin-only soft launch, no repost or seeking alerts, "+N more" to the homepage filtered by area, iOS message instead of a new sign-in method):
+
+1. **Settings keys.** `settings.alerts = { enabled (default false), adminOnly (default true), maxPushesPerDay, quietStart, quietEnd, maxListings, maxDigests, minGapMin }` instead of `{ webpush, ... }`. The caps are the defaults for new users and `maxListings`/`maxDigests` are also ceilings at send time, so an admin can lower them for everyone. Run stats live in a separate key, `settings.alertsRun`, so a cron run never overwrites an admin change.
+2. **`GET /api/alerts/config` answers 200** with `enabled: false` and a `reason` (`off`, `admin_only`, `not_configured`) instead of 403, so the UI can hide itself. Every other route except `DELETE /targets/:id` answers 403 `alerts_off`.
+3. **Notification URL.** One listing → `/#listing-<id>`; several listings in one area → `/#area-<id>` (new route: homepage filtered to that area); several areas → `/#alerts`.
+4. **Users with no working device** (none stored, or all at 5 failures) get their pending rows marked `capped` (shown on `#alerts` as "not pushed") instead of being re-selected every run until expiry.
+5. **Write-back order:** the expiry statement runs first, so a digest never claims rows older than 36 h. Failure counts are one statement carrying a per-target error code (not one per code), so the batch is always ≤ 6 statements.
+6. **429 is not counted** against the device (it is the push service throttling us); rows stay pending and that origin is skipped for the rest of the run.
+7. **Node:** a separate 10-minute timer (when `CRON_ENABLED=1` and the VAPID secrets are set) instead of calling `alertStep()` after `scheduledJob()`.
+8. **`pushsubscriptionchange`** fetches the public key from `/api/alerts/config` (no IndexedDB).
+9. **No manual `Content-Length: 0`:** the push request has no body and fetch sends `Content-Length: 0` itself for a bodiless POST (Fetch standard).
+10. **Blocked users get 401** from the inbox (our auth treats a blocked account as signed out), not 403.
+11. **Test send** counts against the 3/hour limit only when the caller has at least one device.
+12. **Admin counts:** `queue.expired7d` (rows are kept 7 days) instead of `expiredToday`.
+13. **Not built:** the optional Playwright check (§13.18; Playwright is not a repo dependency). UI was built from §10 without a separate designer spec; `docs/DESIGN.md` describes what exists.

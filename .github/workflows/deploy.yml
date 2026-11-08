@@ -76,12 +76,16 @@ jobs:
           INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-          # Optional secrets: uploaded only when set (Google sign-in, Reddit source, Groq AI fallback).
+          # Optional secrets: uploaded only when set (Google sign-in, Reddit source, Groq AI fallback,
+          # Web Push area alerts: without all three VAPID secrets the alert step stays idle and the UI hides alerts).
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
           # Optional plain config from repository Variables, passed as Worker vars only when set.
           VAR_ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
           VAR_REDDIT_USERNAME: ${{ vars.REDDIT_USERNAME }}
@@ -90,7 +94,7 @@ jobs:
           umask 077
           secrets_file="$RUNNER_TEMP/worker-secrets.json"
           node -e '
-            const keys = ["APIFY_TOKEN","INGEST_SECRET","APP_PASSWORD","SESSION_SECRET","GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","REDDIT_CLIENT_ID","REDDIT_CLIENT_SECRET","GROQ_API_KEY"];
+            const keys = ["APIFY_TOKEN","INGEST_SECRET","APP_PASSWORD","SESSION_SECRET","GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","REDDIT_CLIENT_ID","REDDIT_CLIENT_SECRET","GROQ_API_KEY","VAPID_PUBLIC_KEY","VAPID_PRIVATE_KEY","VAPID_SUBJECT"];
             const out = {};
             for (const k of keys) if (process.env[k]) out[k] = process.env[k];
             require("fs").writeFileSync(process.argv[1], JSON.stringify(out));
@@ -124,6 +128,12 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE/finance.js")
           echo "GET /finance.js -> $code"
           [ "$code" = "200" ] || { echo "::error::/finance.js is not served (got $code); the UI would not load"; exit 1; }
+          # Same for /alerts.js (area alerts UI); /sw.js is the alerts service worker and must be public.
+          for f in alerts.js sw.js; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE/$f")
+            echo "GET /$f -> $code"
+            [ "$code" = "200" ] || { echo "::error::/$f is not served (got $code)"; exit 1; }
+          done
           code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST \
             -H 'Content-Type: application/json' -H 'X-Ingest-Secret: wrong' \
             --data '{"datasetId":"smoke-test"}' "$BASE/api/ingest/apify")

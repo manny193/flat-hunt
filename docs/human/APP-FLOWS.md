@@ -47,6 +47,20 @@ What people do in Flat Hunt, step by step. Written for non-technical readers. La
 4. **Passed** keeps the ones you rejected, in case you want one back.
 5. Shortlisted flats are never deleted by the 30-day clean-up.
 
+### 6a. Alerts for new flats (being tested by admins first)
+
+While the founder tests alerts, only admins see this. Everyone else sees nothing until it is opened up.
+
+1. Go to **Me** → **Alerts** and tap **Turn on alerts**. The browser asks whether Flat Hunt may show notifications: tap Allow.
+2. Go to **My areas** and tap the bell next to an area. Optionally set a top rent and the BHK sizes you want. Posts that do not say their rent or BHK still come through, so nothing is missed. Up to 10 areas.
+3. When a new flat is posted in one of those areas, a notification arrives within about 10 minutes, for example "3 new flats in your areas: 2 BHK · ₹28,000 · Green Glen".
+4. Tap it. One flat opens that flat. Several flats in one area open the home page filtered to that area. Several areas open **Alerts**, the list of what was sent.
+5. Alerts are bundled: at most 6 a day and 30 flats a day, at least an hour apart, and none between 10 pm and 8 am (change these under Me → Alerts). Reposts of a flat you were already told about do not alert again. "Looking for" posts never alert.
+6. To stop: tap the bell off for an area, **Turn off on this device**, switch **All alerts on** off, or sign out (signing out turns alerts off on that device).
+7. **iPhone**: alerts only work for apps on the Home Screen (iOS 16.4 or later). In Safari, tap Share → **Add to Home Screen**, open Flat Hunt from the Home Screen, sign in again there, then turn alerts on. If Google sign-in sends you to Safari instead of back to the app, tell us: that is being checked.
+
+What a notification shows: the size, rent and area, nothing else. No phone numbers, names or post text. Google, Apple or Mozilla deliver the notification without seeing any listing: the app fetches the text from Flat Hunt itself.
+
 ## Admin flows
 
 ### 7. Scraper schedule
@@ -85,6 +99,13 @@ What people do in Flat Hunt, step by step. Written for non-technical readers. La
 2. Turn the AI reader on or off, set its daily cap, retry failed posts.
 3. When the AI thinks two listings are the same flat but is not sure, it suggests a merge. The admin chooses **Merge** or **Dismiss**.
 4. Note: AI extraction currently fails in production with an "invalid JSON" error. The simple text rules still fill in the details.
+
+### 10a. Alerts
+
+1. Admin → **Alerts**: turn alerts on or off for everyone, and keep **Admins only** on while testing.
+2. Set the most notifications the app sends in a day (all users together, default 2,000).
+3. **Send a test to my devices** checks that your own phone or browser receives them.
+4. The usage table shows devices, people with alert areas, alerts waiting and sent today, devices that stopped answering, and the last error.
 
 ### 11. Users and data
 

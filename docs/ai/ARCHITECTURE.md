@@ -8,7 +8,7 @@ One codebase, two entry points, one handler:
 
 | Entry | File | Runtime | DB driver | Cron |
 |---|---|---|---|---|
-| Production | `src/worker.js` | Cloudflare Workers Free, Worker `flat-hunt` | `d1Driver(env.DB)` | Cron Trigger `30 * * * *` (= :00 IST) calls `scheduled()` |
+| Production | `src/worker.js` | Cloudflare Workers Free, Worker `flat-hunt` | `d1Driver(env.DB)` | Cron Triggers `30 * * * *` (= :00 IST, hourly job) and `*/10 * * * *` (area alerts only, §11) call `scheduled()` |
 | Local / Docker | `src/node-server.js` | Node 22 | node:sqlite (`DB_PATH`) | in-process timer when `CRON_ENABLED=1` (`CRON_INTERVAL_MINUTES`) |
 
 Both call `createApp({repo, assets})` from `src/app.js`, which exposes `fetch(request, env, ctx)` and `scheduled(event, env)`. `env.RUNTIME` is `'worker'` or `'node'`; `AUTH_DISABLED=1` only works when `RUNTIME==='node'`.
@@ -96,7 +96,7 @@ All steps share one `budgeted(repo, 48)` counter (`repo.left()`):
 3. Save scheduler status and `nextRunAt`.
 A step that throws records its error in the status and does not block later steps or the next run.
 
-## 6. Data model (D1 / SQLite, migrations 0001–0003)
+## 6. Data model (D1 / SQLite, migrations 0001–0004; alert tables in §11)
 
 | Table | Key | Notes |
 |---|---|---|
@@ -123,10 +123,11 @@ A step that throws records its error in the status and does not block later step
 6. Migrations are add-only; previous code version runs on the new schema.
 7. User edits override extraction and AI.
 8. Browse with no `area` returns every stored housing post in the city (offers by default; `kind=seeking` for seekers); `area` narrows via `listing_match`.
+9. Area alerts: a push carries no payload; notification text uses only public-safe fields (type/BHK, rent, area name) and is served only behind the session; push endpoints are never logged or returned by any API.
 
 ## 8. UI (`web/`)
 
-Vanilla JS (`ui.js`), `app.css`, `index.html`, PWA manifest. Hash routes: `#browse` (default, opens on "All Bangalore"), `#listing-<id>` (detail sheet), `#review`, `#shortlist`, `#passed`, `#areas`, `#account`, `#signin`, admin `#admin-scraper`, `#admin-groups`, `#admin-phone`, `#admin-ai`, `#admin-data`, `#admin-users`. Locked routes open the sign-in sheet for the public. Phone: bottom tabs; desktop: left rail. Charts are plain SVG. Design tokens: `docs/DESIGN.md`.
+Vanilla JS (`ui.js`), `app.css`, `index.html`, PWA manifest. Hash routes: `#browse` (default, opens on "All Bangalore"), `#listing-<id>` (detail sheet), `#review`, `#shortlist`, `#passed`, `#areas`, `#account`, `#signin`, `#alerts` (latest alert batches), `#area-<id>` (homepage filtered to an area, used by notifications), admin `#admin-scraper`, `#admin-groups`, `#admin-phone`, `#admin-ai`, `#admin-data`, `#admin-users`, `#admin-alerts`. `web/alerts.js` (alerts UI, imported by `ui.js`) and `web/sw.js` (service worker, push only, no fetch handler). Locked routes open the sign-in sheet for the public. Phone: bottom tabs; desktop: left rail. Charts are plain SVG. Design tokens: `docs/DESIGN.md`.
 
 ## 9. CI/CD (`.github/workflows`)
 
@@ -143,3 +144,16 @@ Vanilla JS (`ui.js`), `app.css`, `index.html`, PWA manifest. Hash routes: `#brow
 | An admin page | route in `adminApi()`, screen in `web/ui.js` SCREENS, admin-only guard both sides | CSP: no inline styles |
 | Paid Apify actor switch | `APIFY_ACTOR` var; `ROW_PRICE` map in `src/apify.js`; field mapping in `prepareItems()` | official actor ≈ 3–4× the price per post |
 | Edge rate limiting | commented `ratelimits` block in `wrangler.jsonc` | would remove one D1 write per public request (HANDOFF §9.4) |
+
+## 11. Area alerts over Web Push (`src/alerts.js`, `src/channels/`, `web/sw.js`, `web/alerts.js`)
+
+Design and reasoning: `docs/ai/ALERTS-WEBPUSH.md`. Payload-less VAPID pushes; the service worker fetches the text.
+
+- **Switches** in `settings.alerts` (`ALERT_DEFAULTS`): `enabled` (default false), `adminOnly` (default true: soft launch), `maxPushesPerDay` (2,000), and defaults for new users `quietStart` 22, `quietEnd` 8 (IST), `maxListings` 30, `maxDigests` 6, `minGapMin` 60. `maxListings`/`maxDigests` also cap what a user may pick. Run stats in `settings.alertsRun` (day, pushesToday, lastRunAt, lastError). Missing `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT` = off (step idle, UI hidden).
+- **Enqueue**: `ingestItems()` appends one `enqueueStatement()` to its `saveIngest()` batch when alerts are on and the source is live (`apify`, `reddit`, `phone`): brand-new listings only (reposts merge, samples/imports/backfill never), `kind='offer'`, area ≠ 0, posted in the last 24 h, user's max-rent/BHK filters (unknown values included), prefs enabled. +1 D1 statement per ingest call.
+- **Send step** `alertStep()` on the `*/10 * * * *` trigger only (`scheduled()` dispatches on `event.cron`, ignores unknown strings; Node: 10-minute timer when `CRON_ENABLED=1` and VAPID set). Settings → due users (≤ 60, oldest first, one query with today's counts) → targets → ≤ 40 pushes in groups of 6 → one write-back batch (expire > 36 h, mark sent with `sent_at` = batch id, mark `capped` = over the listing cap or no working device, delete 404/410 devices, count failures, reset ok devices) → `settings.alertsRun`. ≤ 10 D1 queries, 2 when idle. Quiet hours (IST, wrap midnight), min gap, digests/day, listings/day, global pushes/day, admin-only all apply here; users who wait keep `pending` rows.
+- **Channel** `src/channels/webpush.js`: endpoint allowlist (FCM, Mozilla, `*.push.apple.com`, `*.notify.windows.com`; https, port 443, no userinfo) checked on store and before every send (SSRF guard); `importVapid()` (JWK from the base64url secrets), one ES256 JWT per push-service origin per run, `POST` with no body, `TTL: 21600`, `Urgency: normal`, `Topic: flat-hunt-alerts`. `src/channels/index.js` is the plug-in point for Telegram later.
+- **API** (behind the normal gate, `alertsApi()`): `GET /api/alerts/config` (enabled + reason, public VAPID key, prefs, areas, devices without endpoints), `PUT /api/alerts/prefs`, `PUT /api/alerts/areas` (≤ 10, followed areas only), `POST /api/alerts/targets` (≤ 5 per user, oldest replaced; an endpoint moves to the account that registers it), `DELETE /api/alerts/targets/:id` (always allowed), `GET /api/alerts/inbox` (service worker; `?full=1` for `#alerts`), `POST /api/alerts/test` (3/hour). Everything except config and DELETE answers 403 `alerts_off` when off, not configured, or admins-only. Admin: `GET|PUT /api/admin/alerts` (counts only), `POST /api/admin/alerts/test` (own devices only).
+- **Notification text** `alertText()`: ≤ 3 lines `2 BHK · ₹28,000 · Green Glen` + `+N more`. URL: one listing → `/#listing-<id>`; several in one area → `/#area-<id>` (homepage filtered); mixed areas → `/#alerts`. Generic text if nothing was sent in 24 h or the fetch fails; test text for 10 min after a test send.
+- **Tables** (`migrations/0004_alerts.sql`): `alert_targets` (device: channel, address = endpoint, keys, label, failures, last_ok_at, last_error; UNIQUE(channel, address)), `alert_prefs` (per user), `alert_areas` (user, area, max_rent, bhks `,1,2,1RK,`), `alert_queue` (PK (user_id, listing_id); status pending/sent/capped/expired; sent_at = batch id). Unfollowing or deleting an area removes its `alert_areas` rows; the daily purge drops queue rows after 7 days and devices with ≥ 5 failures after 7 days.
+- **Rollback**: the tables are add-only. Rolling back past this release, also remove the `*/10` trigger from `wrangler.jsonc`, or the old `scheduled()` runs the hourly job every 10 minutes.
