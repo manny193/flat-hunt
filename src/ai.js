@@ -177,6 +177,8 @@ export function mergeAi(l, v, { postId, model, now }) {
     if (l[k] != null && l[k] !== f[k]) conflicts[k] = [l[k], f[k]];
     if (l[k] == null || final >= 0.7) set(k, f[k]);
   }
+  if (changed.includes('rent')) delete l.rentEstimated;        // the AI's rent is what the post says, not our split
+  if (l.type !== 'flatmate') { if (l.totalRent && l.rentEstimated) { l.rent = l.totalRent; delete l.rentEstimated; } delete l.totalRent; }
   set('bhk', bhkVal(f.bhk)); set('depositMonths', f.depositMonths);
   if (f.availableFrom) set('availableFrom', f.availableFrom);
   for (const k of ['society', 'locality']) set(k, f[k]);

@@ -215,7 +215,7 @@ const TEST_SHOW_MS = 10 * 60e3;
 const TESTS_PER_HOUR = 3;
 const MAX_LINES = 3;
 const typeLabel = it => it.type === 'flatmate' ? 'Room' : it.type === 'pg' ? 'PG' : it.bhk === '1RK' ? '1 RK' : it.bhk != null && it.bhk !== '' ? `${it.bhk} BHK` : 'Flat';
-const rentLabel = r => Number.isFinite(Number(r)) && Number(r) > 0 ? '₹' + Math.round(Number(r)).toLocaleString('en-IN') : '';
+const rentLabel = (r, est) => Number.isFinite(Number(r)) && Number(r) > 0 ? (est ? '≈₹' : '₹') + Math.round(Number(r)).toLocaleString('en-IN') : '';
 // Area names are validated against phones/links/emails when created; publicText() again as a backstop.
 const areaLabel = s => publicText(String(s || '')).replace(/\[\w+\]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
 const safeId = id => /^[A-Za-z0-9_-]{1,64}$/.test(String(id)) ? String(id) : null;
@@ -227,7 +227,7 @@ const safeId = id => /^[A-Za-z0-9_-]{1,64}$/.test(String(id)) ? String(id) : nul
  */
 export function alertText(items) {
   const n = items.length;
-  const line = (it, withArea) => [typeLabel(it), rentLabel(it.rent), withArea ? areaLabel(it.area_name) : ''].filter(Boolean).join(' · ');
+  const line = (it, withArea) => [typeLabel(it), rentLabel(it.rent, it.est), withArea ? areaLabel(it.area_name) : ''].filter(Boolean).join(' · ');
   if (n === 1) {
     const it = items[0]; const area = areaLabel(it.area_name); const t = typeLabel(it);
     const noun = t === 'Room' ? 'room' : t === 'PG' ? 'PG' : 'flat';

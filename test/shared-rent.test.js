@@ -1,7 +1,7 @@
 // Shared flat vs whole home, and room rent vs whole-flat rent (a Green Glen post showed a 3BHK's 71k as a room's rent).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extract, reparseListing } from '../src/core/logic.js';
+import { extract, reparseListing, applyPost, newListing } from '../src/core/logic.js';
 import { publicListing } from '../src/serialize.js';
 import { mergeAi } from '../src/ai.js';
 import { ingestItems } from '../src/ingest.js';
@@ -19,6 +19,29 @@ test('a room in a shared flat: type flatmate; whole-flat rent becomes totalRent,
   assert.deepEqual(pick('Looking for a female flatmate for our 3 BHK in Bellandur. Rent 15000 for the room. Total 45k.'), ['flatmate', 3, 15000, 45000, null]);
   assert.deepEqual(pick('Private room for rent in a 2BHK, rent 18k per month including maintenance'), ['flatmate', 2, 18000, null, null], 'a normal room rent is kept');
   assert.deepEqual(pick('2BHK available, sharing for 2 boys, 12k each'), ['flatmate', 2, 12000, null, null]);
+});
+
+test('senior review / QA F3: bare "flat" is not a total; "sharing allowed" is not a room; small totals ignored', () => {
+  assert.deepEqual(pick('Room for rent in my flat ₹15000'), ['flatmate', null, 15000, null, null]);
+  assert.deepEqual(pick('Room available in 2BHK flat 15000'), ['flatmate', 2, 15000, null, null]);
+  assert.deepEqual(pick('Rent 55000 for 3BHK, sharing allowed for bachelors'), ['flat', 3, 55000, null, null]);
+  assert.deepEqual(pick('3BHK replacement needed, rent 66000, deposit 2L'), ['flatmate', 3, 66000, null, null], 'no room offered: no estimate');
+  assert.deepEqual(pick('Room in 3BHK, total 18k, my share 6k'), ['flatmate', 3, 6000, null, null]);
+  const t0 = Date.now(); extract('room ' + ' '.repeat(3000) + 'mate ' + 'flat   -   '.repeat(300)); assert.ok(Date.now() - t0 < 20, 'no slow backtracking on long whitespace');
+});
+
+test('AI rent clears our estimate; a whole flat reposted as a room is not a rent drop; a stated share replaces an estimate', () => {
+  const fields = { kind: 'offer', type: 'flat', bhk: '3', rent: 55000, deposit: null, depositMonths: null, maintenance: null, brokerage: null, brokerageAmount: null, furnishing: null, gender: null, availableFrom: null, society: null, locality: null, otherUnits: [], summary: 'x', isRental: true };
+  const l = { id: 'a', kind: 'offer', type: 'flatmate', bhk: 3, rent: 18300, totalRent: 55000, rentEstimated: true, posts: [] };
+  mergeAi(l, { fields, confidence: 0.95, bad: 0 }, { postId: 'p', model: 'm', now: 1 });
+  assert.deepEqual([l.type, l.rent, l.totalRent, l.rentEstimated], ['flat', 55000, undefined, undefined]);
+  const p = (text, t) => ({ text, th: 'h' + t, postedAt: t, source: 'apify' });
+  const w = newListing(p('3BHK flat for rent, rent 60000', 1), extract('3BHK flat for rent, rent 60000'), 1);
+  applyPost(w, p('1 room available in 3BHK flat, rent 60000', 2), extract('1 room available in 3BHK flat, rent 60000'), 2);
+  assert.deepEqual([w.rent, w.totalRent, w.rentEstimated, w.rentHistory.length], [20000, 60000, true, 0], 'no fake rent drop');
+  const e = newListing(p('1 room in 3BHK, rent 72k for the flat', 5), extract('1 room in 3BHK, rent 72k for the flat'), 5);
+  applyPost(e, p('Room in 3BHK, total rent 72k, per person 25k', 3), extract('Room in 3BHK, total rent 72k, per person 25k'), 5);
+  assert.deepEqual([e.rent, e.rentEstimated], [25000, undefined], 'older post with the real share wins over an estimate');
 });
 
 test('whole homes and seeking posts are unchanged', () => {
