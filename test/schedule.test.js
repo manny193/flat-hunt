@@ -19,6 +19,7 @@ function fakeApis({ redditPosts = {}, usage = 1 } = {}) {
     if (url === REDDIT_TOKEN_URL) { assert.match(init.headers.authorization, /^Basic /); assert.match(init.headers['user-agent'], /^flat-hunt\/1\.0 by tester$/); return Response.json({ access_token: 'rtok', expires_in: 86400 }); }
     if (u.hostname === 'oauth.reddit.com') {
       assert.equal(init.headers.authorization, 'Bearer rtok');
+      if (u.pathname === '/api/info') { const want = new Set(u.searchParams.get('id').split(',').map(x => x.replace('t3_', ''))); return Response.json({ data: { children: Object.values(redditPosts).flat().filter(d => want.has(d.permalink.split('/')[4])).map(d => ({ kind: 't3', data: { ...d, id: d.permalink.split('/')[4] } })) } }); }
       const sub = u.pathname.split('/')[2];
       return Response.json({ data: { children: (redditPosts[sub] || []).map(d => ({ kind: 't3', data: d })) } });
     }
