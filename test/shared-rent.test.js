@@ -62,6 +62,19 @@ test('re-check: stored listings get the new rules; user-set fields are kept; adm
   assert.deepEqual([a.type, a.rent, a.totalRent, a.rentEstimated], ['flatmate', 23700, 71000, true]);
   assert.deepEqual([b.type, b.rent], ['flatmate', 80000], 'a rent the user set is kept; the type still updates');
   assert.equal((await call('admin', { after: r.data.next })).data.checked, 0, 'resumes after the last row');
+  // Pages are capped by count (20) and by post text (~60 KB) so one call stays inside the Workers CPU limit.
+  const long = 'Room available in 3BHK Green Glen Layout rent 30000 per person. ' + 'spacious flat near the lake. '.repeat(100);
+  const now = Date.now();
+  await t.repo.saveIngest({ listings: Array.from({ length: 30 }, (_, i) => ({ id: 'l_big' + i, kind: 'offer', type: 'flatmate', bhk: 3, rent: 30000, areas: [], createdAt: now, lastPostedAt: now, posts: Array.from({ length: 5 }, (_, j) => ({ id: 'p' + i + j, text: long + i + j, th: 'h' + i + j })) })), keys: [], run: null, now });
+  const p1 = await call('admin', { after: 0 });
+  assert.ok(p1.data.checked <= 20 && p1.data.checked >= 1 && !p1.data.done, `capped page (${p1.data.checked})`);
   assert.equal((await call('admin', { after: 0 })).data.changed, 0, 'idempotent');
   assert.equal(reparseListing({ isSample: true, posts: [{ text: 'room in 3bhk rent 71000' }] }), false, 'samples are skipped');
+  // Senior review: never split a whole flat's rent the AI typed as a flat; never override a rent the AI agreed with.
+  const aiFlat = { type: 'flat', rent: 71000, fieldSource: { type: 'ai' }, posts: [{ text: '1 room available in 3BHK flat at Green Glen Layout. Rent 71000.' }] };
+  assert.equal(reparseListing(aiFlat), false); assert.equal(aiFlat.rent, 71000);
+  const agreed = { type: 'flatmate', rent: 71000, bhk: 3, ai: { fields: { rent: 71000 } }, posts: [{ text: '1 room available in 3BHK flat. Rent 71000.' }] };
+  assert.equal(reparseListing(agreed), false); assert.equal(agreed.rent, 71000);
+  const stale = { type: 'flat', rent: 18300, totalRent: 55000, rentEstimated: true, posts: [{ text: 'Rent 55000 for 3BHK whole flat, deposit 3 lakh' }] };
+  assert.equal(reparseListing(stale), true); assert.deepEqual([stale.rent, stale.totalRent, stale.rentEstimated], [55000, undefined, undefined], 'a stale split is undone');
 });

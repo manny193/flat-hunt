@@ -1066,8 +1066,11 @@ async function renderData(q = state.admin.dq || '') {
     try {
       if (act === 'reparse') {
         const btn = e.target.closest('[data-act]'); btn.disabled = true; let after = 0, checked = 0, changed = 0;
-        for (let i = 0; i < 400; i++) { const r = await api('POST', '/api/admin/listings/reparse', { after }); checked += r.checked; changed += r.changed; after = r.next; btn.textContent = `Checked ${checked}…`; if (r.done) break; }
-        toast(`Checked ${checked} listings, ${changed} updated`); renderData(q); return;
+        try {
+          for (let i = 0; i < 1000; i++) { const r = await api('POST', '/api/admin/listings/reparse', { after }); checked += r.checked; changed += r.changed; after = r.next; btn.textContent = `Checked ${checked}…`; if (r.done) break; }
+          toast(`Checked ${checked} listings, ${changed} updated`);
+        } catch (err) { fail(err); toast(`Stopped after ${checked} listings (${changed} updated). Tap again to retry.`, { err: true }); }
+        btn.disabled = false; btn.textContent = 'Re-check all listings'; renderData(q); return;
       }
       if (act === 'ret') { await api('PUT', '/api/admin/scraper', { retentionDays: stepVal('ret') }); toast('Retention saved'); }
       if (act === 'del') {

@@ -427,10 +427,17 @@ export function reparseListing(l) {
   const text = l.posts?.[0]?.text; if (!text || l.isSample) return false;
   const ex = extract(text); const src = l.fieldSource || {}; const before = JSON.stringify([l.type, l.rent, l.totalRent, l.rentEstimated]);
   if (src.type !== 'user' && src.type !== 'ai' && ex.type) l.type = ex.type;
-  if (src.rent !== 'user' && src.rent !== 'ai' && ex.rent && (ex.totalRent || ex.rentEstimated || l.totalRent || l.rentEstimated || l.rent === ex.totalRent)) {
-    l.rent = ex.rent;
-    if (ex.totalRent) l.totalRent = ex.totalRent; else delete l.totalRent;
-    if (ex.rentEstimated) l.rentEstimated = true; else delete l.rentEstimated;
+  // Rent: never over a user edit or a rent the AI set or agreed with (set() leaves agreed fields unmarked).
+  const rentLocked = src.rent === 'user' || src.rent === 'ai' || (l.ai?.fields?.rent != null && l.ai.fields.rent === l.rent);
+  if (!rentLocked && ex.rent) {
+    if (l.type === 'flatmate' && (ex.totalRent || ex.rentEstimated || l.totalRent || l.rentEstimated || l.rent === ex.totalRent)) {
+      l.rent = ex.rent;
+      if (ex.totalRent) l.totalRent = ex.totalRent; else delete l.totalRent;
+      if (ex.rentEstimated) l.rentEstimated = true; else delete l.rentEstimated;
+    } else if (l.type !== 'flatmate' && (l.rentEstimated || l.totalRent)) {
+      // An earlier rule split a whole flat's rent: put the stated rent back.
+      l.rent = ex.totalRent || ex.rent; delete l.totalRent; delete l.rentEstimated;
+    }
   }
   return JSON.stringify([l.type, l.rent, l.totalRent, l.rentEstimated]) !== before;
 }
