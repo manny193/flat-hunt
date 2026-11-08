@@ -453,3 +453,25 @@ Verdict: **sign-off with notes.** No blocker. `npm test`: 148 tests, 147 pass, 1
 7. Quiet hours: set quiet to cover now, wait for a real new post, confirm nothing arrives until quiet ends.
 8. After the first run, read Workers dashboard CPU time for the `*/10` trigger (N2).
 9. Before pushing: note the rollback runbook item (N1).
+
+## QA round: Reddit public JSON (#33, branch feat/reddit-json)
+
+Result: **pass, no must-fix.** `npm test`: 181 tests, 180 pass, 0 fail, 1 skipped. The skip is `real Apify sample (test/fixtures/apify-sample.json)`, "fixture not provided yet"; it is unrelated and skipped the same way on main.
+
+| Check | Result |
+|---|---|
+| Gate | `redditMode()` returns `public` only with no OAuth secrets AND `schedule.redditPublic === true` AND `redditEnabled !== false`. `redditPublic` is not in `SCHEDULE_DEFAULTS`, so production stays off. OAuth path (`redditStep`) untouched. |
+| Request hygiene | FlatHunt UA, `accept: application/json`, no cookies, no proxy. Subreddit names are validated by `/^[A-Za-z0-9_]{2,40}$/` in `validateSubreddits` and `subredditsOf`, so nothing can inject into the URL. |
+| Limits | `PUBLIC_MAX_SUBS` 3 per invocation, 2 s sleep between requests (4 s total), 10 s fetch timeout. Loop stops when `left` is too small for two pages. Run reserves 9 D1 statements beyond ingest; shares the `budgeted()` counter with Apify/AI/backfill. |
+| Cursor | `marks[name]` moves only after `ingestItems` returns for that page. A throw before `putSettings` re-reads the posts, and dedupe absorbs them. Cycle is deleted on block, `lastGoodStart` not advanced, next cycle waits `intervalHours` (no endless re-reads). |
+| Blocks | Any non-2xx, non-JSON or unexpected shape breaks the loop with no retry. Status recorded (`redditStatus`); `consecutiveFails` >= 3 sets `backoffUntil` +6 h; counter resets on success. |
+| Privacy | Same `toItem` / `ingestItems` / `serializeListing` path as the OAuth source. No `console.*` in reddit.js or ingest.js, so usernames are not logged. |
+| Admin UI (dev server, scratch DB, no Reddit call made) | Sources row shows "Reddit (public JSON)", status pill "HTTP 403 x3, paused 6 h" (seeded status), Subreddits panel shows mode/last result, Schedule sheet has the new toggle (checked after saving). 375 px: no horizontal overflow, 0 console errors. The only `style=` attributes are the pre-existing budget ticks set by JS. |
+
+| # | Severity | Where | Finding |
+|---|---|---|---|
+| R1 | Info | src/apify.js:431 | When the group plan runs in a tick, Reddit waits an hour (existing behaviour, comment says so). |
+| R2 | Low | src/reddit.js:`redditPublicStep` | Admin "Run" (`force`) during backoff returns `backoff` and does not try; fine, but the admin cannot test early after a block. |
+| R3 | Info | wrangler.jsonc cron | Workers cron wall-clock limit not verified here (about 15 min per Cloudflare docs, unverified). Worst case in this step is ~3 x 10 s timeouts + 4 s of sleeps. |
+| R4 | Info | listing limit=50 | If a subreddit gets more than 50 posts between runs, the older ones are never read. Acceptable at a 4 h interval. |
+| R5 | Info | Real behaviour | Whether Reddit serves Worker IPs is unverified (COSTS.md already says so). Turn on in production only with the founder watching the status pill. |
