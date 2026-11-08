@@ -64,6 +64,15 @@ What people do in Flat Hunt, step by step. Written for non-technical readers. La
 3. Each group shows its spend, new listings per dollar, and a "Low value" flag. The flag marks groups that post a lot but rarely add new flats. Those are the first to drop when money is tight.
 4. Groups that turn out to be private are listed so you can remove them.
 
+### 8a. Group performance (rotation)
+
+1. Admin → **Group performance**. The top shows how many groups are read now against the minimum (default 6), how many wait in the pool, the spend projected for this Apify cycle against the budget, and today's allowance.
+2. Switch **Rotate groups automatically** on and press **Save plan**. Every enabled group gets a status at once: *Trial* (new groups, 7 days, sampled), *Active* (read fully), *Sample* (only the last few hours before each read, when money is short) or *Paused* (with the reason: low yield, echo of another group, unscrapable, budget, queued for trial, or manual).
+3. The table shows for each group: posts read and usable listings (7 days and this cycle), yield, usable posts per 6 hours, the share of its posts that were copies of another group's posts, spend and listings per dollar, failures, and the trial countdown or last change.
+4. **Pause** and **Promote** are kept until you press **Resume**, which starts a fresh trial. Rotation never undoes them.
+5. Paused groups (not manual) are tried again after 30 days. If fewer than the minimum are being read, the next queued or cooled-off group starts a trial.
+6. **Recent rotations** lists every status change with the reason. Rotation off: every enabled group is read on each run, as before.
+
 ### 9. Phone scans (private-group experiment)
 
 1. On an Android phone, the admin runs a helper script while searching an area in Facebook Lite. The script reads the visible posts without touching anything.

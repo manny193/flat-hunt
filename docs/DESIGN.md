@@ -61,7 +61,7 @@ Routes are hash names. The hash router replaces the v1 `SCREENS` list.
 | `#signin` | sheet | – | – |
 | `#areas` (My areas) | – | yes | yes |
 | `#account` (theme, sign out, areas link, admin links on phone) | – | yes | yes |
-| `#admin-scraper` `#admin-groups` `#admin-phone` `#admin-ai` `#admin-data` `#admin-users` | – | – | yes |
+| `#admin-scraper` `#admin-finance` `#admin-groups` `#admin-groups-performance` `#admin-phone` `#admin-ai` `#admin-data` `#admin-users` | – | – | yes |
 
 A non-admin who opens an `#admin-*` route goes to `#browse` with the toast "That page is for admins."
 
@@ -107,6 +107,9 @@ A search field: "Type an area, e.g. HSR Layout". Matches show as rows (name, lis
 
 ### `#admin-groups`
 Table: Group, Enabled toggle, Last scraped, Posts 7d, Match %, New 7d, Failures. Add-group field with URL validation. On phones, each group is a card.
+
+### `#admin-groups-performance`
+Header status dot ("Rotation on, last placed 2 h ago" / off) and Refresh. KPI row: Groups read now "5 of min 6" (tolet-text "Below the minimum" when short), Waiting in the pool, Projected spend this cycle (meter, amber past 80%, red past 95% of budget), Daily allowance. Plan panel: switch, "Always read at least" and "Re-try paused groups after" steppers, a Thresholds disclosure, Save plan. Groups table: Group, Status pill (Trial info, Active keep, Sample plain, Paused red when low yield / echo / unscrapable, else plain) with the reason in small text, Tier, Posts and Usable (7 d / cycle), Yield, Usable per 6 h, Cross-posts with "echo of …", Spend, Listings per $, Failures, Trial countdown or last change, Pause / Promote / Resume. Below 720px rows become cards and the action buttons span the card. Recent rotations: a plain list, newest first.
 
 ### `#admin-phone`
 Drop zone (dashed `--line-strong`, 120px; "Drop scan JSON or choose a file"); after upload, an inline report reusing the v1 report table. Below it, the scan history table. Then "Posts from groups we don't scrape": Group, Posts seen, Matched an area, and an "Add to watched" button.

@@ -1,6 +1,6 @@
 # Watching 10+ Facebook groups on the Apify free $5
 
-Design note, 8 Nov 2026. Status: proposal, nothing built. Inputs: `docs/ai/COSTS.md`, `docs/APIFY.md` "Cost plan", `src/apify.js`, `src/admin.js` (`groupValue`, `LOW_VALUE`). Figures marked **[est]** are our estimates, not measurements. Check them against `runs.report` after one week of data.
+Design note, 8 Nov 2026. Status: **built behind `groupPlan.enabled` (default off)** on branch `feat/group-rotation` (issue #28); see section 9 for what was built and how it differs from this proposal. Inputs: `docs/ai/COSTS.md`, `docs/APIFY.md` "Cost plan", `src/apify.js`, `src/admin.js` (`groupValue`, `LOW_VALUE`). Figures marked **[est]** are our estimates, not measurements. Check them against `runs.report` after one week of data.
 
 ## 1. Answer first
 
@@ -200,3 +200,25 @@ No D1 migration is needed. If `json_patch` proves awkward on D1, the fallback is
 - Apify Free: concurrent runs and memory with 3 parallel cohorts are unverified.
 - Platform cost per run is uncertain ($0.00015 measured, $0.0005 assumed). At 365 runs a month the gap is $0.13.
 - Facebook may rate-limit or block groups the actor reads logged out; a failing group shows as `unscrapable` and should auto-pause after 3 failures (small add to the allocator).
+
+## 9. As built (8 Nov 2026, founder decisions applied)
+
+Code: `src/groupplan.js` (pure rules), `src/apify.js` (`runGroupPlan`, `startPlannedRuns`, ingest hook), `src/admin.js` (`/api/admin/group-plan`), `web/ui.js` (`#admin-groups-performance`). Tests: `test/groupplan.test.js`, plan cases in `test/apify.test.js`, `test/api.test.js`, `test/ingest.test.js`, `test/schedule.test.js`.
+
+Founder decisions on top of sections 4-6:
+- **minActive** (default 6, 1-30): the allocator keeps at least this many groups in trial/active/sample. When it pauses a group it starts a trial for the next pool candidate (queued new groups first, then groups whose cool-off has passed). If full coverage of the kept groups costs more than the allowance, the best `minActive` share the money (water-filling: cheap groups full, the rest sampled) instead of being paused. Spend never exceeds the allowance: the per-tick charge cap is the hard stop.
+- **Rotation**: groups paused for low yield, echo or failures (not manual) become trial candidates after `retryDays` (default 30). They start a trial when a slot is free (minActive, the trial reserve or spare money), not all at once. 3 consecutive unscrapable runs pause a group (`failPause`). Manual pause/promote is never overridden; Resume starts a fresh trial. Every change records `why` and `at`; the last 10 events per group are kept in `groupState[gid].history`.
+- **No AI**: all thresholds are in `groupPlan` (`minYield`, `earlyMinYield`, `echoShare`, `hotPer6h`, `normalPer6h`, `trialDays`, `trialMaxUsd`, `reservePct`, `sampleFloor`, `failPause`).
+
+Differences from the proposal and why:
+- **Storage**: `groupState` is written with `json_patch` (`repo.patchSettings`, `repo.markGroupsRead`), never `putSettings`, so the allocator and an ingest cannot clobber each other. No migration.
+- **Today's spend** comes from the runs table (`repo.apifySpentSince`, replacing `lastGoodRun` on the plan path, so the statement count stays flat) instead of a separate counter.
+- **New groups** start in the pool ("queued for trial") and are promoted, instead of all starting trial at once; with 10-20 new groups a simultaneous trial would exceed the daily allowance. Existing groups with 20+ rows in the last 7 days are judged at once on that data.
+- **Sample ladder** has 1 and 2 h steps added (1, 2, 3, 6, 12 h at 2 reads a day = 8-100% coverage) so `minActive` can be honoured on a small budget.
+- **Due rules** are time-based (hot every slot, normal after 3.5 h, cold/sample/trial after 13:00 and 21:00 IST) rather than slot-index based, so they work in both schedule modes.
+- **Hysteresis** is a 7-day minimum between automatic status changes of an active/sample group (failures excepted); the 25% value-change rule was not built (the smoothed yield already damps noise).
+- **Cohort merge**: cutoffs within 1 h share a run (the earliest cutoff is used, so a few extra overlap rows are bought).
+- The allocator runs in a cron tick without an ingest (CPU), plus on plan save and on any watched-group edit.
+- The Finance page forecast still models the 80/95 % guard; with the plan on, the Group performance page shows the plan's projection.
+
+Founder action to start: add at least 6 public Bangalore rental group links (Admin → Groups), then Admin → Group performance → switch on → Save plan. Existing groups with a week of data are judged immediately; new ones queue for trials.
