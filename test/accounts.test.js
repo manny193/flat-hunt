@@ -252,7 +252,13 @@ test('admin API: schedule settings, groups with Page warning, runs/stats, areas 
   const A = (m, p, body) => h.jcall(m, p, { body, headers: { cookie } });
   assert.equal((await h.call('GET', '/api/admin/stats', { headers: { cookie: user.cookie } })).status, 403);
   const sc = await A('GET', '/api/admin/scraper');
-  assert.deepEqual(sc.data.schedule, { enabled: true, intervalHours: 4, budgetWarnPct: 80, budgetStopPct: 95, retentionDays: 30, backfillDays: 3, redditEnabled: true });
+  assert.deepEqual(sc.data.schedule, { enabled: true, mode: 'times', runHoursIst: [6, 9, 11, 13, 15, 17, 19, 21], intervalHours: 4, maxRunUsd: 0.5, budgetWarnPct: 80, budgetStopPct: 95, retentionDays: 30, backfillDays: 3, redditEnabled: true });
+  const hrs = await A('PUT', '/api/admin/scraper', { runHoursIst: [21, 9, 9, 13], maxRunUsd: 0.3 });
+  assert.deepEqual(hrs.data.schedule.runHoursIst, [9, 13, 21], 'sorted, deduplicated'); assert.equal(hrs.data.schedule.maxRunUsd, 0.3);
+  assert.equal((await A('PUT', '/api/admin/scraper', { runHoursIst: [24] })).status, 400);
+  assert.equal((await A('PUT', '/api/admin/scraper', { runHoursIst: [] })).status, 400, 'times mode needs at least one hour');
+  assert.equal((await A('PUT', '/api/admin/scraper', { maxRunUsd: 50 })).status, 400);
+  assert.equal((await A('PUT', '/api/admin/scraper', { resultsPerGroup: 80 })).status, 400, 'posts per group capped at 50');
   assert.equal((await A('PUT', '/api/admin/scraper', { intervalHours: 6, backfillDays: 2, retentionDays: 60 })).data.schedule.intervalHours, 6);
   assert.equal((await A('PUT', '/api/admin/scraper', { backfillDays: 9 })).status, 400);
   assert.equal((await A('PUT', '/api/admin/scraper', { budgetWarnPct: 90, budgetStopPct: 85 })).status, 400);

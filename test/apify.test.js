@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
-import { buildInput, webhookParam, OFFICIAL_ACTOR, DEFAULT_ACTOR, DATASET_OMIT } from '../src/apify.js';
+import { buildInput, webhookParam, runCost, OFFICIAL_ACTOR, DEFAULT_ACTOR, DATASET_OMIT } from '../src/apify.js';
 import { memoryDb, GREEN_GLEN } from './helpers.js';
 
 const BASE = 'https://hunt.test';
@@ -27,6 +27,7 @@ function fakeApify({ dataset = DATASET, usage = 1, limit = 5, runs = [], failOn 
     if (u.pathname === '/v2/users/me/limits') return Response.json({ data: { current: { monthlyUsageUsd: usage }, limits: { maxMonthlyUsageUsd: limit }, monthlyUsageCycle: { endAt: '2026-12-01T00:00:00Z' } } });
     if (u.pathname.match(/^\/v2\/acts\/[\w.~-]+\/runs$/) && init.method === 'POST') return Response.json({ data: { id: 'run0000NEW1', defaultDatasetId: 'dsNEW000001', startedAt: '2026-11-07T06:00:00Z' } });
     if (u.pathname.match(/^\/v2\/acts\/[\w.~-]+\/runs$/)) return Response.json({ data: { items: runs } });
+    if (u.pathname.match(/^\/v2\/actor-runs\/\w+$/)) return Response.json({ data: { usageTotalUsd: 0.0002, chargedEventCounts: { 'apify-default-dataset-item': 0, 'apify-actor-start': 1 }, pricingInfo: { pricingPerEvent: { actorChargeEvents: { 'apify-default-dataset-item': { eventPriceUsd: 0.0012 }, 'apify-actor-start': { eventPriceUsd: 0.00005 } } } } } });
     return new Response('not found', { status: 404 });
   };
   return { fn, calls };
@@ -73,9 +74,12 @@ test('webhook: ingests the dataset in pages; a replay of the same dataset is ski
 
   const again = await hook({ datasetId: 'dsAAAA0001', runId: 'runAAAA0001' });
   assert.deepEqual(await again.json(), { status: 'skipped', reason: 'already ingested' });
-  assert.equal(api.calls.length, pages.length, 'replay makes no Apify calls');
+  assert.equal(api.calls.length, pages.length + 1, 'one run-cost lookup, then the replay makes no Apify calls');
   const runs = await repo.listRuns();
   assert.equal(runs.length, 1); assert.equal(runs[0].status, 'done'); assert.equal(runs[0].report.progress, undefined);
+  assert.equal(runs[0].costUsd, 0.0303, '25 rows read x $0.0012 + start + platform usage');
+  assert.deepEqual(runs[0].report.cost, { totalUsd: 0.0303, platformUsd: 0.0002, resultsUsd: 0.0301, rows: 25 });
+  assert.equal((await repo.getSettings()).groupInfo.groups[0].name, 'Bellandur Flats', 'group details stored for runs without group rows');
 });
 
 test('paged ingest resumes from the saved offset after a failure, without double counting', async () => {
@@ -93,7 +97,7 @@ test('paged ingest resumes from the saved offset after a failure, without double
   assert.equal((await repo.listListings()).length, 24);
 });
 
-test('scheduled: budget check, input from watched groups, cutoff = last successful start minus 1 h, per-run webhook', async () => {
+test('scheduled: budget check, input from watched groups, exact cutoff = last successful start minus 15 min, caps, per-run webhook', async () => {
   const api = fakeApify({ usage: 1.2 });
   const { app, env, repo } = await harness(api);
   await repo.putSettings({ groups: [{ name: 'A', url: 'https://www.facebook.com/groups/111', active: true }, { name: 'B', url: 'https://www.facebook.com/groups/222', active: false }] });
@@ -106,7 +110,9 @@ test('scheduled: budget check, input from watched groups, cutoff = last successf
   assert.equal(st.action, 'started');
   const start = api.calls.find(c => c.init.method === 'POST');
   assert.equal(start.url.pathname, `/v2/acts/${DEFAULT_ACTOR}/runs`);
-  assert.deepEqual(JSON.parse(start.init.body), { groups: ['https://www.facebook.com/groups/111'], resultsPerGroup: 25, sortOrder: 'new', postsPublishedAfter: new Date(lastStart - 36e5).toISOString().slice(0, 10), includeGroupInfo: true });
+  assert.deepEqual(JSON.parse(start.init.body), { groups: ['https://www.facebook.com/groups/111'], resultsPerGroup: 30, sortOrder: 'new', postsPublishedAfter: '2026-11-07T01:45:00Z', includeGroupInfo: true });
+  assert.equal(start.url.searchParams.get('maxItems'), '36', '1 group x 30 posts + 1 group row + 5');
+  assert.equal(start.url.searchParams.get('maxTotalChargeUsd'), '0.06', 'the natural ceiling, below the $0.50 per-run limit');
   const hooks = JSON.parse(atob(start.url.searchParams.get('webhooks')));
   assert.deepEqual(hooks[0].eventTypes, ['ACTOR.RUN.SUCCEEDED']);
   assert.equal(hooks[0].requestUrl, 'https://hunt.test/api/ingest/apify');
@@ -134,6 +140,7 @@ test('scheduled: sweep ingests succeeded runs whose webhook was missed', async (
   const { app, env, repo } = await harness(api);
   const st = await app.scheduled({}, env);
   assert.deepEqual(st.swept, [{ datasetId: 'dsMISSED001', status: 'done', newListings: 24 }]);
+  assert.equal((await repo.getRunByDataset('dsMISSED001')).costUsd, 0.0303, 'swept runs get their cost too');
   assert.equal(st.action, 'skipped', 'no watched groups yet, so no new run');
   const st2 = await app.scheduled({}, env);
   assert.deepEqual(st2.swept, [], 'already ingested');
@@ -142,8 +149,12 @@ test('scheduled: sweep ingests succeeded runs whose webhook was missed', async (
 
 test('actor input builders and webhook param', () => {
   const args = { groups: [{ url: 'https://www.facebook.com/groups/1' }], resultsPerGroup: 20, after: Date.UTC(2026, 10, 6) };
-  assert.deepEqual(buildInput(OFFICIAL_ACTOR, args), { startUrls: [{ url: 'https://www.facebook.com/groups/1' }], resultsLimit: 20, viewOption: 'CHRONOLOGICAL', onlyPostsNewerThan: '2026-11-06T00:00:00.000Z' });
-  assert.equal(buildInput(DEFAULT_ACTOR, args).postsPublishedAfter, '2026-11-06');
+  assert.deepEqual(buildInput(OFFICIAL_ACTOR, args), { startUrls: [{ url: 'https://www.facebook.com/groups/1' }], resultsLimit: 20, viewOption: 'CHRONOLOGICAL', onlyPostsNewerThan: '2026-11-06T00:00:00Z' });
+  assert.deepEqual(buildInput(DEFAULT_ACTOR, { ...args, after: Date.UTC(2026, 10, 6, 7, 15, 30, 250) }), { groups: ['https://www.facebook.com/groups/1'], resultsPerGroup: 20, sortOrder: 'new', postsPublishedAfter: '2026-11-06T07:15:30Z', includeGroupInfo: false }, 'automly rejects milliseconds (HTTP 400, checked live 8 Nov)');
+  assert.equal(buildInput(DEFAULT_ACTOR, { ...args, groupInfo: true }).includeGroupInfo, true);
+  // Apify can report 0 charged rows right after a run: rows we read count instead.
+  assert.deepEqual(runCost({ usageTotalUsd: 0.001, chargedEventCounts: { 'apify-default-dataset-item': 0 } }, DEFAULT_ACTOR, 100), { totalUsd: 0.121, platformUsd: 0.001, resultsUsd: 0.12, rows: 100 });
+  assert.deepEqual(runCost({ usageTotalUsd: 0, chargedEventCounts: { post: 10 } }, OFFICIAL_ACTOR, 0), { totalUsd: 0.05, platformUsd: 0, resultsUsd: 0.05, rows: 10 });
   assert.equal(webhookParam({ INGEST_SECRET: 'x' }), null, 'no PUBLIC_BASE_URL, no webhook');
   assert.match(JSON.parse(atob(webhookParam({ INGEST_SECRET: 'x', PUBLIC_BASE_URL: 'https://a.b' })))[0].payloadTemplate, /resource.defaultDatasetId/);
 });

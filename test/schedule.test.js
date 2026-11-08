@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
 import { createRepo } from '../src/db/repo.js';
-import { cutoffFor, SCHEDULE_DEFAULTS } from '../src/apify.js';
+import { cutoffFor, SCHEDULE_DEFAULTS, isDue, nextRunAt, istHourStart, apifyTime, groupInfoStale } from '../src/apify.js';
 import { resetRedditToken, toItem, REDDIT_TOKEN_URL } from '../src/reddit.js';
 import { ingestItems } from '../src/ingest.js';
 import { memoryDb, GREEN_GLEN } from './helpers.js';
@@ -45,20 +45,45 @@ test('cron is hourly: a scrape starts only when due; Pages are left out of the a
   assert.equal(first.action, 'started'); assert.match(first.detail, /Skipped 1 Facebook Page/);
   const body = JSON.parse(api.calls.find(c => c.init.method === 'POST').init.body);
   assert.deepEqual(body.groups, ['https://www.facebook.com/groups/111']);
-  assert.ok(Date.parse(body.postsPublishedAfter) >= now - 4 * 24 * H, 'never more than backfillDays (date-only, so up to a day earlier) on the first run');
+  assert.ok(Date.parse(body.postsPublishedAfter) >= now - 3 * 24 * H - 1000, 'never more than backfillDays on the first run');
+  assert.match(body.postsPublishedAfter, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, 'exact time, no milliseconds');
   const second = await app.scheduled({}, ENV);
   assert.equal(second.action, 'not_due'); assert.equal(api.calls.filter(c => c.init.method === 'POST').length, 1);
-  assert.ok(second.nextRunAt > now + 3.9 * H);
+  assert.ok(second.nextRunAt > now && second.nextRunAt <= now + 10 * H, 'next IST run hour');
   await t.repo.putSettings({ schedule: { ...SCHEDULE_DEFAULTS, enabled: false } });
   assert.equal((await app.scheduled({}, ENV)).action, 'paused');
 });
 
-test('data window: cutoff = max(last good start - 1 h, now - backfillDays)', () => {
+test('data window: cutoff = max(last good start - 15 min, now - backfillDays), sent without milliseconds', () => {
   const now = Date.UTC(2026, 10, 10);
   assert.equal(cutoffFor(null, { backfillDays: 3 }, now), now - 3 * 24 * H);
-  assert.equal(cutoffFor(now - 2 * H, { backfillDays: 3 }, now), now - 3 * H);
+  assert.equal(cutoffFor(now - 2 * H, { backfillDays: 3 }, now), now - 2 * H - 15 * 60e3);
+  assert.equal(apifyTime(Date.UTC(2026, 10, 8, 5, 4, 3, 999)), '2026-11-08T05:04:03Z');
   assert.equal(cutoffFor(now - 10 * 24 * H, { backfillDays: 2 }, now), now - 2 * 24 * H, 'after an outage');
   assert.equal(cutoffFor(null, { backfillDays: 99 }, now), now - 5 * 24 * H, 'capped at 5 days');
+});
+
+test('IST run hours: due once per listed hour, next run is the next listed hour; interval mode still works', () => {
+  const ist = (d, h, m = 0) => Date.UTC(2026, 10, d, h, m) - 5.5 * H; // IST wall clock -> ms
+  const sch = { ...SCHEDULE_DEFAULTS, runHoursIst: [6, 9, 21] };
+  assert.equal(isDue(sch, null, ist(10, 3)), true, 'never run: start now');
+  assert.equal(isDue(sch, ist(10, 6), ist(10, 9, 1)), true, '9 AM slot');
+  assert.equal(isDue(sch, ist(10, 9, 1), ist(10, 9, 30)), false, 'already ran in this hour');
+  assert.equal(isDue(sch, ist(10, 9), ist(10, 10)), false, '10 AM is not a run hour');
+  assert.equal(istHourStart(ist(10, 9, 42)), ist(10, 9));
+  assert.equal(nextRunAt({ schedule: sch, scheduler: { lastStartedAt: ist(10, 9) } }, ist(10, 10)), ist(10, 21));
+  assert.equal(nextRunAt({ schedule: sch, scheduler: { lastStartedAt: ist(10, 21) } }, ist(10, 22)), ist(11, 6), 'wraps to tomorrow');
+  const iv = { ...SCHEDULE_DEFAULTS, mode: 'interval', intervalHours: 4 };
+  assert.equal(isDue(iv, ist(10, 9), ist(10, 12)), false); assert.equal(isDue(iv, ist(10, 9), ist(10, 13)), true);
+  assert.equal(isDue({ ...sch, enabled: false }, null, ist(10, 9)), false);
+});
+
+test('group details are fetched only when stale (a week) or when a watched group is new', () => {
+  const now = Date.UTC(2026, 10, 10); const g = [{ url: 'https://www.facebook.com/groups/1' }];
+  assert.equal(groupInfoStale({}, g, now), true);
+  assert.equal(groupInfoStale({ groupInfo: { at: now - 864e5, urls: ['https://www.facebook.com/groups/1'] } }, g, now), false);
+  assert.equal(groupInfoStale({ groupInfo: { at: now - 8 * 864e5, urls: ['https://www.facebook.com/groups/1'] } }, g, now), true);
+  assert.equal(groupInfoStale({ groupInfo: { at: now, urls: [] } }, g, now), true);
 });
 
 test('Reddit: OAuth client_credentials, /new and search, cutoff + watermark, runs recorded as source reddit', async () => {

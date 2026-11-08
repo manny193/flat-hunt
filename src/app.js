@@ -8,7 +8,7 @@ import { publicApi } from './public.js';
 import { adminApi } from './admin.js';
 import { serializeListing, publicText } from './serialize.js';
 import { ingestItems } from './ingest.js';
-import { ingestDataset, isDatasetId, scheduledJob, actorId, DEFAULT_RESULTS_PER_GROUP, budgeted } from './apify.js';
+import { ingestDataset, isDatasetId, scheduledJob, actorId, DEFAULT_RESULTS_PER_GROUP, MAX_RESULTS_PER_GROUP, budgeted } from './apify.js';
 import { runEnrich, aiConfigured } from './ai.js';
 import { validateGroups } from './groups.js';
 import { startBackfill, backfillState } from './backfill.js';
@@ -422,7 +422,7 @@ function validateSettings(b) {
   const out = {};
   if (b.groups !== undefined) out.groups = validateGroups(b.groups).groups;
   if (b.keywordFilter !== undefined) { if (typeof b.keywordFilter !== 'boolean') throw new HttpError(400, 'bad_keyword_filter'); out.keywordFilter = b.keywordFilter; }
-  if (b.resultsPerGroup !== undefined) { const n = Number(b.resultsPerGroup); if (!Number.isInteger(n) || n < 5 || n > 100) throw new HttpError(400, 'bad_results_per_group', 'Posts per group must be 5 to 100.'); out.resultsPerGroup = n; }
+  if (b.resultsPerGroup !== undefined) { const n = Number(b.resultsPerGroup); if (!Number.isInteger(n) || n < 5 || n > MAX_RESULTS_PER_GROUP) throw new HttpError(400, 'bad_results_per_group', `Posts per group must be 5 to ${MAX_RESULTS_PER_GROUP}.`); out.resultsPerGroup = n; }
   if (!Object.keys(out).length) throw new HttpError(400, 'nothing_to_update');
   return out;
 }

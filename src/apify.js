@@ -12,22 +12,68 @@ import { runEnrich, aiConfigured } from './ai.js';
 export const API = 'https://api.apify.com/v2';
 export const DEFAULT_ACTOR = 'automly~facebook-public-group-posts-scraper';
 export const OFFICIAL_ACTOR = 'apify~facebook-groups-scraper';
-export const DEFAULT_RESULTS_PER_GROUP = 25;
+// With an exact cutoff, posts per group is only a safety cap: a run returns the posts since the last run.
+export const DEFAULT_RESULTS_PER_GROUP = 30;
+export const MAX_RESULTS_PER_GROUP = 50;
 const HOUR = 36e5;
 const DAY = 24 * HOUR;
-// Admin-controlled schedule (settings.schedule). The Worker cron fires hourly; a run starts only when due.
-export const SCHEDULE_DEFAULTS = { enabled: true, intervalHours: 4, budgetWarnPct: 80, budgetStopPct: 95, retentionDays: 30, backfillDays: 3, redditEnabled: true };
+const IST = 5.5 * HOUR;
+// Overlap between runs: the cutoff is the last good start minus this, so posts a group admin approves a
+// little late are not missed. Every post inside the overlap is paid for twice, so keep it short.
+export const OVERLAP_MS = 15 * 60e3;
+// Price per dataset row (USD) when the run does not say. automly: $1.20 / 1,000 rows (posts AND group
+// rows); official actor on the free tier: $5 / 1,000 posts. Used for the per-run charge cap and group value.
+export const ROW_PRICE = { 'automly~facebook-public-group-posts-scraper': 0.0012, 'apify~facebook-groups-scraper': 0.005 };
+export const rowPrice = actor => ROW_PRICE[actor] ?? 0.005;
+// Group details (name, privacy) cost one row per group, so they are fetched once a week or when the
+// watched list changes, not on every run; posts are named from the stored details or our own settings.
+export const GROUP_INFO_MAX_AGE = 7 * DAY;
+// Admin-controlled schedule (settings.schedule). The Worker cron fires hourly at :00 IST.
+//   mode 'times': run at these IST hours (default: every 2 h from 9 AM to 9 PM, when most people post,
+//                 plus 6 AM to pick up the night's posts; the exact cutoff means no post is skipped).
+//   mode 'interval': run every intervalHours.
+export const DEFAULT_RUN_HOURS = [6, 9, 11, 13, 15, 17, 19, 21];
+export const SCHEDULE_DEFAULTS = { enabled: true, mode: 'times', runHoursIst: DEFAULT_RUN_HOURS, intervalHours: 4, maxRunUsd: 0.5, budgetWarnPct: 80, budgetStopPct: 95, retentionDays: 30, backfillDays: 3, redditEnabled: true };
 export const scheduleOf = settings => ({ ...SCHEDULE_DEFAULTS, ...(settings?.schedule && typeof settings.schedule === 'object' ? settings.schedule : {}) });
+const runHours = sch => [...new Set((Array.isArray(sch.runHoursIst) ? sch.runHoursIst : []).filter(h => Number.isInteger(h) && h >= 0 && h <= 23))].sort((a, b) => a - b);
+const useTimes = sch => sch.mode !== 'interval' && runHours(sch).length > 0;
+/** Start (ms) of the IST clock hour that contains t. */
+export const istHourStart = t => Math.floor((t + IST) / HOUR) * HOUR - IST;
+export const istHour = t => new Date(t + IST).getUTCHours();
+/**
+ * Is a scheduled run due now? Never run before: yes. Times mode: the current IST hour is a run hour and
+ * no run started in it yet. Interval mode: intervalHours since the last start (5 min early is fine).
+ */
+export function isDue(sch, lastStartedAt, now) {
+  if (!sch.enabled) return false;
+  if (!lastStartedAt) return true;
+  if (useTimes(sch)) return runHours(sch).includes(istHour(now)) && !(lastStartedAt >= istHourStart(now));
+  return !lastStartedAt || now - lastStartedAt >= sch.intervalHours * HOUR - 5 * 60e3;
+}
 /** When the next Apify run is due (ms), or null when scheduling is off. */
-export function nextRunAt(settings) {
+export function nextRunAt(settings, now = Date.now()) {
   const sch = scheduleOf(settings); if (!sch.enabled) return null;
   const last = settings?.scheduler?.lastStartedAt;
-  return last ? last + sch.intervalHours * HOUR : Date.now();
+  if (useTimes(sch)) {
+    const hours = runHours(sch);
+    for (let i = 0; i <= 48; i++) { const t = istHourStart(now) + i * HOUR; if (hours.includes(istHour(t)) && !(last >= t)) return Math.max(t, i === 0 ? now : t); }
+    return null;
+  }
+  return last ? last + sch.intervalHours * HOUR : now;
 }
-/** Never ask a source for more than the last backfillDays: cutoff = max(last good start - 1 h, now - backfillDays). */
+/** Never ask a source for more than the last backfillDays: cutoff = max(last good start - 15 min, now - backfillDays). */
 export function cutoffFor(lastGoodStart, sch, now) {
   const floor = now - Math.min(5, Math.max(1, sch.backfillDays || 3)) * DAY;
-  return Math.max(lastGoodStart ? lastGoodStart - HOUR : floor, floor);
+  return Math.max(lastGoodStart ? lastGoodStart - OVERLAP_MS : floor, floor);
+}
+/** Cutoff as the actors accept it: "YYYY-MM-DDTHH:MM:SSZ". automly rejects milliseconds (HTTP 400). */
+export const apifyTime = t => new Date(t).toISOString().slice(0, 19) + 'Z';
+/** True when stored group details are missing, older than a week, or miss a watched group. */
+export function groupInfoStale(settings, groups, now) {
+  const info = settings?.groupInfo;
+  if (!info?.at || now - info.at > GROUP_INFO_MAX_AGE) return true;
+  const have = new Set((info.urls || []).map(u => String(u).toLowerCase()));
+  return groups.some(g => !have.has(String(g.url).toLowerCase()));
 }
 /** Wrap a repository so every D1 statement counts against a per-invocation budget (Workers Free: 50). */
 export function budgeted(repo, cap = 48) {
@@ -72,13 +118,34 @@ async function apify(env, path, init = {}, fetchFn = fetch) {
 }
 
 /** Input for the configured actor. Each actor names things differently. */
-export function buildInput(actor, { groups, resultsPerGroup, after }) {
+export function buildInput(actor, { groups, resultsPerGroup, after, groupInfo = false }) {
   const urls = groups.map(g => g.url);
-  const iso = new Date(after).toISOString();
-  if (actor === OFFICIAL_ACTOR) return { startUrls: urls.map(url => ({ url })), resultsLimit: resultsPerGroup, viewOption: 'CHRONOLOGICAL', onlyPostsNewerThan: iso };
-  // The automly actor documents postsPublishedAfter as a date ("2026-09-01", UTC). Send the date only;
-  // the extra hours it may return are dropped for free by post_keys dedupe.
-  return { groups: urls, resultsPerGroup, sortOrder: 'new', postsPublishedAfter: iso.slice(0, 10), includeGroupInfo: true };
+  const at = apifyTime(after);
+  if (actor === OFFICIAL_ACTOR) return { startUrls: urls.map(url => ({ url })), resultsLimit: resultsPerGroup, viewOption: 'CHRONOLOGICAL', onlyPostsNewerThan: at };
+  // automly's postsPublishedAfter accepts a full UTC time without milliseconds (its input pattern is
+  // YYYY-MM-DD[THH:MM[:SS][Z]]). Posts before it are never returned, so they are never charged.
+  return { groups: urls, resultsPerGroup, sortOrder: 'new', postsPublishedAfter: at, includeGroupInfo: !!groupInfo };
+}
+/**
+ * What a finished run cost, from GET /v2/actor-runs/{id}: platform usage plus the actor's per-event charges.
+ * Right after a run, Apify can still report 0 charged rows (measured 8 Nov), so rows are at least the
+ * rows we read from the dataset (rowsRead).
+ */
+export function runCost(run, actor, rowsRead = 0) {
+  if (!run || typeof run !== 'object') return null;
+  const counts = run.chargedEventCounts && typeof run.chargedEventCounts === 'object' ? run.chargedEventCounts : {};
+  const prices = run.pricingInfo?.pricingPerEvent?.actorChargeEvents || {};
+  let eventsUsd = 0, rows = 0;
+  for (const [ev, n] of Object.entries(counts)) {
+    const num = Number(n) || 0;
+    const p = prices[ev]?.eventPriceUsd ?? (ev === 'apify-default-dataset-item' || ev === 'post' ? rowPrice(actor) : 0);
+    eventsUsd += num * p;
+    if (ev === 'apify-default-dataset-item' || ev === 'post') rows += num;
+  }
+  if (rowsRead > rows) { const p = prices['apify-default-dataset-item']?.eventPriceUsd ?? prices.post?.eventPriceUsd ?? rowPrice(actor); eventsUsd += (rowsRead - rows) * p; rows = rowsRead; }
+  const platformUsd = Number(run.usageTotalUsd) || 0;
+  const r4 = x => Math.round(x * 10000) / 10000;
+  return { totalUsd: r4(platformUsd + eventsUsd), platformUsd: r4(platformUsd), resultsUsd: r4(eventsUsd), rows };
 }
 /** Per-run webhook (base64 JSON) so Apify calls /api/ingest/apify when the run succeeds. */
 export function webhookParam(env) {
@@ -113,8 +180,10 @@ export async function ingestDataset(repo, env, { datasetId, runId, startedAt, co
   let report = prev?.report?.progress ? prev.report : null; // resume after a cut-off invocation
   if (report) delete report.error;
   let offset = report?.progress?.offset || 0;
-  let groups = report?.progress?.groups || [];
   const [areas, settings] = await Promise.all([repo.listAreas(), repo.getSettings()]);
+  // Group names: rows seen on earlier pages of this dataset, else the weekly stored group details.
+  let groups = report?.progress?.groups || settings.groupInfo?.groups || [];
+  let fresh = []; // group rows found in this dataset (a group-details run)
   const limit = pageSize(env);
   const mergeGroups = more => [...new Map([...groups, ...more].map(g => [g.id, g])).values()].slice(0, 200);
   let partial = false;
@@ -131,6 +200,7 @@ export async function ingestDataset(repo, env, { datasetId, runId, startedAt, co
       const progress = last ? null : pageGroups => ({ offset: nextOffset, groups: mergeGroups(pageGroups) });
       const res = await ingestItems(repo, items, { source: 'apify', now, datasetId, areas, settings, groups, storeAll: true, env, run: { status: last ? 'done' : partial ? 'partial' : 'ingesting', report, progress } });
       report = res.runReport;
+      fresh = [...fresh, ...res.groups.filter(g => !groups.some(x => x.id === g.id && x.name === g.name))];
       groups = mergeGroups(res.groups);
       offset = nextOffset;
       if (last || partial) break;
@@ -142,9 +212,17 @@ export async function ingestDataset(repo, env, { datasetId, runId, startedAt, co
   }
   if (partial) return { status: 'partial', report };
   delete report.progress;
-  if (typeof costUsd === 'number' && isFinite(costUsd)) await repo.setRunCost(datasetId, Math.round(costUsd * 10000) / 10000);
-  if (report.unscrapable?.length) await repo.putSettings({ unscrapableGroups: { at: now, datasetId, groups: report.unscrapable.slice(0, 50) } });
-  else await repo.putSettings({ unscrapableGroups: { at: now, datasetId, groups: [] } });
+  // Real cost of the run (one Apify call): platform usage + per-row charges. Falls back to a cost passed in.
+  let cost = null;
+  if (runId) { try { cost = runCost((await apify(env, `/actor-runs/${encodeURIComponent(runId)}`, {}, fetchFn))?.data, actorId(env), offset); } catch { /* cost stays unknown */ } }
+  if (!cost && typeof costUsd === 'number' && isFinite(costUsd)) cost = { totalUsd: Math.round(costUsd * 10000) / 10000 };
+  if (cost) { await repo.setRunCost(datasetId, cost.totalUsd, cost); report.cost = cost; }
+  const patch = { unscrapableGroups: { at: now, datasetId, groups: (report.unscrapable || []).slice(0, 50) } };
+  if (fresh.length) {
+    const watched = (Array.isArray(settings.groups) ? settings.groups : []).filter(g => g.url && !isPage(g)).map(g => g.url);
+    patch.groupInfo = { at: now, urls: watched, groups: mergeGroups(fresh).map(({ id, name, url, privacy }) => ({ id, name, url, privacy })) };
+  }
+  await repo.putSettings(patch);
   return { status: 'done', report };
 }
 
@@ -161,7 +239,7 @@ export async function sweep(repo, env, { fetchFn = fetch, now = Date.now() } = {
   for (const r of runs.reverse()) {
     const st = statuses.get(r.defaultDatasetId);
     if (st === 'done') continue;
-    const res = await ingestDataset(repo, env, { datasetId: r.defaultDatasetId, runId: r.id, startedAt: Date.parse(r.startedAt) || null, costUsd: typeof r.usageTotalUsd === 'number' ? r.usageTotalUsd : undefined }, { fetchFn, now, maxPages: SWEEP_PAGES });
+    const res = await ingestDataset(repo, env, { datasetId: r.defaultDatasetId, runId: r.id, startedAt: Date.parse(r.startedAt) || null, }, { fetchFn, now, maxPages: SWEEP_PAGES });
     out.push({ datasetId: r.defaultDatasetId, status: res.status, newListings: res.report?.newListings ?? 0 });
     if (res.status !== 'skipped') break;
   }
@@ -176,7 +254,7 @@ export async function startRun(repo, env, { fetchFn = fetch, now = Date.now(), s
   const pages = all.filter(isPage); const groups = all.filter(g => !isPage(g));
   const pageNote = pages.length ? `Skipped ${pages.length} Facebook Page${pages.length > 1 ? 's' : ''} (the group scraper can't read Pages). ` : '';
   if (!groups.length) return { action: 'skipped', detail: (pageNote + 'No active watched groups with a link. Add them in Settings.').trim() };
-  let perGroup = Number(settings.resultsPerGroup) || DEFAULT_RESULTS_PER_GROUP;
+  let perGroup = Math.min(MAX_RESULTS_PER_GROUP, Number(settings.resultsPerGroup) || DEFAULT_RESULTS_PER_GROUP);
   let usage = null, detail = pageNote;
   try {
     usage = await getUsage(env, fetchFn);
@@ -186,12 +264,20 @@ export async function startRun(repo, env, { fetchFn = fetch, now = Date.now(), s
   if (usage && usage.ratio > sch.budgetWarnPct / 100) { perGroup = Math.max(5, Math.floor(perGroup / 2)); detail += `Credit ${Math.round(usage.ratio * 100)}% used, so ${perGroup} posts per group. `; }
   const after = cutoffFor(await repo.lastSuccessfulStart(), sch, now);
   const actor = actorId(env);
-  const input = buildInput(actor, { groups, resultsPerGroup: perGroup, after });
+  const groupInfo = groupInfoStale(settings, groups, now);
+  const input = buildInput(actor, { groups, resultsPerGroup: perGroup, after, groupInfo });
+  // Hard caps Apify enforces on the run: at most this many dataset rows, and at most maxRunUsd of
+  // per-row charges (the run stops there), so a misbehaving actor can never drain the month's credit.
+  const maxItems = groups.length * perGroup + (groupInfo ? groups.length : 0) + 5;
+  const maxCharge = Math.max(0.01, Math.min(Number(sch.maxRunUsd) || SCHEDULE_DEFAULTS.maxRunUsd, Math.ceil(maxItems * rowPrice(actor) * 1.2 * 100) / 100));
   const hook = webhookParam(env);
-  const { data } = await apify(env, `/acts/${actor}/runs${hook ? `?webhooks=${encodeURIComponent(hook)}` : ''}`, { method: 'POST', body: JSON.stringify(input) }, fetchFn);
+  const qs = new URLSearchParams({ maxItems: String(maxItems), maxTotalChargeUsd: String(maxCharge) });
+  if (hook) qs.set('webhooks', hook);
+  const { data } = await apify(env, `/acts/${actor}/runs?${qs}`, { method: 'POST', body: JSON.stringify(input) }, fetchFn);
   if (data?.id && isDatasetId(data.defaultDatasetId)) await repo.recordStartedRun({ runId: data.id, datasetId: data.defaultDatasetId, startedAt: Date.parse(data.startedAt) || now, actor });
   if (!hook) detail += 'PUBLIC_BASE_URL or INGEST_SECRET is not set, so results arrive with the next sweep instead of a webhook. ';
-  return { action: 'started', runId: data?.id, groups: groups.length, skippedPages: pages.length, resultsPerGroup: perGroup, after, detail: detail.trim() };
+  if (groupInfo) detail += 'Group details refreshed this run. ';
+  return { action: 'started', runId: data?.id, groups: groups.length, skippedPages: pages.length, resultsPerGroup: perGroup, after, maxItems, maxChargeUsd: maxCharge, groupInfo, detail: detail.trim() };
 }
 
 /**
@@ -209,7 +295,7 @@ export async function scheduledJob(baseRepo, env, { fetchFn = fetch, now = Date.
   const status = { at: now, swept: [], action: '', detail: '', lastStartedAt: prev.lastStartedAt || null };
   if (!env.APIFY_TOKEN) { status.action = 'skipped'; status.detail = 'APIFY_TOKEN is not set.'; }
   else {
-    const due = force || (sch.enabled && (!prev.lastStartedAt || now - prev.lastStartedAt >= sch.intervalHours * HOUR - 5 * 60e3));
+    const due = force || isDue(sch, prev.lastStartedAt, now);
     if (due) {
       try { const r = await startRun(repo, env, { fetchFn, now, settings }); status.action = r.action; status.detail = r.detail ? r.detail + ' ' : ''; status.runId = r.runId; if (r.action === 'started') status.lastStartedAt = now; }
       catch (e) { status.action = 'error'; status.detail = 'Start failed: ' + e.message + '. '; }
@@ -219,7 +305,7 @@ export async function scheduledJob(baseRepo, env, { fetchFn = fetch, now = Date.
   }
   if (!force) await extras(repo, env, settings, sch, status, { fetchFn, now });
   status.detail = status.detail.trim();
-  status.nextRunAt = sch.enabled ? (status.lastStartedAt ? status.lastStartedAt + sch.intervalHours * HOUR : now + HOUR) : null;
+  status.nextRunAt = nextRunAt({ ...settings, scheduler: status }, now + 1);
   await repo.putSettings({ scheduler: status });
   if (!env.APIFY_TOKEN && status.action === 'skipped' && !status.reddit && !status.backfill && !status.purged) return { action: 'skipped', detail: status.detail, swept: [] };
   return status;

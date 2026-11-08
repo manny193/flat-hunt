@@ -86,7 +86,7 @@ test('import validation: source, items, size cap, content type', async () => {
 test('settings: structured watched groups, keyword filter, posts per group', async () => {
   const { call } = await harness();
   const s0 = (await call('GET', '/api/settings')).data;
-  assert.deepEqual(s0.groups, []); assert.equal(s0.keywordFilter, true); assert.equal(s0.resultsPerGroup, 25); assert.equal(s0.apify.configured, false);
+  assert.deepEqual(s0.groups, []); assert.equal(s0.keywordFilter, true); assert.equal(s0.resultsPerGroup, 30); assert.equal(s0.apify.configured, false);
   const put = await call('PUT', '/api/settings', { groups: [{ name: 'Bellandur Flats', url: 'https://m.facebook.com/groups/123456/?ref=share', active: true }, { name: 'Old', url: 'https://www.facebook.com/groups/old-group/', active: false }], keywordFilter: false, resultsPerGroup: 30 });
   assert.equal(put.status, 200);
   assert.deepEqual(put.data.groups, [{ name: 'Bellandur Flats', url: 'https://www.facebook.com/groups/123456', active: true }, { name: 'Old', url: 'https://www.facebook.com/groups/old-group', active: false }]);

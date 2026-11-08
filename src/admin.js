@@ -1,7 +1,7 @@
 // Admin API (/api/admin/*). The router has already checked that the caller is an admin.
 import { HttpError, json, errorJson, readJson } from './http.js';
 import { ingestItems } from './ingest.js';
-import { scheduledJob, startRun, sweep, getUsage, scheduleOf, nextRunAt, actorId, DEFAULT_RESULTS_PER_GROUP, budgeted } from './apify.js';
+import { scheduledJob, startRun, sweep, getUsage, scheduleOf, nextRunAt, actorId, DEFAULT_RESULTS_PER_GROUP, MAX_RESULTS_PER_GROUP, budgeted, rowPrice, groupInfoStale } from './apify.js';
 import { redditStep, redditConfigured, subredditsOf, validateSubreddits, DEFAULT_SUBREDDITS } from './reddit.js';
 import { validateGroups, groupsView, groupId, classifyFacebookUrl, PAGE_WARNING } from './groups.js';
 import { editArea, areaName, LIMITS } from './app.js';
@@ -28,7 +28,7 @@ export function runView(r) {
     startedAt: r.startedAt || null, finishedAt: finished, durationMs: r.startedAt && finished ? Math.max(0, finished - r.startedAt) : null,
     postsFetched: total, matchedArea: matched, newListings: p.newListings || 0, merged: p.merged || 0, duplicates: p.dupes || 0,
     offArea, notHousing: p.notHousing || 0, seeking: p.seeking || 0, unscrapableGroups: Array.isArray(p.unscrapable) ? p.unscrapable : [],
-    outsideGroups: p.outsideGroups || {}, costUsd: r.costUsd ?? null, progressOffset: p.progress?.offset ?? null, error: p.error || (p.errors || [])[0] || null,
+    outsideGroups: p.outsideGroups || {}, costUsd: r.costUsd ?? null, cost: p.cost || null, progressOffset: p.progress?.offset ?? null, error: p.error || (p.errors || [])[0] || null,
   };
 }
 
@@ -38,7 +38,8 @@ async function scraperView(repo, env, fetchFn, { live = true } = {}) {
   if (live && env.APIFY_TOKEN) { try { usage = { ...(await getUsage(env, fetchFn)), checkedAt: Date.now() }; await repo.putSettings({ apifyUsage: usage }); } catch { /* keep cached */ } }
   let actor = null; try { actor = actorId(env); } catch { actor = 'invalid'; }
   return {
-    schedule: scheduleOf(s), resultsPerGroup: s.resultsPerGroup || DEFAULT_RESULTS_PER_GROUP,
+    schedule: scheduleOf(s), resultsPerGroup: Math.min(MAX_RESULTS_PER_GROUP, s.resultsPerGroup || DEFAULT_RESULTS_PER_GROUP), maxResultsPerGroup: MAX_RESULTS_PER_GROUP,
+    groupInfo: s.groupInfo ? { at: s.groupInfo.at, groups: (s.groupInfo.groups || []).length } : null,
     apifyUsage: usage, nextRunAt: env.APIFY_TOKEN ? nextRunAt(s) : null, scheduler: s.scheduler || null, purge: s.purge || null,
     apify: { configured: !!env.APIFY_TOKEN, actor, webhook: !!(env.PUBLIC_BASE_URL && env.INGEST_SECRET) },
     reddit: { configured: redditConfigured(env), state: redditState(s) },
@@ -53,8 +54,32 @@ function validateSchedule(b, cur) {
   if (b.enabled !== undefined) { if (typeof b.enabled !== 'boolean') throw new HttpError(400, 'bad_enabled'); out.enabled = b.enabled; }
   if (b.redditEnabled !== undefined) { if (typeof b.redditEnabled !== 'boolean') throw new HttpError(400, 'bad_redditEnabled'); out.redditEnabled = b.redditEnabled; }
   num('intervalHours', 1, 24); num('budgetWarnPct', 10, 99); num('budgetStopPct', 11, 100); num('retentionDays', 7, 365); num('backfillDays', 1, 5);
+  if (b.mode !== undefined) { if (b.mode !== 'times' && b.mode !== 'interval') throw new HttpError(400, 'bad_mode', 'mode must be "times" or "interval".'); out.mode = b.mode; }
+  if (b.runHoursIst !== undefined) {
+    if (!Array.isArray(b.runHoursIst) || b.runHoursIst.length > 24 || !b.runHoursIst.every(h => Number.isInteger(h) && h >= 0 && h <= 23)) throw new HttpError(400, 'bad_runHoursIst', 'Run hours must be whole hours from 0 to 23 (IST).');
+    out.runHoursIst = [...new Set(b.runHoursIst)].sort((x, y) => x - y);
+  }
+  if (out.mode === 'times' && !(out.runHoursIst || []).length) throw new HttpError(400, 'bad_runHoursIst', 'Pick at least one run hour.');
+  if (b.maxRunUsd !== undefined) { const n = Number(b.maxRunUsd); if (!(n >= 0.01 && n <= 5)) throw new HttpError(400, 'bad_maxRunUsd', 'The per-run limit must be $0.01 to $5.'); out.maxRunUsd = Math.round(n * 100) / 100; }
   if (out.budgetStopPct <= out.budgetWarnPct) throw new HttpError(400, 'bad_budget', 'The stop threshold must be above the warn threshold.');
   return out;
+}
+
+const actorDefault = 'automly~facebook-public-group-posts-scraper';
+// A paid group is "low value" when, over the window, it returned enough posts to judge (20+) but under
+// 15% of them became new listings: most of its spend goes on reposts, chatter or non-housing posts.
+export const LOW_VALUE = { minPosts: 20, minYield: 0.15 };
+/** Add match rate, spend, listings per dollar and a low-value flag to a per-group stats row. */
+export function groupValue(g) {
+  const cost = Math.round((g.costUsd || 0) * 10000) / 10000;
+  const yieldRate = g.postsFetched ? g.newListings / g.postsFetched : null;
+  return {
+    ...g, costUsd: cost,
+    matchRate: g.postsFetched ? Math.round(1000 * g.matched / g.postsFetched) / 10 : null,
+    yieldPct: yieldRate == null ? null : Math.round(1000 * yieldRate) / 10,
+    listingsPerUsd: cost > 0 ? Math.round(g.newListings / cost) : null,
+    lowValue: cost > 0 && g.postsFetched >= LOW_VALUE.minPosts && yieldRate < LOW_VALUE.minYield,
+  };
 }
 
 /** Per-day, per-source, per-group and per-area numbers for the dashboard. */
@@ -76,16 +101,18 @@ async function stats(repo, days, now) {
     const so = sources[r.source] ||= { runs: 0, postsFetched: 0, matched: 0, newListings: 0, merged: 0, failed: 0, costUsd: 0, lastRunAt: null };
     so.runs++; so.postsFetched += v.postsFetched; so.matched += v.matchedArea; so.newListings += v.newListings; so.merged += v.merged; if (r.status === 'failed') so.failed++; so.costUsd += v.costUsd || 0; so.lastRunAt = Math.max(so.lastRunAt || 0, t);
     const p = r.report || {};
-    for (const [g, n] of Object.entries(p.fetchedByGroup || {})) { const x = groups.get(g) || { group: g, source: r.source, postsFetched: 0, matched: 0, newListings: 0, failures: 0, lastSeenAt: null }; x.postsFetched += n; x.lastSeenAt = Math.max(x.lastSeenAt || 0, t); groups.set(g, x); }
+    // Each fetched Apify row is charged, so a group's spend is its rows times the actor's row price.
+    const price = r.source === 'apify' ? rowPrice(r.actor || actorDefault) : 0;
+    for (const [g, n] of Object.entries(p.fetchedByGroup || {})) { const x = groups.get(g) || { group: g, source: r.source, postsFetched: 0, matched: 0, newListings: 0, failures: 0, lastSeenAt: null, costUsd: 0 }; x.postsFetched += n; x.costUsd = (x.costUsd || 0) + n * price; x.lastSeenAt = Math.max(x.lastSeenAt || 0, t); groups.set(g, x); }
     for (const [g, n] of Object.entries(p.matchedByGroup || {})) { const x = groups.get(g); if (x) x.matched += n; }
     for (const [g, n] of Object.entries(p.newByGroup || {})) { const x = groups.get(g); if (x) x.newListings += n; }
-    for (const u of v.unscrapableGroups) { const k = u.name || u.url; const x = groups.get(k) || { group: k, url: u.url, source: r.source, postsFetched: 0, matched: 0, newListings: 0, failures: 0, lastSeenAt: null }; x.failures++; x.failReason = u.reason; groups.set(k, x); }
+    for (const u of v.unscrapableGroups) { const k = u.name || u.url; const x = groups.get(k) || { group: k, url: u.url, source: r.source, postsFetched: 0, matched: 0, newListings: 0, failures: 0, lastSeenAt: null, costUsd: 0 }; x.failures++; x.failReason = u.reason; groups.set(k, x); }
   }
   for (const d of perDay.values()) d.matchRate = d.postsFetched ? Math.round(1000 * d.matched / d.postsFetched) / 10 : null;
   const totals = [...perDay.values()].reduce((a, d) => ({ postsFetched: a.postsFetched + d.postsFetched, matched: a.matched + d.matched, newListings: a.newListings + d.newListings, merged: a.merged + d.merged }), { postsFetched: 0, matched: 0, newListings: 0, merged: 0 });
   return {
     days, from, perDay: [...perDay.values()], totals, previous: prev,
-    sources, groups: [...groups.values()].map(g => ({ ...g, matchRate: g.postsFetched ? Math.round(1000 * g.matched / g.postsFetched) / 10 : null })).sort((a, b) => b.newListings - a.newListings || b.postsFetched - a.postsFetched),
+    sources, groups: [...groups.values()].map(groupValue).sort((a, b) => b.newListings - a.newListings || b.postsFetched - a.postsFetched),
     areas: (await repo.areaStats(now)).map(a => ({ id: a.id, name: a.name, active: a.active, listings: a.listings, listings7d: a.listings7d, users: a.users })),
   };
 }
@@ -116,7 +143,7 @@ export async function adminApi(request, env, method, path, url, repo, fetchFn, w
     if (method === 'PUT') {
       const b = await body(); if (!b || typeof b !== 'object') throw new HttpError(400, 'bad_body');
       const s = await repo.getSettings(); const patch = { schedule: validateSchedule(b, scheduleOf(s)) };
-      if (b.resultsPerGroup !== undefined) { const n = Number(b.resultsPerGroup); if (!Number.isInteger(n) || n < 5 || n > 100) throw new HttpError(400, 'bad_resultsPerGroup', 'Posts per group must be 5 to 100.'); patch.resultsPerGroup = n; }
+      if (b.resultsPerGroup !== undefined) { const n = Number(b.resultsPerGroup); if (!Number.isInteger(n) || n < 5 || n > MAX_RESULTS_PER_GROUP) throw new HttpError(400, 'bad_resultsPerGroup', `Posts per group must be 5 to ${MAX_RESULTS_PER_GROUP}.`); patch.resultsPerGroup = n; }
       await repo.putSettings(patch);
       return json(await scraperView(repo, env, fetchFn, { live: false }));
     }

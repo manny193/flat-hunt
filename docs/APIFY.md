@@ -2,6 +2,21 @@
 
 Checked 2026-11-07 from public Apify Store pages. Could not do a live test run from the build workspace (its network blocks api.apify.com); the first real run happens from production, and the ingest code accepts both field layouts below.
 
+## Cost plan (8 Nov 2026, measured live)
+
+A live experiment (4 tiny runs, ~$0.04) settled how we pay and what the actor accepts:
+
+| Finding | Evidence | What we do |
+|---|---|---|
+| `postsPublishedAfter` takes an exact UTC time, but **not milliseconds** | `2026-11-08T05:00:00Z` accepted, 0 older posts returned; `…00.000Z` rejected with HTTP 400 (input pattern `YYYY-MM-DD[THH:MM[:SS][Z]]`) | Send `apifyTime(t)` = ISO without ms. Cutoff = last good start − 15 min (was: date only, which re-bought every post since midnight UTC) |
+| We pay per dataset row: posts **and** group rows ($0.0012 each) | Pricing: event `apify-default-dataset-item`, "One post or group in the dataset" | `includeGroupInfo: false`; group details only weekly or when the watched list changes. Names come from stored details or our settings |
+| Platform usage per run is tiny | `usageTotalUsd` ≈ $0.00015 for a 10-post run | Scrape often: run frequency barely changes cost. Default IST run hours 6, 9, 11, 13, 15, 17, 19, 21 |
+| Right after a run, `chargedEventCounts` can still show 0 rows | 10 rows written, 0 reported | Run cost = platform usage + max(charged rows, rows we read) × row price |
+| A group's search link (`/search/?q=bhk`) is ignored | Same posts as the plain group (7 of 10 mention "bhk" in both) | No keyword pre-filter is possible; choose groups carefully instead |
+| Apify can cap a run | Run options `maxItems`, `maxTotalChargeUsd` | Every run passes both: rows ≤ groups × posts-per-group (+ group rows), charge ≤ min(natural ceiling × 1.2, admin "max spend per run", default $0.50) |
+
+Posts per group is now a safety cap (default 30, max 50). Admin → Groups shows each group's spend, new listings per dollar, and a "Low value" flag (20+ posts in 7 days, under 15% became new listings).
+
 ## Actor choice
 
 | Actor | Price | Fetch only new posts | Track record | Use |

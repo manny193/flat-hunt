@@ -218,6 +218,8 @@ mark{background:none;color:inherit;box-shadow:inset 0 -.42em 0 var(--amber-soft)
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend i{width:10px;height:10px;border-radius:3px;background:var(--chart-match)}
 .legend i.off{background:var(--chart-off)}
+.hours{display:flex;flex-wrap:wrap;gap:6px;margin:var(--s2) 0}
+.hours .fchip{min-height:32px;padding:0 10px;font-size:var(--fs-12)}
 .seg{display:inline-flex;background:var(--sunk);border-radius:10px;padding:3px}
 .seg button{border:0;background:none;border-radius:8px;min-height:30px;padding:0 10px;font-size:var(--fs-12);font-weight:700;color:var(--muted)}
 .seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0/.12)}

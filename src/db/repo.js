@@ -376,7 +376,11 @@ export function createRepo(db) {
     async finishRun(datasetId, { status = 'done', report, now }) {
       await db.run('UPDATE runs SET status = ?, at = ?, finished_at = ?, report = ? WHERE dataset_id = ?', [status, now, Date.now(), JSON.stringify(report || {}), datasetId]);
     },
-    async setRunCost(datasetId, costUsd) { await db.run('UPDATE runs SET cost_usd = ? WHERE dataset_id = ?', [costUsd, datasetId]); },
+    /** Store a run's cost; the breakdown (platform, per-row charges, rows) goes into report.cost. */
+    async setRunCost(datasetId, costUsd, breakdown = null) {
+      if (breakdown) await db.run(`UPDATE runs SET cost_usd = ?, report = json_set(coalesce(report, '{}'), '$.cost', json(?)) WHERE dataset_id = ?`, [costUsd, JSON.stringify(breakdown), datasetId]);
+      else await db.run('UPDATE runs SET cost_usd = ? WHERE dataset_id = ?', [costUsd, datasetId]);
+    },
     /** Take the ingest lock for a dataset. False when already ingested (or being ingested right now). */
     async claimRun({ datasetId, runId, startedAt, now }) {
       const r = await db.run(`INSERT INTO runs (source, dataset_id, run_id, status, started_at, at, report) VALUES ('apify', ?, ?, 'ingesting', ?, ?, '{}')

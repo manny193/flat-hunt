@@ -40,7 +40,7 @@ Written 8 Nov 2026, covering 6–8 Nov 2026 (updated 8 Nov evening: city-wide ho
 | URL | `https://flat-hunt.<founder's subdomain>.workers.dev` (Workers & Pages → flat-hunt → Domains & Routes) |
 | Database | Cloudflare D1 `flat-hunt`, id `989e4e92-3549-4199-8cc9-2a6bc5f2babe`, migrations 0001–0003 applied |
 | Deploys | GitHub Actions on push to `main`: tests, D1 migrations, deploy, smoke test, auto-rollback on failure |
-| Cron | Hourly (`0 * * * *`). A scrape starts when due (interval setting, default 4 h). |
+| Cron | Hourly at :00 IST (`30 * * * *` UTC). A scrape starts at the admin's IST run hours (default 6, 9, 11, 13, 15, 17, 19, 21) or every N hours. |
 | Scraper | Apify actor `automly~facebook-public-group-posts-scraper` (logged-out, public groups) |
 | Cost | ₹0 so far. Apify free plan has $5/month credit and cannot overspend. **This is at risk; see §9.1.** |
 | Old prototype | A claude.ai artifact ("Green Glen Flat Hunt"), superseded by the real app |
@@ -92,8 +92,8 @@ Optional secrets are uploaded only when present. A deploy without them still pas
 | D7 | **Free `workers.dev` domain for now.** | ₹0. A paid domain is the founder's call: `.com` at Cloudflare is about ₹1,000/yr; `.in`/`.xyz` start at ₹90–180 for the first year but renew at ₹500–1,260. Claude can't buy one. |
 | D8 | **Apify actor: automly primary, official `apify~facebook-groups-scraper` fallback** (one config value: `APIFY_ACTOR`). | automly costs $1.20/1,000 posts, has a date cutoff, and reports private groups. The official one costs from $2.60/1,000 but has 47K users. memo23 was rejected (1.3★). |
 | D9 | **Our cron starts the Apify runs (no Apify Schedule)**, with a per-run webhook and an hourly sweep for missed runs. | Gives a dynamic "posts newer than" cutoff and a budget check before every run. |
-| D10 | **Data window:** cutoff = max(last successful start − 1 h, now − `backfillDays`). backfillDays defaults to 3; admin can set 1–5. | Requested by the founder to limit Apify use. |
-| D11 | **Budget guard:** read Apify usage before each run. Above 80%, halve posts per group; above 95%, skip runs until the cycle resets. | Stay inside the $5 credit. |
+| D10 | **Data window:** cutoff = max(last successful start − 15 min, now − `backfillDays`), sent as an exact UTC time without milliseconds (8 Nov; was date-only). backfillDays defaults to 3; admin can set 1–5. | Pay only for new posts. The 15-min overlap covers late admin approvals. |
+| D11 | **Budget guard:** read Apify usage before each run. Above 80%, halve posts per group; above 95%, skip runs until the cycle resets. Every run also passes Apify's `maxItems` and `maxTotalChargeUsd` (admin "max spend per run", default $0.50). | Stay inside the $5 credit. |
 | D12 | **Store all posts** (not just matching ones), tagged by area at ingest. A new area triggers a backfill scan of stored posts. Retention is 30 days, except shortlisted listings. Applies to every source, including the admin's manual import since 8 Nov (samples aside). | Founder: make it useful for other people and areas. |
 | D13 | **Reddit through its official API directly (not Apify).** | Free for non-commercial use, 100 req/min OAuth, adds no Apify cost. Unauthenticated `.json` access has been blocked since mid-2026. |
 | D14 | **Three roles: Public / User (Google sign-in) / Admin (`ADMIN_EMAILS`).** Public gets browse with sensitive data stripped on the server. Users get full details and their own deck, shortlist and areas. Admin gets scrapers, data and users. `APP_PASSWORD` is the break-glass admin login. | Founder's decision. The privacy risk of signed-in users seeing third parties' phone numbers was flagged; an admin "require approval" toggle exists (default off, as the founder asked; Claude and QA recommend on). |
@@ -241,7 +241,11 @@ Run reports also show posts labelled with other group names ("…Without Brokers
 
 ## 9. Open issues and questions (prioritised)
 
-### 9.1 HIGH: Apify spend will exceed the free $5/month at current settings
+### 9.1 FIXED 8 Nov (pending deploy): Apify re-buying posts
+Root cause confirmed live: the actor rejects milliseconds, so the cutoff fell back to a date. Now exact time, no group rows per run, IST run hours, per-run caps, real run cost and per-group value (docs/APIFY.md "Cost plan"). Remaining limit: at ~1.5 new posts/group/hour, $5/month covers about 4 busy groups; 10 groups ≈ $13/month, 50 ≈ $65/month. **Production `resultsPerGroup` is 100**; the code now caps it at 50; set it to 30 after deploy.
+
+#### Original note
+### 9.1 (old) HIGH: Apify spend will exceed the free $5/month at current settings
 - Each run fetches about 85–89 posts ≈ **$0.11 per run**; at 6 runs/day that's about **$0.65/day ≈ $19/month**.
 - Cause: on 7 Nov the cutoff was changed to **date-only** (`YYYY-MM-DD`) to fix an HTTP 400. Each run now re-fetches everything since midnight UTC of the cutoff day: 52 of 89 posts on the latest run were duplicates we paid for.
 - The budget guard will halve fetches at 80% and stop at 95%, so there's no bill, but scraping would pause for the rest of the month.
@@ -317,4 +321,5 @@ Run reports also show posts labelled with other group names ("…Without Brokers
 - **8 Nov:**
   - 3 scheduled runs succeeded, 94 listings stored, 2 in Green Glen.
   - Found the Apify cost risk (9.1) and the AI failures (9.2).
+  - Apify cost work: live experiment found the millisecond bug; exact cutoff, weekly group details, IST run hours, run caps, run cost and group value built (D10, D11, §9.1).
   - Founder reset the scope: a worldwide flat-hunt app, Bangalore first. Homepage now shows every Bangalore post with an area filter (D22); manual imports keep unmatched posts too. Not deployed yet.
