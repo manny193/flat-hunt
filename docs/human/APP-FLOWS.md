@@ -88,11 +88,11 @@ What a notification shows: the size, rent and area, nothing else. No phone numbe
 5. Paused groups (not manual) are tried again after 30 days. If fewer than the minimum are being read, the next queued or cooled-off group starts a trial.
 6. **Recent rotations** lists every status change with the reason. Rotation off: every enabled group is read on each run, as before.
 
-### 8b. Turn Reddit on (no API key)
-1. Admin, **Scraper**, open the schedule. Make sure **Reddit source on** and **Reddit without an API key (public JSON)** are both on, then save. (Public JSON is off until you do this.)
-2. Admin, **Groups**: the **Subreddits** panel lists the subreddits to read (one per line). The panel shows the mode, last success, last result and posts read.
-3. The hourly job reads up to 3 subreddits per run, a few seconds apart. Use **Run** on the Sources table to try it now.
-4. If Reddit blocks us (HTTP 403/429 or a web page instead of data), the run stops and the status shows the error. After 3 failures in a row Reddit pauses for 6 hours. Nothing is broken on our side; turn the switch off if you want to stop trying.
+### 8b. Turn Reddit on (official API)
+Public JSON tested 9 Nov 2026; Reddit requires login (403 from Cloudflare, login redirect elsewhere); removed in favour of the official API (#35).
+1. Reddit needs official API credentials (`REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, optional `REDDIT_USERNAME`) in the deploy secrets. Without them Admin shows Reddit as Not connected and nothing runs.
+2. Admin, **Scraper**, schedule: keep **Reddit source on**. Admin, **Groups**: the **Subreddits** panel lists the subreddits to read (one per line).
+3. Once a day the hourly job also re-checks stored Reddit posts and removes ones the author or moderators deleted (Reddit's rules). Nothing to do for this.
 
 ### 9. Phone scans (private-group experiment)
 
