@@ -397,3 +397,26 @@ test('public view hides society names in any case and from every shown post (QA)
   const all = p.posts.map(x => x.text).join(' ');
   assert.doesNotMatch(all, /sobha|prestige lakeside/i, all);
 });
+
+test('post URLs: signed-in listing, browse and detail output carry them; public and pending never do (#31)', async () => {
+  const h = await harness();
+  const gg = await h.repo.createArea(GREEN_GLEN, Date.now());
+  const { ingestItems } = await import('../src/ingest.js');
+  const url = 'https://www.facebook.com/groups/1/posts/4242/';
+  await ingestItems(h.repo, [{ text: '2BHK available in Green Glen Layout, rent 25000, no brokerage. unique words zq', url, author: 'Someone', groupName: 'Bellandur Flats', createdAt: new Date().toISOString() }], { source: 'apify', storeAll: true });
+  const user = await h.sessionFor('u31@example.com'), pending = await h.sessionFor('p31@example.com', 'user', 'pending');
+  const hdr = c => ({ cookie: c.cookie });
+  const br = await h.jcall('GET', `/api/browse?area=${gg.id}`, { headers: hdr(user) });
+  assert.equal(br.status, 200); assert.ok(br.data.listings.length && JSON.stringify(br.data).includes(url), 'browse includes the post url for a signed-in user');
+  const id = br.data.listings[0].id;
+  const det = await h.jcall('GET', `/api/listings/${id}`, { headers: hdr(user) });
+  assert.equal(det.data.posts[0].url, url, 'detail includes the url');
+  const ip = { 'cf-connecting-ip': '198.51.100.31' };
+  const pub = await h.jcall('GET', `/api/public/listings/${id}`, { headers: ip });
+  const pubList = await h.jcall('GET', `/api/public/listings?area=${gg.id}`, { headers: ip });
+  for (const r of [pub, pubList]) assert.ok(!JSON.stringify(r.data).includes('/posts/4242') && !JSON.stringify(r.data).includes('"url"'), 'public has no post url');
+  const pend = await h.jcall('GET', `/api/browse?area=${gg.id}`, { headers: hdr(pending) });
+  assert.ok(pend.status !== 200 || !JSON.stringify(pend.data).includes('/posts/4242'), 'pending gets no post url');
+  const pendDet = await h.jcall('GET', `/api/listings/${id}`, { headers: hdr(pending) });
+  assert.ok(!JSON.stringify(pendDet.data).includes('/posts/4242'), 'pending detail has no post url');
+});

@@ -38,6 +38,7 @@ What people do in Flat Hunt, step by step. Written for non-technical readers. La
 2. Swipe right (or tap Keep) to shortlist it. Swipe left (or tap Pass) to pass.
 3. Undo appears for a few seconds if you change your mind.
 4. If a shortlisted flat is posted again with new details, it is flagged as updated.
+5. Tap **View original post** on a card (or on each post in the full details) to open the Facebook or Reddit post in a new tab. Visitors who are not signed in see "Sign in to view the original post" instead.
 
 ### 6. Shortlist
 

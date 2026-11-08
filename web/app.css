@@ -559,3 +559,7 @@ details.how summary{cursor:pointer;font-weight:700;font-size:var(--fs-14);color:
 .al-row select.input,.field-row .al-num{width:auto;min-width:96px;flex:none}
 .al-grid{padding:var(--s2) 0}
 .alert-note{border-left:3px solid var(--amber);padding-left:var(--s3)}
+.btn.orig{white-space:normal;text-align:center;text-decoration:none}
+.post .btn.orig{margin-top:var(--s3)}
+.sfoot .btn.orig{min-height:36px}
+@media (pointer:coarse){.sfoot .btn.orig{min-height:44px}}
