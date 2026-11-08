@@ -148,6 +148,11 @@ export function createRepo(db) {
         [f.status, f.stage, f.notes, f.decidedAt ?? null, f.hasUpdate ? 1 : 0, now, id]);
       return r ? rowToListing(r) : null;
     },
+    /** Listings holding Reddit posts, by rowid, for the deleted-post clean-up. */
+    async redditListingsAfter(rid, limit) {
+      const rows = await db.all(`SELECT rowid AS rid, * FROM listings WHERE rowid > ? AND is_sample = 0 AND data LIKE '%"source":"reddit"%' ORDER BY rowid LIMIT ?`, [rid, limit]);
+      return rows.map(r => ({ rid: r.rid, listing: rowToListing(r) }));
+    },
     async deleteListings(ids) {
       if (!ids.length) return 0;
       const arr = JSON.stringify(ids);

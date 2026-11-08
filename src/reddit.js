@@ -143,92 +143,52 @@ export async function redditStep(repo, env, { fetchFn = fetch, now = Date.now(),
   return { action: done ? 'done' : 'continuing', fetched: cycle.fetched, queue: cycle.queue.length, errors: (cycle.errors || []).length };
 }
 
-// ---------- Public JSON mode (no API key) ----------
-// Used when the OAuth secrets are absent and the admin turned on schedule.redditPublic (off by default; redditEnabled stays the master switch).
-// One GET per watched subreddit per run to old.reddit.com/r/<name>/new.json, honest User-Agent, no cookies,
-// no proxies. Any block (403/429/5xx/HTML) stops Reddit for the run and is never retried around.
-export const PUBLIC_UA = 'FlatHunt/1.0 (+https://flat-hunt.19mnsh.workers.dev)';
-const PUBLIC_MAX_SUBS = 3;        // requests per cron invocation (each ingest page costs ~10 D1 statements)
-const PUBLIC_GAP_MS = 2000;       // pause between requests (waiting is not CPU)
-const BACKOFF_FAILS = 3, BACKOFF_MS = 6 * HOUR;
-export const publicListingUrl = name => `https://old.reddit.com/r/${name}/new.json?limit=50&raw_json=1`;
-/** Which mode would run now: 'api' (OAuth secrets set), 'public' (switched on explicitly) or null. */
-export const redditMode = (env, settings) => redditConfigured(env) ? 'api' : (settings?.schedule?.redditPublic === true && settings.schedule.redditEnabled !== false ? 'public' : null);
+// ---------- Deleted-post clean-up (Reddit Data API terms) ----------
+// Once a day, every stored Reddit post is re-checked with GET /api/info?id=t3_a,t3_b,... (up to 100 ids per
+// call). Posts whose author is [deleted], whose body is [removed]/[deleted], or that Reddit no longer returns
+// are dropped; a listing left with no posts is deleted. One cycle walks the listings by rowid (cursor in
+// settings.redditClean), one /api/info call per cron tick, and starts again 23 h after the last start.
+const INFO_IDS = 100, CLEAN_LISTINGS = 40, CLEAN_MIN_BUDGET = 14;
+export const redditPostId = url => /\/comments\/([a-z0-9]+)(?:\/|$|\?)/i.exec(String(url || ''))?.[1]?.toLowerCase() || null;
+const isGone = d => !d || d.author === '[deleted]' || /^\s*\[(removed|deleted)\]\s*$/i.test(d.selftext || '') || d.removed_by_category === 'deleted';
 
-const sleepMs = ms => new Promise(r => setTimeout(r, ms));
-const queryTest = q => { const words = String(q || '').split(/\s+/).filter(w => w && !/^or$/i.test(w)).map(w => w.toLowerCase()); return words.length ? d => { const t = ((d.title || '') + ' ' + (d.selftext || '')).toLowerCase(); return words.some(w => t.includes(w)); } : () => true; };
-
-export async function redditPublicStep(repo, env, { fetchFn = fetch, now = Date.now(), settings, sch, budget = 30, force = false, sleep = sleepMs }) {
-  const status = { ...(settings.redditStatus || {}), mode: 'public' };
-  if (status.backoffUntil && now < status.backoffUntil) return { action: 'backoff', until: status.backoffUntil };
-  const state = { ...(settings.reddit || {}) };
-  const subs = subredditsOf(settings);
-  let cycle = state.cycle;
-  if (!cycle) {
-    const due = force || !state.lastStartedAt || now - state.lastStartedAt >= sch.intervalHours * HOUR - 5 * 60e3;
-    if (!due || !subs.length) return { action: subs.length ? 'not_due' : 'no_subreddits' };
-    const floor = now - Math.min(5, Math.max(1, sch.backfillDays || 3)) * DAY;
-    const cutoff = Math.max(state.lastGoodStart ? state.lastGoodStart - HOUR : floor, floor);
-    cycle = { key: 'reddit-' + now, startedAt: now, cutoff, queue: subs.map(s => s.name), fetched: 0, errors: [] };
-    await repo.createRun({ source: 'reddit', datasetId: cycle.key, startedAt: now, actor: 'reddit-public-json' });
-    state.lastStartedAt = now;
+export async function redditCleanStep(repo, env, { fetchFn = fetch, now = Date.now(), settings, budget = 30, force = false }) {
+  if (!redditConfigured(env)) return { action: 'not_configured' };
+  if (budget < CLEAN_MIN_BUDGET) return { action: 'low_budget' };
+  let st = { ...(settings.redditClean || {}) };
+  if (st.cursor == null || st.done) {
+    if (!force && st.startedAt && now - st.startedAt < DAY - HOUR) return { action: 'not_due' };
+    st = { startedAt: now, cursor: 0, checked: 0, removed: 0, done: false };
   }
-  const marks = { ...(state.watermarks || {}) };
-  const watched = [...(Array.isArray(settings.groups) ? settings.groups : []), ...subs.map(s => ({ name: 'r/' + s.name, url: 'https://www.reddit.com/r/' + s.name, active: true }))];
-  const ingestSettings = { ...settings, groups: watched };
-  const areas = await repo.listAreas();
-  let report = (await repo.getRunByDataset(cycle.key))?.report || null;
-  let left = budget - 3, requests = 0, blocked = null;
-  while (cycle.queue.length && left >= QUERIES_PER_PAGE * 2 + 2 && requests < PUBLIC_MAX_SUBS) {
-    const name = cycle.queue[0];
-    const sub = subs.find(s => s.name === name) || { name };
-    if (requests) await sleep(PUBLIC_GAP_MS);
-    requests++;
-    let posts, code = 0;
-    try {
-      const r = await fetchFn(publicListingUrl(name), { headers: { 'user-agent': PUBLIC_UA, accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
-      code = r.status;
-      if (!r.ok) throw new Error(`r/${name}: HTTP ${r.status}`);
-      let j; try { j = await r.json(); } catch { throw new Error(`r/${name}: response was not JSON`); }
-      if (!Array.isArray(j?.data?.children)) throw new Error(`r/${name}: unexpected response`);
-      posts = j.data.children.map(c => c?.data).filter(d => d && d.id && !d.stickied);
-    } catch (e) {
-      blocked = { code, error: String(e.message || e).slice(0, 160) };
-      break; // never retry around a block
-    }
-    if (sub.query) posts = posts.filter(queryTest(sub.query));
-    const since = Math.max(cycle.cutoff, marks[name] || 0);
-    const fresh = posts.map(d => ({ d, t: (Number(d.created_utc) || 0) * 1000 })).filter(x => x.t > since).sort((a, b) => a.t - b.t);
-    cycle.fetched += fresh.length;
-    while (fresh.length) { // at most 50 posts = 2 pages
-      const page = fresh.splice(0, PAGE);
-      const res = await ingestItems(repo, page.map(x => toItem(x.d)), { source: 'reddit', now, datasetId: cycle.key, areas, settings: ingestSettings, storeAll: true, env, run: { status: 'ingesting', report } });
-      report = res.runReport;
-      marks[name] = page[page.length - 1].t; // cursor moves only after the page was ingested
-      left -= QUERIES_PER_PAGE;
-    }
-    cycle.queue.shift();
+  const rows = await repo.redditListingsAfter(st.cursor, CLEAN_LISTINGS);
+  const take = []; const ids = new Set();
+  for (const r of rows) {
+    const mine = (r.listing.posts || []).filter(p => p.source === 'reddit').map(p => redditPostId(p.url)).filter(Boolean);
+    if (take.length && ids.size + new Set(mine).size > INFO_IDS) break;
+    mine.forEach(i => ids.add(i)); take.push(r);
   }
-  state.watermarks = marks;
-  let done = false;
-  if (blocked) {
-    cycle.errors = [...(cycle.errors || []), blocked.error];
-    const fails = (status.consecutiveFails || 0) + 1;
-    await repo.finishRun(cycle.key, { status: 'failed', report: { ...(report || {}), source: 'reddit', fetched: cycle.fetched, errors: cycle.errors }, now });
-    state.lastRun = { at: now, startedAt: cycle.startedAt, fetched: cycle.fetched, newListings: report?.newListings || 0, errors: cycle.errors };
-    delete state.cycle;
-    Object.assign(status, { ok: false, code: blocked.code, error: blocked.error, at: now, consecutiveFails: fails, postsRead: cycle.fetched, ...(fails >= BACKOFF_FAILS ? { backoffUntil: now + BACKOFF_MS } : {}) });
-  } else if (!cycle.queue.length) {
-    done = true;
-    await repo.finishRun(cycle.key, { status: 'done', report: { ...(report || {}), source: 'reddit', fetched: cycle.fetched, errors: [] }, now });
-    state.lastRun = { at: now, startedAt: cycle.startedAt, fetched: cycle.fetched, newListings: report?.newListings || 0, errors: [] };
-    state.lastGoodStart = cycle.startedAt;
-    delete state.cycle;
-    Object.assign(status, { ok: true, code: 200, error: null, at: now, lastSuccessAt: now, consecutiveFails: 0, backoffUntil: 0, postsRead: cycle.fetched });
-  } else {
-    state.cycle = cycle;
-    Object.assign(status, { ok: true, code: 200, error: null, at: now, lastSuccessAt: now, consecutiveFails: 0, backoffUntil: 0 });
+  if (!take.length) { await repo.putSettings({ redditClean: { ...st, done: true, finishedAt: now } }); return { action: 'done', checked: st.checked, removed: st.removed }; }
+  let live = new Map();
+  if (ids.size) {
+    const bearer = await token(env, fetchFn, now);
+    const r = await fetchFn(`${REDDIT_API}/api/info?id=${[...ids].map(i => 't3_' + i).join(',')}&raw_json=1`, { headers: { authorization: 'Bearer ' + bearer, 'user-agent': userAgent(env) }, signal: AbortSignal.timeout(10000) });
+    if (r.status === 401) resetRedditToken();
+    if (!r.ok) throw new Error('Reddit info: HTTP ' + r.status); // cursor stays put: retried next tick
+    const j = await r.json();
+    if (!Array.isArray(j?.data?.children)) throw new Error('Reddit info: unexpected response');
+    for (const c of j.data.children) if (c?.data?.id) live.set(String(c.data.id).toLowerCase(), c.data);
   }
-  await repo.putSettings({ reddit: state, redditStatus: status });
-  return { action: blocked ? 'blocked' : done ? 'done' : 'continuing', fetched: cycle.fetched, queue: blocked ? 0 : cycle.queue.length, errors: blocked ? 1 : 0, ...(blocked ? { code: blocked.code } : {}) };
+  const drop = [], update = []; let removed = 0;
+  for (const { listing } of take) {
+    const keep = (listing.posts || []).filter(p => { if (p.source !== 'reddit') return true; const id = redditPostId(p.url); return !id || !isGone(live.get(id)); });
+    const n = (listing.posts || []).length - keep.length;
+    if (!n) continue;
+    removed += n;
+    if (!keep.length) drop.push(listing.id); else { listing.posts = keep; listing.updatedAt = now; update.push(listing); }
+  }
+  if (update.length) await repo.saveIngest({ listings: update, keys: [], run: null, now });
+  if (drop.length) await repo.deleteListings(drop);
+  st.cursor = take[take.length - 1].rid; st.checked += ids.size; st.removed += removed;
+  await repo.putSettings({ redditClean: st });
+  return { action: 'checked', checked: ids.size, removed, listingsDeleted: drop.length };
 }
