@@ -304,12 +304,14 @@ function drawGrid() {
   $('#bline').innerHTML = `<b>${L.length}${state.browse.next ? '+' : ''} listing${L.length === 1 ? '' : 's'}</b> from ${groups.size} group${groups.size === 1 ? '' : 's'}, newest first. Reposts are merged into one card.${state.lastIngestMin != null ? ` Checked ${ago(Date.now() - state.lastIngestMin * 60e3)}.` : ''}`;
   const cells = L.map(l => cardHtml(l, { actions: signedIn() }));
   if (!signedIn()) for (let i = 3; i <= cells.length; i += 13) cells.splice(i, 0, ctaCard());
-  $('#grid').innerHTML = cells.join('') || `<div class="empty"><div class="eboard"></div><p>No listings${state.f.bhk ? ` with ${esc(FILTERS[0][3](state.f.bhk))}` : ''}${state.f.maxRent ? ` under ₹${k(Number(state.f.maxRent))}` : ''} in ${esc(areaName(state.area) || CITY)} yet.</p>${state.area != null || Object.entries(state.f).some(([key, v]) => v && key !== 'sort') ? '<button class="btn" type="button" data-act="clear-filters">Clear filters</button>' : ''}${isAdmin() && !state.browse.items.length ? '<button class="btn" type="button" data-act="samples" id="btn-samples">Import sample posts</button>' : ''}</div>`;
+  const decidedAll = signedIn() && !cells.length && filtered().length > 0; // everything here is on Shortlist or Passed (QA F2)
+  $('#grid').innerHTML = cells.join('') || (decidedAll ? `<div class="empty"><div class="eboard"></div><p>You've been through every listing here${state.browse.next ? ' on this page' : ''}. Liked ones are on your Shortlist, rejected ones under Passed.</p><a class="btn" href="#shortlist">Shortlist</a><a class="btn" href="#passed">Passed</a></div>` : '') || `<div class="empty"><div class="eboard"></div><p>No listings${state.f.bhk ? ` with ${esc(FILTERS[0][3](state.f.bhk))}` : ''}${state.f.maxRent ? ` under ₹${k(Number(state.f.maxRent))}` : ''} in ${esc(areaName(state.area) || CITY)} yet.</p>${state.area != null || Object.entries(state.f).some(([key, v]) => v && key !== 'sort') ? '<button class="btn" type="button" data-act="clear-filters">Clear filters</button>' : ''}${isAdmin() && !state.browse.items.length ? '<button class="btn" type="button" data-act="samples" id="btn-samples">Import sample posts</button>' : ''}</div>`;
   $('#more').innerHTML = state.browse.next ? '<button class="btn" type="button" data-act="more">Show more</button>' : '';
   if (!state.swung && !reduceMotion()) { state.swung = true; $$('#grid .lcard').slice(0, 3).forEach((c, i) => { c.classList.add('swing'); c.style.animationDelay = (i * 60) + 'ms'; }); }
 }
 async function browseClick(e) {
   const ca = e.target.closest('[data-card]');
+  if (e.target.closest('[data-decided]')) return; // a card on its way out ignores further taps (QA F1)
   if (ca) { cardAction(ca.closest('[data-id]'), ca.dataset.card); return; }
   if (e.target.closest('.lacts')) return; // the Post link opens in a new tab
   const open = e.target.closest('[data-open]'); if (open && !e.target.closest('a')) { location.hash = '#listing-' + open.dataset.open; return; }
@@ -331,10 +333,13 @@ async function browseClick(e) {
 function cardAction(card, act) {
   const id = card?.dataset.id; if (!id) return;
   if (act === 'details') { location.hash = '#listing-' + id; return; }
+  if (card.dataset.decided) return; card.dataset.decided = '1'; // a double tap must not record two decisions (QA F1)
   if (!state.listings.has(id)) { const b = state.browse.items.find(x => x.id === id); if (b) state.listings.set(id, { ...b, status: 'new' }); }
   decide(id, act === 'reject' ? 'rejected' : 'approved', { quiet: true });
-  const drop = () => { card.hidden = true; card.classList.remove('lcard'); drawCount(); };
-  if (reduceMotion()) drop(); else { card.classList.add('leaving'); setTimeout(drop, 200); }
+  const drop = () => { card.hidden = true; card.classList.remove('lcard'); drawCount(); if (!$$('#grid .lcard').length) drawGrid(); };
+  // Keep the card's space for a moment even with reduced motion, so the second tap of a double tap
+  // lands on this (ignored) card, not on the next one sliding up (QA F1).
+  card.classList.add('leaving'); setTimeout(drop, reduceMotion() ? 350 : 250);
   renderChrome();
 }
 function drawCount() { const n = $$('#grid .lcard').length; const b = $('#bline b'); if (b) b.textContent = `${n}${state.browse.next ? '+' : ''} listing${n === 1 ? '' : 's'}`; }

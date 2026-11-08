@@ -579,3 +579,4 @@ details.how summary{cursor:pointer;font-weight:700;font-size:var(--fs-14);color:
 .lacts .ca.off{visibility:hidden}
 .lcard.leaving{opacity:0;transform:scale(.96);transition:opacity var(--d2) var(--ease),transform var(--d2) var(--ease)}
 .btn.rej{color:var(--tolet-text);border-color:var(--tolet-text)}
+@media (prefers-reduced-motion:reduce){.lcard.leaving{transition:none;transform:none}}

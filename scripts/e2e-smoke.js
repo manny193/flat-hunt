@@ -149,6 +149,13 @@ async function runViewport(browser, vp) {
       await page.waitForFunction(n => document.querySelectorAll('#grid .lcard.acts').length === n - 1, before);
       await page.reload(); await page.waitForSelector('#grid .lcard.acts');
       assert(await page.locator('#grid .lcard.acts').count() === before - 1, 'still hidden after reload');
+      // QA F1: a double tap records one decision, so one Undo brings the card back.
+      const n2 = await page.locator('#grid .lcard.acts').count();
+      await page.locator('#grid .lcard.acts').first().locator('[data-card="reject"]').dblclick();
+      await page.waitForFunction(n => document.querySelectorAll('#grid .lcard.acts').length === n - 1, n2);
+      assert(await page.evaluate(() => location.hash) === '#browse', 'the second tap did not open a listing');
+      await page.click('#toast-undo');
+      await page.waitForFunction(n => document.querySelectorAll('#grid .lcard.acts').length === n, n2);
     });
     await step(vp.name === 'desktop' ? 'restore from Passed' : 'Details opens the contact sheet', async () => {
       if (vp.name === 'desktop') {
