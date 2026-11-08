@@ -563,3 +563,4 @@ details.how summary{cursor:pointer;font-weight:700;font-size:var(--fs-14);color:
 .post .btn.orig{margin-top:var(--s3)}
 .sfoot .btn.orig{min-height:36px}
 @media (pointer:coarse){.sfoot .btn.orig{min-height:44px}}
+.btn:disabled { opacity: .5; cursor: not-allowed; }

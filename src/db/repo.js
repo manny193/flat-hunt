@@ -619,6 +619,13 @@ export function createRepo(db) {
         WHERE q.user_id = ? AND q.status = 'sent' AND q.sent_at = (SELECT MAX(sent_at) FROM alert_queue WHERE user_id = ? AND status = 'sent')
         ORDER BY l.last_posted_at DESC, q.listing_id LIMIT ?`, [userId, userId, limit]);
     },
+    /** Admin sample alert: the newest offer with an area, preferring the user's alert areas. Allowlisted fields only. */
+    async alertSampleItem(userId) {
+      return db.first(`SELECT m.listing_id, m.area_id, a.name AS area_name, l.bhk, l.rent, json_extract(l.data, '$.type') AS type
+        FROM listing_match m JOIN listings l ON l.id = m.listing_id JOIN areas a ON a.id = m.area_id
+        WHERE m.area_id > 0 AND m.kind = 'offer' AND l.is_sample = 0
+        ORDER BY (m.area_id IN (SELECT area_id FROM alert_areas WHERE user_id = ?)) DESC, m.last_posted_at DESC LIMIT 1`, [userId]);
+    },
     /** #alerts screen: the user's latest alerted listings (pushed or not pushed), full rows, newest first. */
     async alertHistory(userId, limit = 20) {
       const rows = await db.all(`SELECT l.*, q.status AS q_status, q.sent_at AS q_sent_at, q.created_at AS q_created_at FROM alert_queue q JOIN listings l ON l.id = q.listing_id

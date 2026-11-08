@@ -243,7 +243,11 @@ test('alerts API: soft launch and kill switch (off by default, admins only, VAPI
   assert.equal((await h.call('PUT', '/api/alerts/prefs', { quietStart: 23 }, boss.cookie)).data.prefs.quietStart, 23);
   const tid = (await h.call('POST', '/api/alerts/targets', sub(FCM(1)), boss.cookie)).data.id;
   await h.repo.putSettings({ alerts: { enabled: false } });
-  assert.equal((await h.call('POST', '/api/alerts/targets', sub(FCM(2)), boss.cookie)).status, 403);
+  assert.equal((await h.call('POST', '/api/alerts/targets', sub(FCM(2)), u.cookie)).status, 403, 'users are blocked while alerts are off');
+  const off = await h.call('GET', '/api/alerts/config', undefined, boss.cookie);
+  assert.equal(off.data.enabled, true, 'admins can still set up and test devices while alerts are off'); assert.equal(off.data.adminTesting, true);
+  assert.equal((await h.call('POST', '/api/alerts/targets', sub(FCM(2)), boss.cookie)).status, 201);
+  assert.equal((await alertStep(budgeted(h.repo), h.env, { fetchFn: fakePush().fn })).action, 'off', 'the send step stays off for everyone');
   assert.equal((await h.call('DELETE', `/api/alerts/targets/${tid}`, undefined, boss.cookie)).status, 204, 'removing a device works with alerts off');
   const nov = await apiHarness({ vapid: false });
   const x = await nov.sessionFor('boss@example.com');
@@ -626,7 +630,7 @@ test('admin alerts: admin only, counts only, switches validated and stored, test
   assert.deepEqual([r.data.targets.webpush, r.data.usersWithAlerts, r.data.areasWithAlerts], [2, 1, 1]);
   assert.doesNotMatch(r.text, /DEVICE|example\.com|fcm\.googleapis|apple\.com/, 'no endpoints or emails');
   const t = await h.call('POST', '/api/admin/alerts/test', undefined, boss.cookie);
-  assert.equal(t.status, 202); assert.deepEqual(t.data, { sent: 1, failed: 0 });
+  assert.equal(t.status, 202); assert.deepEqual([t.data.sent, t.data.failed, t.data.kind], [1, 0, 'basic']);
   assert.deepEqual(push.calls.map(c => c.url), ['https://web.push.apple.com/BOSS-DEVICE'], "only the admin's own device");
 });
 
@@ -641,4 +645,33 @@ test('VAPID_SUBJECT that is not mailto: or https: keeps alerts idle and admin sh
   const push = fakePush();
   assert.deepEqual(await alertStep(budgeted(h.repo), h.env, { fetchFn: push.fn }), { action: 'off', reason: 'bad_subject' });
   assert.equal(push.calls.length, 0);
+});
+
+test('admin sample alert: real-looking text from the newest listing in the admin\'s alert areas, own devices only, inbox shows it, works while alerts are off', async () => {
+  const push = fakePush();
+  const h = await apiHarness({ alerts: null, fetchFn: push.fn });
+  const boss = await h.sessionFor('boss@example.com'), u = await h.sessionFor('u@example.com');
+  assert.equal((await h.call('POST', '/api/admin/alerts/test', { kind: 'sample' }, u.cookie)).status, 403);
+  await h.call('POST', '/api/alerts/targets', sub('https://web.push.apple.com/BOSS-DEVICE'), boss.cookie);
+  assert.equal((await h.call('POST', '/api/admin/alerts/test', { kind: 'sample' }, boss.cookie)).data.error, 'no_listings');
+  const gg = await h.repo.createArea(GREEN_GLEN, Date.now());
+  const hsr = await h.repo.createArea({ name: 'HSR Layout', keywords: ['hsr layout'] }, Date.now());
+  await ingestItems(h.repo, [
+    { text: '2BHK in Green Glen Layout, rent 31,000. Call 9876543210. Sobha Elite', url: 'https://www.facebook.com/groups/1/posts/1/', author: 'Ravi Kumar', createdAt: new Date(Date.now() - 3600e3).toISOString() },
+    { text: '1BHK in HSR Layout sector 2, rent 18,000 only, newest post here', url: 'https://www.facebook.com/groups/1/posts/2/', createdAt: new Date(Date.now() - 60e3).toISOString() },
+  ], { source: 'apify', storeAll: true });
+  let r = await h.call('POST', '/api/admin/alerts/test', { kind: 'sample' }, boss.cookie);
+  assert.equal(r.status, 202); assert.equal(r.data.sent, 1); assert.equal(r.data.notification.title, 'Sample: New flat in HSR Layout', 'no alert areas: newest listing');
+  assert.equal(r.data.notification.body, '1 BHK · ₹18,000'); assert.match(r.data.notification.url, /^\/#listing-[\w-]+$/);
+  assert.deepEqual((await h.call('GET', '/api/alerts/inbox', undefined, boss.cookie)).data.notification, r.data.notification, 'the service worker shows the sample');
+  await h.repo.linkArea(boss.user.id, gg.id, Date.now());
+  assert.equal((await h.call('PUT', '/api/alerts/areas', { areas: [{ areaId: gg.id }] }, boss.cookie)).status, 200);
+  r = await h.call('POST', '/api/admin/alerts/test', { kind: 'sample' }, boss.cookie);
+  assert.equal(r.data.notification.title, 'Sample: New flat in Green Glen', 'the admin\'s alert area comes first');
+  assert.doesNotMatch(JSON.stringify(r.data), /9876|Sobha|Ravi|facebook/);
+  r = await h.call('POST', '/api/admin/alerts/test', undefined, boss.cookie);
+  assert.equal(r.data.kind, 'basic');
+  assert.deepEqual((await h.call('GET', '/api/alerts/inbox', undefined, boss.cookie)).data.notification, TEST_NOTE, 'a basic test replaces the sample text');
+  assert.ok(push.calls.every(c => c.url === 'https://web.push.apple.com/BOSS-DEVICE'));
+  void hsr;
 });

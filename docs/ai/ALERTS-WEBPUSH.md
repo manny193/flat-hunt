@@ -210,7 +210,7 @@ Inbox selection: the user's rows with the latest `sent_at` (one batch), joined t
 |---|---|---|---|
 | GET | `/api/admin/alerts` | – | `{ enabled, targets: {webpush: n}, usersWithAlerts, areasWithAlerts, queue: {pending, sentToday, cappedToday, expiredToday}, pushesToday, failingTargets, lastRunAt, lastError }`. Counts only, no endpoints, no per-user rows. |
 | PUT | `/api/admin/alerts` | `{ webpush?: bool, maxPushesPerDay?: 100-10000 }` | `{ ...view }`. Writes `settings.alerts`. |
-| POST | `/api/admin/alerts/test` | – | Same as the user test, to the admin's own devices only. Admins cannot push to other users. |
+| POST | `/api/admin/alerts/test` | `{kind?: 'basic'\|'sample'}` | Same as the user test, to the admin's own devices only. Admins cannot push to other users. `sample` builds a real alert (`alertText`) from the newest offer with an area, the admin's alert areas first (`repo.alertSampleItem`), stores it in settings `alertTestNotes[uid]` so the inbox returns it for 10 min, and the tap opens that listing. Admins bypass the global "off" switch for their own devices and tests (not for the send step), so alerts can be tested before launch. |
 
 `/api/export` must not include `alert_targets.address` or `keys`.
 
