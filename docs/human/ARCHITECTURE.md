@@ -4,7 +4,7 @@ A plain-language guide for anyone who wants to understand the app without readin
 
 ## The idea in one paragraph
 
-Fresh flat listings in Bangalore appear first in Facebook groups, and the good ones go fast. Flat Hunt checks those groups for you several times a day. It reads each post, works out the rent, size, deposit and contact details, and merges reposts of the same flat. Then it shows every post on one page, newest first. You can narrow the list to one area. If you sign in, you can swipe through posts, keep a shortlist and see phone numbers.
+Fresh flat listings in Bangalore appear first in Facebook groups, and the good ones go fast. Flat Hunt checks those groups for you several times a day. It reads each post, works out the rent, size, deposit and contact details, and merges reposts of the same flat. Then it shows every post on one page, newest first. You can narrow the list to one area. If you sign in, you can like or reject posts right on the homepage, keep a shortlist and see phone numbers.
 
 ## The big picture
 
@@ -37,7 +37,7 @@ flowchart LR
 ## Who sees what
 
 - **Visitors (not signed in)** see every listing, but no phone numbers, links, author names or building names. Those are removed on the server, so they never reach the browser.
-- **Signed-in users** see full details. They get their own swipe deck for the areas they follow, a shortlist and a "passed" list.
+- **Signed-in users** see full details. They get Reject / Like / Details / Post buttons on every card, a shortlist and a "passed" list.
 - **Admins** also manage the scraper schedule, the list of Facebook groups, users, phone scans and the AI reader.
 
 ## What keeps it safe and cheap

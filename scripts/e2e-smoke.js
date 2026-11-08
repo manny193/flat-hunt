@@ -72,12 +72,13 @@ async function runViewport(browser, vp) {
       assert(!/wa\.me|maps\.app\.goo\.gl|tel:/.test(html), 'no contact links');
     });
     if (vp.name === 'phone') await step('public: tap targets and width', () => phoneLayout(page, ['.tabbar a', '.topbar .btn', '.fchip']));
-    await step('public: details are locked; Review asks to sign in', async () => {
+    await step('public: details are locked; Shortlist asks to sign in; no card buttons', async () => {
       await page.locator('#grid .lcard').first().click();
       await page.waitForSelector('.sheet .lock');
       assert(!MOBILE.test(noIds(await page.content())), 'detail sheet has no phone digits');
       await page.keyboard.press('Escape');
-      await page.goto('/#review');
+      assert(await page.locator('#grid .lacts').count() === 0, 'no Reject/Like buttons for the public');
+      await page.goto('/#shortlist');
       await page.waitForSelector('.sheet .signin-title');
       await page.keyboard.press('Escape');
     });
@@ -105,34 +106,23 @@ async function runViewport(browser, vp) {
       await page.waitForSelector('#grid .lcard .strip:not(.locked)');
       assert(MOBILE.test(await page.locator('#grid').innerText()), 'numbers visible to members');
     });
-    await step('review deck has the new listings', async () => {
-      await page.goto('/#review');
-      await page.waitForSelector('#deck .scard.top');
-      const s = await sub();
-      assert(s === '4 new', 'expected 4 new (5 listings, 1 "looking for" hidden), got ' + s);
+    await step('browse cards have Reject, Like, Details and Post; no Review tab', async () => {
+      await page.waitForSelector('#grid .lcard.acts .lacts');
+      assert(await page.locator('.tabbar a[href="#review"]').count() === 0, 'Review tab removed');
+      const first = page.locator('#grid .lcard.acts').first();
+      assert(await first.locator('[data-card="reject"]').count() === 1 && await first.locator('[data-card="like"]').count() === 1 && await first.locator('[data-card="details"]').count() === 1, 'three buttons');
+      await page.goto('/#review'); await page.waitForFunction(() => location.hash === '#browse'); // old links land on Browse
+      await page.waitForSelector('#grid .lcard.acts');
     });
-    if (vp.name === 'phone') await step('review: tap targets, width, buttons above the tab bar', async () => {
-      await phoneLayout(page, ['.deck-btns .rb', '.tabbar a', '#deck .scard.top .info-btn']);
-      const [btnBottom, tabTop] = await page.evaluate(() => [document.querySelector('.deck-btns').getBoundingClientRect().bottom, document.querySelector('.tabbar').getBoundingClientRect().top]);
-      assert(btnBottom <= tabTop, `deck buttons (${Math.round(btnBottom)}) above the tab bar (${Math.round(tabTop)})`);
-    });
-    const topLabel = async () => (await page.locator('#deck .scard.top').getAttribute('aria-label')) || '';
+    if (vp.name === 'phone') await step('card buttons: tap targets and width', () => phoneLayout(page, ['#grid .lacts .ca', '.tabbar a']));
     let kept = '';
-    await step(vp.name === 'phone' ? 'swipe right to shortlist' : 'press → to shortlist', async () => {
-      kept = await topLabel();
+    await step('Like shortlists a listing', async () => {
+      const card = page.locator('#grid .lcard.acts').first();
+      kept = (await card.getAttribute('aria-label')) || '';
       const patch = page.waitForResponse(r => r.url().includes('/api/listings/') && r.request().method() === 'PATCH' && r.ok());
-      if (vp.name === 'phone') {
-        const box = await page.locator('#deck .scard.top').boundingBox();
-        const y = box.y + box.height * 0.3;
-        await page.mouse.move(box.x + box.width * 0.2, y);
-        await page.mouse.down();
-        for (let i = 1; i <= 12; i++) await page.mouse.move(box.x + box.width * 0.2 + i * 25, y + i);
-        await page.mouse.up();
-      } else {
-        await page.keyboard.press('ArrowRight');
-      }
+      await card.locator('[data-card="like"]').click();
       await patch;
-      await page.waitForFunction(() => document.querySelector('.screen-h .sub')?.textContent.trim() === '3 new');
+      await page.waitForSelector('#grid .lcard.acts [data-card="like"][aria-pressed="true"]');
     });
     await step('shortlisted listing is on Shortlist, also after reload', async () => {
       await page.goto('/#shortlist');
@@ -141,29 +131,31 @@ async function runViewport(browser, vp) {
       await page.waitForSelector('.srow');
       assert(await page.locator('.srow').count() === 1, 'one shortlisted row');
       assert(await page.locator('.srow .stage-pill').inputValue() === 'To call', 'stage To call');
-      const rent = kept.split(' a month')[0].replace(/[₹,]/g, '');
+      const rent = kept.split(' a month')[0].replace(/[₹,≈]/g, '');
       const mini = (await page.locator('.srow .mini b').textContent()).replace('k', '');
       assert(rent.startsWith(mini.replace('.', '')) || Number(rent) === Number(mini) * 1000, `row shows the rent ${rent}: ${mini}`);
       if (vp.name === 'phone') await phoneLayout(page, ['.srow .stage-pill', '.srow .btn']);
     });
-    await step(vp.name === 'phone' ? 'tap Pass on the next card' : 'press ← to pass', async () => {
-      await page.goto('/#review');
-      await page.waitForSelector('#deck .scard.top');
+    await step('Reject hides a card from Browse and puts it on Passed', async () => {
+      await page.goto('/#browse');
+      await page.waitForSelector('#grid .lcard.acts');
+      const before = await page.locator('#grid .lcard.acts').count();
+      const card = page.locator('#grid .lcard.acts [data-card="like"][aria-pressed="false"]').first().locator('xpath=ancestor::article');
       const patch = page.waitForResponse(r => r.url().includes('/api/listings/') && r.request().method() === 'PATCH' && r.ok());
-      if (vp.name === 'phone') await page.click('.rb.passb');
-      else await page.keyboard.press('ArrowLeft');
+      await card.locator('[data-card="reject"]').click();
       await patch;
-      await page.waitForFunction(() => document.querySelector('.screen-h .sub')?.textContent.trim() === '2 new');
+      await page.waitForFunction(n => document.querySelectorAll('#grid .lcard.acts').length === n - 1, before);
+      await page.reload(); await page.waitForSelector('#grid .lcard.acts');
+      assert(await page.locator('#grid .lcard.acts').count() === before - 1, 'still hidden after reload');
     });
-    await step(vp.name === 'desktop' ? 'restore from Passed' : 'open a card\'s details from the deck', async () => {
+    await step(vp.name === 'desktop' ? 'restore from Passed' : 'Details opens the contact sheet', async () => {
       if (vp.name === 'desktop') {
         await page.goto('/#passed'); await page.waitForSelector('.srow');
         assert(await page.locator('.srow').count() === 1, 'one passed row');
         await page.click('.srow [data-restore]');
         await page.waitForSelector('.empty');
       } else {
-        await page.goto('/#review'); await page.waitForSelector('#deck .scard.top');
-        await page.click('#deck .scard.top .info-btn');
+        await page.locator('#grid .lcard.acts [data-card="details"]').first().click();
         await page.waitForSelector('.sheet .contact');
         await page.keyboard.press('Escape');
       }

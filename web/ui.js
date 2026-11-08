@@ -142,8 +142,8 @@ document.addEventListener('keydown', e => {
 const route = () => (location.hash.slice(1) || 'browse');
 function navItems() {
   const c = counts();
-  if (!signedIn()) return [['browse', 'Browse', I.home], ['review', 'Review', I.cards, 0, true], ['shortlist', 'Shortlist', I.star, 0, true], ['signin', 'Sign in', I.user]];
-  return [['browse', 'Browse', I.home], ['review', 'Review', I.cards, c.review], ['shortlist', 'Shortlist', I.star, c.shortlist], ['passed', 'Passed', I.x, 0], ['account', 'Me', I.user]];
+  if (!signedIn()) return [['browse', 'Browse', I.home], ['shortlist', 'Shortlist', I.star, 0, true], ['signin', 'Sign in', I.user]];
+  return [['browse', 'Browse', I.home], ['shortlist', 'Shortlist', I.star, c.shortlist], ['passed', 'Passed', I.x, 0], ['account', 'Me', I.user]];
 }
 const avatar = () => { const u = state.me.user; if (u?.picture) return `<span class="avatar"><img src="${esc(u.picture)}" alt="" referrerpolicy="no-referrer"></span>`; return `<span class="avatar">${esc((u?.name || u?.email || '?').slice(0, 1).toUpperCase())}</span>`; };
 function renderChrome() {
@@ -230,13 +230,24 @@ function origBtn(q, sm = true) {
 }
 const latestUrlPost = l => (l.posts || []).find(q => origUrl(q.url)) || (l.posts || [])[0];
 
-function cardHtml(l) {
+/** Card actions for signed-in users on Browse: Reject, Like (shortlist), Details, Original post. */
+function cardActs(l) {
+  const st = state.listings.get(l.id)?.status || l.status || 'new'; const liked = st === 'approved';
+  const u = origUrl(latestUrlPost(l)?.url);
+  return `<div class="lacts"><button class="ca rej" type="button" data-card="reject" aria-label="Reject">${I.x}<span>Reject</span></button>
+    <button class="ca like${liked ? ' on' : ''}" type="button" data-card="like" aria-pressed="${liked}" aria-label="${liked ? 'Liked. Tap to remove from shortlist' : 'Like: add to shortlist'}">${I.heart}<span>${liked ? 'Liked' : 'Like'}</span></button>
+    <button class="ca" type="button" data-card="details" aria-label="Details">${I.cards}<span>Details</span></button>
+    ${u ? `<a class="ca" href="${esc(u)}" target="_blank" rel="noopener noreferrer" aria-label="Original post">${LINK_ICON}<span>Post</span></a>` : '<span class="ca off" aria-hidden="true"></span>'}</div>`;
+}
+function cardHtml(l, { actions = false } = {}) {
   const imgs = imagesOf(l);
   const group = l.posts?.[0]?.group || l.groups?.[0] || '';
-  return `<button class="lcard" type="button" data-open="${esc(l.id)}" aria-label="${esc((l.rent ? inr(l.rent) + ' a month, ' : '') + typeName(l))}">
+  const label = esc((l.rent ? inr(l.rent) + ' a month, ' : '') + typeName(l));
+  const open = actions ? `<article class="lcard acts" data-open="${esc(l.id)}" data-id="${esc(l.id)}" aria-label="${label}">` : `<button class="lcard" type="button" data-open="${esc(l.id)}" aria-label="${label}">`;
+  return `${open}
     ${imgs.length ? `<div class="photo"><img src="${esc(imgs[0])}" alt="" loading="lazy" referrerpolicy="no-referrer"><span class="count">${I.photo}${imgs.length} photo${imgs.length > 1 ? 's' : ''}</span></div>` : ''}
     ${boardHtml(l)}${chipsHtml(l)}<p class="excerpt">${postHtml(firstText(l))}</p>
-    <div class="meta">${fresh(l) ? '<span class="fresh" aria-label="New"></span>' : ''}<span class="grp">${esc(group)}</span><span>${ago(l.lastPostedAt)}</span><span class="sp"></span>${(l.postCount || l.posts?.length || 0) > 1 || l.seenCount > 1 ? `<span class="reposts">Posted ${l.seenCount || l.postCount}×</span>` : ''}</div></button>`;
+    <div class="meta">${fresh(l) ? '<span class="fresh" aria-label="New"></span>' : ''}<span class="grp">${esc(group)}</span><span>${ago(l.lastPostedAt)}</span><span class="sp"></span>${(l.postCount || l.posts?.length || 0) > 1 || l.seenCount > 1 ? `<span class="reposts">Posted ${l.seenCount || l.postCount}×</span>` : ''}</div>${actions ? cardActs(l) + '</article>' : '</button>'}`;
 }
 
 // ---------- Browse ----------
@@ -288,16 +299,19 @@ async function renderBrowse() {
   drawGrid();
 }
 function drawGrid() {
-  const L = filtered();
+  const L = signedIn() ? filtered().filter(l => state.listings.get(l.id)?.status !== 'rejected') : filtered();
   const groups = new Set(L.flatMap(l => l.groups || []));
   $('#bline').innerHTML = `<b>${L.length}${state.browse.next ? '+' : ''} listing${L.length === 1 ? '' : 's'}</b> from ${groups.size} group${groups.size === 1 ? '' : 's'}, newest first. Reposts are merged into one card.${state.lastIngestMin != null ? ` Checked ${ago(Date.now() - state.lastIngestMin * 60e3)}.` : ''}`;
-  const cells = L.map(cardHtml);
+  const cells = L.map(l => cardHtml(l, { actions: signedIn() }));
   if (!signedIn()) for (let i = 3; i <= cells.length; i += 13) cells.splice(i, 0, ctaCard());
-  $('#grid').innerHTML = cells.join('') || `<div class="empty"><div class="eboard"></div><p>No listings${state.f.bhk ? ` with ${esc(FILTERS[0][3](state.f.bhk))}` : ''}${state.f.maxRent ? ` under ₹${k(Number(state.f.maxRent))}` : ''} in ${esc(areaName(state.area) || CITY)} yet.</p>${state.area != null || Object.entries(state.f).some(([key, v]) => v && key !== 'sort') ? '<button class="btn" type="button" data-act="clear-filters">Clear filters</button>' : ''}</div>`;
+  $('#grid').innerHTML = cells.join('') || `<div class="empty"><div class="eboard"></div><p>No listings${state.f.bhk ? ` with ${esc(FILTERS[0][3](state.f.bhk))}` : ''}${state.f.maxRent ? ` under ₹${k(Number(state.f.maxRent))}` : ''} in ${esc(areaName(state.area) || CITY)} yet.</p>${state.area != null || Object.entries(state.f).some(([key, v]) => v && key !== 'sort') ? '<button class="btn" type="button" data-act="clear-filters">Clear filters</button>' : ''}${isAdmin() && !state.browse.items.length ? '<button class="btn" type="button" data-act="samples" id="btn-samples">Import sample posts</button>' : ''}</div>`;
   $('#more').innerHTML = state.browse.next ? '<button class="btn" type="button" data-act="more">Show more</button>' : '';
   if (!state.swung && !reduceMotion()) { state.swung = true; $$('#grid .lcard').slice(0, 3).forEach((c, i) => { c.classList.add('swing'); c.style.animationDelay = (i * 60) + 'ms'; }); }
 }
 async function browseClick(e) {
+  const ca = e.target.closest('[data-card]');
+  if (ca) { cardAction(ca.closest('[data-id]'), ca.dataset.card); return; }
+  if (e.target.closest('.lacts')) return; // the Post link opens in a new tab
   const open = e.target.closest('[data-open]'); if (open && !e.target.closest('a')) { location.hash = '#listing-' + open.dataset.open; return; }
   const f = e.target.closest('[data-filter]');
   if (f) {
@@ -310,8 +324,24 @@ async function browseClick(e) {
   }
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (act === 'more') { await loadBrowse(true); drawGrid(); }
+  if (act === 'samples') importSamples();
   if (act === 'clear-filters') { state.f = { bhk: '', maxRent: '', type: '', nobroker: false, furnishing: '', sort: 'new' }; store.set('filters', state.f); state.area = null; store.set('area', null); state.browse.key = ''; renderBrowse(); }
 }
+
+function cardAction(card, act) {
+  const id = card?.dataset.id; if (!id) return;
+  if (act === 'details') { location.hash = '#listing-' + id; return; }
+  if (!state.listings.has(id)) { const b = state.browse.items.find(x => x.id === id); if (b) state.listings.set(id, { ...b, status: 'new' }); }
+  const liked = state.listings.get(id)?.status === 'approved';
+  const status = act === 'reject' ? 'rejected' : liked ? 'new' : 'approved';
+  decide(id, status, { quiet: true });
+  if (status === 'rejected') {
+    const drop = () => { card.hidden = true; card.classList.remove('lcard'); drawCount(); };
+    if (reduceMotion()) drop(); else { card.classList.add('leaving'); setTimeout(drop, 200); }
+  } else card.querySelector('.lacts').outerHTML = cardActs(state.listings.get(id));
+  renderChrome();
+}
+function drawCount() { const n = $$('#grid .lcard').length; const b = $('#bline b'); if (b) b.textContent = `${n}${state.browse.next ? '+' : ''} listing${n === 1 ? '' : 's'}`; }
 
 // ---------- listing detail ----------
 async function openListing(id) {
@@ -334,7 +364,7 @@ async function openListing(id) {
     : `<div class="contact">${p ? `<span class="num">+91 ${esc(phoneFmt(p))}</span><div class="row"><a class="btn sm" href="tel:+91${esc(p)}">${I.phone}Call</a><a class="btn sm keep" href="https://wa.me/91${esc(p)}?text=${encodeURIComponent('Hi, is the flat from your post still available?')}" target="_blank" rel="noopener">${I.wa}WhatsApp</a><button class="btn sm quiet" type="button" data-copy="${esc(p)}">${I.copy}Copy</button></div>` : '<span class="small">No phone number in the post.</span>'}
         ${(l.mapLinks || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${I.pin} Map pin</a>`).join('')}</div>`;
   const imgs = imagesOf(l);
-  const userBtns = signedIn() ? `<div class="field-row section-gap">${l.status !== 'approved' ? `<button class="btn keep" type="button" data-decide="approved">${I.heart}Shortlist</button>` : ''}${l.status !== 'rejected' ? `<button class="btn" type="button" data-decide="rejected">${I.x}Pass</button>` : ''}${l.status !== 'new' ? `<button class="btn quiet" type="button" data-decide="new">Back to Review</button>` : ''}</div>` : '';
+  const userBtns = signedIn() ? `<div class="field-row section-gap">${l.status !== 'approved' ? `<button class="btn keep" type="button" data-decide="approved">${I.heart}Like</button>` : ''}${l.status !== 'rejected' ? `<button class="btn rej" type="button" data-decide="rejected">${I.x}Reject</button>` : ''}${l.status && l.status !== 'new' ? `<button class="btn quiet" type="button" data-decide="new">${l.status === 'approved' ? 'Remove from shortlist' : 'Undo reject'}</button>` : ''}</div>` : '';
   s.innerHTML = `<div class="handle"></div><div class="shead"><h2>${esc(typeName(l))}</h2><button class="btn quiet sm" type="button" data-close>Close</button></div>
     ${boardHtml(l)}${chipsHtml(l)}<dl class="facts">${facts.map(([a, b]) => `<div><dt>${a}</dt><dd>${esc(b)}</dd></div>`).join('')}</dl>
     ${contact}${userBtns}
@@ -354,73 +384,27 @@ function openSignin(context) {
   const next = state.base && state.base !== 'signin' ? '/#' + state.base : '/';
   openSheet(`<div class="shead"><span class="plate" aria-hidden="true">TO-LET</span><span class="sp"></span><button class="btn quiet sm" type="button" data-close>Close</button></div>
     <h2 class="signin-title">Sign in to Flat Hunt</h2>${context ? `<p>${esc(context)}</p>` : ''}
-    <ul class="small"><li>Owner's phone, WhatsApp and map pin</li><li>Your own swipe deck and shortlist</li><li>Pick the areas we scan for you</li></ul>
+    <ul class="small"><li>Owner's phone, WhatsApp and map pin</li><li>Like or reject listings, and keep a shortlist</li><li>Pick the areas we scan for you</li></ul>
     ${state.me.login?.google ? `<a class="btn google block" href="/auth/google?next=${encodeURIComponent(next)}">${GOOGLE}Continue with Google</a>` : '<p class="help">Google sign-in is not set up on this server yet.</p>'}
     <p class="small">We only use your name and email. Posters' numbers stay private to signed-in members.</p>${iosSigninNote(esc)}
     ${state.me.login?.password ? `<a class="small" href="/login?next=${encodeURIComponent(next)}">Admin password login</a>` : ''}`, { label: 'Sign in', center: true, route: 'signin' }).onclick = e => { if (e.target.closest('[data-close]')) closeSheet(); };
 }
 
-// ---------- Review deck ----------
-function deckList() { return mine().filter(l => l.status === 'new' && isOffer(l)).sort((a, b) => b.lastPostedAt - a.lastPostedAt); }
-function renderReview() {
-  const main = $('#main'); const L = deckList();
-  main.innerHTML = `<div class="wrap"><div class="screen-h"><h1>Review</h1><span class="sub">${L.length} new</span></div>${L.length ? `<div class="deckwrap"><div class="deck" id="deck">${L.slice(0, 3).reverse().map((l, i, a) => {
-    const pos = a.length - 1 - i;
-    return `<article class="scard ${pos === 0 ? 'top' : 'b' + pos}" data-id="${esc(l.id)}" aria-label="${esc((l.rent ? inr(l.rent) + ' a month' : 'Rent not stated') + ', ' + typeName(l))}"${pos === 0 ? ' tabindex="0"' : ''}>
-      <span class="stamp keep">SHORTLIST</span><span class="stamp pass">PASS</span>${boardHtml(l)}${chipsHtml(l)}<p class="excerpt">${postHtml(firstText(l))}</p>
-      <div class="sfoot">${(l.mapLinks || []).length ? `${I.pin}<span class="on">Map pin</span>` : ''}${imagesOf(l).length ? `${I.photo}<span>${imagesOf(l).length} photos</span>` : ''}<span class="sp"></span>${origBtn(latestUrlPost(l))}<button class="btn quiet sm info-btn" type="button" data-open="${esc(l.id)}">Full post</button></div></article>`;
-  }).join('')}</div>
-    <div class="deck-btns"><button class="rb sm" type="button" data-act="undo" aria-label="Undo"${state.undo.length ? '' : ' disabled'}>${I.undo}</button><button class="rb lg passb" type="button" data-act="pass" aria-label="Pass">${I.x}</button><button class="rb lg keepb" type="button" data-act="keep" aria-label="Shortlist">${I.heart}</button></div>
-    <p class="kbdline"><kbd>←</kbd> pass · <kbd>→</kbd> shortlist · <kbd>↓</kbd> details · <kbd>Z</kbd> undo</p></div>` : reviewEmpty()}</div>`;
-  main.onclick = e => {
-    const o = e.target.closest('[data-open]'); if (o) { location.hash = '#listing-' + o.dataset.open; return; }
-    const act = e.target.closest('[data-act]')?.dataset.act;
-    if (act === 'keep' || act === 'pass') { const t = $('#deck .scard.top'); if (t) fly(t, act === 'keep' ? 1 : -1); }
-    if (act === 'undo') undo();
-    if (act === 'samples') importSamples();
-  };
-  const top = $('#deck .scard.top'); if (top) dragify(top);
-}
-function reviewEmpty() {
-  if (!state.myAreas.length) return `<div class="empty"><div class="eboard"></div><p>Pick the areas you are hunting in, and new listings there land in this deck.</p><a class="btn primary" href="#areas">Choose areas</a></div>`;
-  return `<div class="empty"><div class="eboard"></div><p>You're all caught up. New posts in ${esc(state.myAreas.map(a => a.name).join(', '))} arrive here after each scrape.</p><a class="btn" href="#browse">Browse listings</a>${isAdmin() ? '<button class="btn" type="button" data-act="samples" id="btn-samples">Import sample posts</button>' : ''}</div>`;
-}
+// ---------- shortlist decisions ----------
 async function importSamples() {
   try { const items = await (await fetch('/samples.json', { credentials: 'same-origin' })).json(); const r = await api('POST', '/api/import', { source: 'sample', items }); toast(`${r.report.newListings} new listings from the samples`); await syncListings({ full: true }); render(); } catch (e) { fail(e); }
 }
-function dragify(card) {
-  let x0 = 0, y0 = 0, dx = 0, active = false, horiz = null;
-  const stamps = { keep: $('.stamp.keep', card), pass: $('.stamp.pass', card) };
-  card.addEventListener('pointerdown', e => { if (e.target.closest('button,a')) return; active = true; horiz = null; x0 = e.clientX; y0 = e.clientY; dx = 0; card.setPointerCapture(e.pointerId); card.classList.add('dragging'); card.style.transition = 'none'; });
-  card.addEventListener('pointermove', e => {
-    if (!active) return; dx = e.clientX - x0; const dy = e.clientY - y0;
-    if (horiz == null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) horiz = Math.abs(dx) > Math.abs(dy);
-    if (!horiz) return;
-    card.style.transform = `translateX(${dx}px) rotate(${dx / 20}deg)`;
-    stamps.keep.style.opacity = String(Math.max(0, Math.min(1, dx / 120))); stamps.pass.style.opacity = String(Math.max(0, Math.min(1, -dx / 120)));
-  });
-  const end = () => {
-    if (!active) return; active = false; card.classList.remove('dragging');
-    if (horiz && Math.abs(dx) >= 200) { fly(card, dx > 0 ? 1 : -1); return; }
-    card.style.transition = 'transform var(--d3) var(--spring)'; card.style.transform = ''; stamps.keep.style.opacity = '0'; stamps.pass.style.opacity = '0';
-  };
-  card.addEventListener('pointerup', end); card.addEventListener('pointercancel', end);
-}
-function fly(card, dir) {
-  const id = card.dataset.id;
-  if (!reduceMotion()) { card.style.transition = 'transform var(--d3) var(--ease)'; card.style.transform = `translateX(${dir * 130}%) rotate(${dir * 14}deg)`; }
-  setTimeout(() => decide(id, dir > 0 ? 'approved' : 'rejected'), reduceMotion() ? 0 : 180);
-}
 const writeChains = new Map();
-async function decide(id, status) {
+async function decide(id, status, { quiet = false } = {}) {
   const l = state.listings.get(id); if (!l) return;
   const prev = { status: l.status, stage: l.stage, decidedAt: l.decidedAt };
   Object.assign(l, { status, stage: status === 'approved' ? (l.stage || STAGES[0]) : status === 'new' ? '' : l.stage, decidedAt: Date.now(), hasUpdate: false });
   if (status !== 'new') state.undo.push({ id, prev });
-  render();
+  if (!quiet) render();
   const body = status === 'new' ? { status, stage: '', decidedAt: null } : { status };
   patch(id, body);
-  if (status !== 'new') toast(status === 'approved' ? 'Shortlisted' : 'Passed', { undo });
+  if (status !== 'new') toast(status === 'approved' ? 'Added to your shortlist' : 'Rejected. You can find it under Passed.', { undo });
+  else if (quiet) toast('Removed from your shortlist');
 }
 function patch(id, body) {
   const chain = (writeChains.get(id) || Promise.resolve()).catch(() => {}).then(async () => { const r = await api('PATCH', `/api/listings/${encodeURIComponent(id)}`, body); state.listings.set(id, r); return r; });
@@ -437,13 +421,6 @@ function undo() {
 document.addEventListener('keydown', e => {
   if ($('.sheet') || e.target.closest('input,textarea,select') || e.metaKey || e.ctrlKey || e.altKey) return;
   const r = route();
-  if (r === 'review') {
-    const t = $('#deck .scard.top');
-    if (e.key === 'ArrowRight' && t) { e.preventDefault(); fly(t, 1); }
-    else if (e.key === 'ArrowLeft' && t) { e.preventDefault(); fly(t, -1); }
-    else if (e.key === 'ArrowDown' && t) { e.preventDefault(); location.hash = '#listing-' + t.dataset.id; }
-    else if (e.key.toLowerCase() === 'z') undo();
-  }
   if (e.key === '/' && r === 'browse') { e.preventDefault(); areaPicker(); }
   const n = ['1', '2', '3', '4'].indexOf(e.key); if (n >= 0) { const items = navItems(); if (items[n]) location.hash = '#' + items[n][0]; }
 });
@@ -466,7 +443,7 @@ function renderShortlist() {
   const q = (state.slq || '').toLowerCase();
   const F = q ? L.filter(l => JSON.stringify([l.notes, l.society, l.posts?.[0]?.text]).toLowerCase().includes(q)) : L;
   $('#main').innerHTML = `<div class="wrap"><div class="screen-h"><h1>Shortlist</h1><span class="sub">${L.length}</span><span class="sp"></span><input class="input" id="slq" placeholder="Search notes" value="${esc(state.slq || '')}"></div>
-    ${F.length ? STAGES.map(s => { const R = F.filter(l => (l.stage || STAGES[0]) === s); return R.length ? `<h2 class="stage-h">${esc(s)} · ${R.length}</h2><div class="rows">${R.map(l => rowHtml(l)).join('')}</div>` : ''; }).join('') : '<div class="empty"><div class="eboard"></div><p>Nothing shortlisted yet. Swipe right in Review to keep a listing.</p><a class="btn" href="#review">Go to Review</a></div>'}</div>`;
+    ${F.length ? STAGES.map(s => { const R = F.filter(l => (l.stage || STAGES[0]) === s); return R.length ? `<h2 class="stage-h">${esc(s)} · ${R.length}</h2><div class="rows">${R.map(l => rowHtml(l)).join('')}</div>` : ''; }).join('') : '<div class="empty"><div class="eboard"></div><p>Nothing shortlisted yet. Tap the heart on a listing to keep it here.</p><a class="btn" href="#browse">Browse listings</a></div>'}</div>`;
   $('#slq').addEventListener('input', e => { state.slq = e.target.value; const pos = e.target.selectionStart; renderShortlist(); const i = $('#slq'); i.focus(); i.setSelectionRange(pos, pos); });
   rowsEvents();
 }
@@ -1130,9 +1107,9 @@ async function renderUsers() {
 const alertsUI = createAlertsUI({ api, esc, toast, fail, openSheet, closeSheet, cardHtml });
 
 // ---------- router ----------
-const SCREENS = { browse: renderBrowse, review: renderReview, shortlist: renderShortlist, passed: renderPassed, areas: renderAreas, account: renderAccount, alerts: () => alertsUI.renderScreen($('#main')), 'admin-alerts': () => alertsUI.renderAdmin($('#main'), adminHead),
+const SCREENS = { browse: renderBrowse, shortlist: renderShortlist, passed: renderPassed, areas: renderAreas, account: renderAccount, alerts: () => alertsUI.renderScreen($('#main')), 'admin-alerts': () => alertsUI.renderAdmin($('#main'), adminHead),
   'admin-scraper': renderScraper, 'admin-finance': renderFinance, 'admin-groups': renderGroups, 'admin-groups-performance': renderGroupPerf, 'admin-phone': renderPhone, 'admin-ai': renderAi, 'admin-data': renderData, 'admin-users': renderUsers };
-const LOCKED = { alerts: 'Sign in to get alerts for new flats in your areas.', review: 'Sign in to get your own swipe deck.', shortlist: 'Sign in to keep a shortlist.', passed: 'Sign in to keep a shortlist.', areas: 'Sign in to pick your areas.', account: '' };
+const LOCKED = { alerts: 'Sign in to get alerts for new flats in your areas.', shortlist: 'Sign in to keep a shortlist.', passed: 'Sign in to keep a shortlist.', areas: 'Sign in to pick your areas.', account: '' };
 async function render() {
   chartObservers.splice(0).forEach(o => o.disconnect());
   let r = route();
@@ -1151,7 +1128,7 @@ async function render() {
 async function renderScreen(r) { try { await SCREENS[r](); } catch (e) { fail(e); } }
 let booted = false; // a hash change during boot is picked up by boot's own render()
 addEventListener('hashchange', () => { if (!booted) return; render(); $('#main').focus({ preventScroll: true }); });
-document.addEventListener('visibilitychange', async () => { if (document.visibilityState === 'visible' && signedIn()) { try { await syncListings(); renderChrome(); if (['review', 'shortlist', 'passed'].includes(route())) render(); } catch { /* offline */ } } });
+document.addEventListener('visibilitychange', async () => { if (document.visibilityState === 'visible' && signedIn()) { try { await syncListings(); renderChrome(); if (['shortlist', 'passed'].includes(route())) render(); } catch { /* offline */ } } });
 
 // ---------- boot ----------
 (async function boot() {
