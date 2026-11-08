@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Finance & budget mockup</title>
+<!-- Static mockup for docs/design/FINANCE.md. Not shipped. Inline CSS/JS here only; in the app, CSS goes in web/app.css and logic in web/ui.js (CSP script-src/style-src 'self'). Numbers match the spec's worked example (8 Nov 2026). Resize to 375 px for the phone layout. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,600;0,700;1,400&family=Atkinson+Hyperlegible+Mono:wght@500;700&display=swap">
+<style>
+:root{
+  --bg:#F1F2EE; --surface:#FFFFFF; --sunk:#E7E9E4;
+  --line:#DADDD6; --line-strong:#C3C7BF;
+  --ink:#15191A; --ink-2:#3A4240; --muted:#5B6461;
+  --tolet:#C8221F; --tolet-text:#C8221F; --tolet-soft:#FBE4E1; --on-tolet:#FFFFFF;
+  --keep:#11774A; --keep-soft:#DCEFE4; --on-keep:#FFFFFF;
+  --pass:#5A636C; --pass-soft:#E7EAEC;
+  --amber:#8F5400; --amber-soft:#F6E9D2;
+  --info:#245C8F; --info-soft:#E0EAF4;
+  --chart-match:#245C8F; --chart-off:#C9CEC6; --chart-grid:#E3E6E0;
+  --e1:0 1px 2px rgb(21 25 26/.06),0 0 0 1px var(--line);
+  --focus:0 0 0 2px var(--bg),0 0 0 4px var(--info);
+  --display:"Archivo","Arial Narrow",Arial,sans-serif;
+  --body:"Atkinson Hyperlegible Next","Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --fs-12:.75rem; --fs-14:.875rem; --fs-16:1rem; --fs-18:1.125rem; --fs-20:1.25rem; --fs-32:2rem;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px;
+  --r-ctl:12px; --r-card:18px; --r-pill:999px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#111517; --surface:#181D20; --sunk:#22282B;
+  --line:#2C3336; --line-strong:#3D4549;
+  --ink:#ECEFED; --ink-2:#C9D0CD; --muted:#9AA4A1;
+  --tolet:#C42A24; --tolet-text:#FF6B5F; --tolet-soft:#3A1A18;
+  --keep:#4CC68A; --keep-soft:#163023; --on-keep:#0B1F14;
+  --pass:#8C969F; --pass-soft:#23292D;
+  --amber:#E9A94B; --amber-soft:#33270F;
+  --info:#8DB6DD; --info-soft:#1A2836;
+  --chart-match:#8DB6DD; --chart-off:#3A4246; --chart-grid:#262D30;
+  --e1:0 0 0 1px var(--line),inset 0 1px 0 rgb(255 255 255/.03);
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111517; --surface:#181D20; --sunk:#22282B;
+  --line:#2C3336; --line-strong:#3D4549;
+  --ink:#ECEFED; --ink-2:#C9D0CD; --muted:#9AA4A1;
+  --tolet:#C42A24; --tolet-text:#FF6B5F; --tolet-soft:#3A1A18;
+  --keep:#4CC68A; --keep-soft:#163023; --on-keep:#0B1F14;
+  --pass:#8C969F; --pass-soft:#23292D;
+  --amber:#E9A94B; --amber-soft:#33270F;
+  --info:#8DB6DD; --info-soft:#1A2836;
+  --chart-match:#8DB6DD; --chart-off:#3A4246; --chart-grid:#262D30;
+  --e1:0 0 0 1px var(--line),inset 0 1px 0 rgb(255 255 255/.03);
+  color-scheme:dark}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:var(--fs-16);line-height:1.5}
+a{color:var(--info)}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:none;box-shadow:var(--focus)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.app{display:grid;grid-template-columns:1fr;min-height:100dvh}
+@media (min-width:900px){.app{grid-template-columns:240px 1fr}}
+.rail{display:none;background:var(--surface);box-shadow:var(--e1);padding:var(--s4)}
+@media (min-width:900px){.rail{display:block}}
+.rail .brand{font-family:var(--display);font-weight:800;font-stretch:74%;font-size:var(--fs-20)}
+.rail h3{font-size:var(--fs-12);color:var(--muted);margin:var(--s6) 0 var(--s2)}
+.rail a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;color:var(--ink-2);text-decoration:none;font-weight:600;font-size:var(--fs-14)}
+.rail a[aria-current]{background:var(--sunk);color:var(--ink)}
+.rail svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.wrap{padding:var(--s4);max-width:1240px;width:100%;min-width:0}
+@media (min-width:900px){.wrap{padding:var(--s6)}}
+.ahead{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s3);margin-bottom:var(--s4)}
+.ahead h1{font-family:var(--display);font-stretch:74%;font-weight:800;font-size:var(--fs-32);line-height:1;margin:0}
+.ahead .sp{flex:1}
+.fresh{font-size:var(--fs-12);color:var(--muted)}
+@media (max-width:520px){.ahead h1{flex-basis:100%}.ahead .sp{display:none}.ahead .fresh{flex-basis:100%;order:3}.ahead .btn{order:4}}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);min-height:44px;padding:0 var(--s4);border-radius:var(--r-ctl);border:1px solid var(--line-strong);background:var(--surface);font-weight:700;font-size:var(--fs-14);white-space:nowrap;cursor:pointer;text-decoration:none;color:var(--ink)}
+.btn:hover{border-color:var(--ink-2)}
+.btn.sm{min-height:36px;padding:0 var(--s3)}
+.btn.quiet{background:transparent;border-color:transparent}
+.btn.keep{background:var(--keep);border-color:var(--keep);color:var(--on-keep)}
+@media (pointer:coarse){.btn,.btn.sm{min-height:44px}}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-12);font-weight:700;padding:2px 8px;border-radius:var(--r-pill);background:var(--pass-soft);color:var(--ink-2);white-space:nowrap}
+.pill.ok{background:var(--keep-soft);color:var(--keep)}
+.pill.warn{background:var(--amber-soft);color:var(--amber)}
+.pill.bad{background:var(--tolet-soft);color:var(--tolet-text)}
+.pill.run{background:var(--info-soft);color:var(--info)}
+.verdict{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--e1);padding:var(--s4) var(--s5);border-left:4px solid var(--pass);font-size:var(--fs-18);line-height:1.45}
+.verdict[data-s="ok"]{border-left-color:var(--keep)}
+.verdict[data-s="watch"]{border-left-color:var(--amber)}
+.verdict[data-s="over"]{border-left-color:var(--tolet)}
+.verdict p{margin:0}
+.verdict .sub{margin-top:var(--s2);font-size:var(--fs-14);color:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s3);margin-top:var(--s4)}
+@media (max-width:900px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{background:var(--surface);border-radius:14px;box-shadow:var(--e1);padding:var(--s4);display:flex;flex-direction:column;gap:2px;min-width:0}
+.kpi .k{font-size:var(--fs-14);color:var(--muted);font-weight:600}
+.kpi .v{font-family:var(--display);font-stretch:72%;font-weight:800;font-size:var(--fs-32);line-height:1.05;font-variant-numeric:tabular-nums}
+.kpi .v small{font-size:var(--fs-16);color:var(--muted);font-stretch:85%;font-weight:700;white-space:nowrap}
+.kpi .d{font-size:var(--fs-12);color:var(--muted)}
+.up{color:var(--keep);font-weight:700}
+.warn-t{color:var(--amber);font-weight:700}
+.meter{position:relative;height:8px;border-radius:8px;background:var(--sunk);margin:var(--s2) 0 var(--s1)}
+.meter i{position:absolute;inset:0 auto 0 0;border-radius:8px;background:var(--keep)}
+.meter i.mid{background:var(--amber)}
+.meter i.hi{background:var(--tolet)}
+.meter .tick{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink-2);border-radius:1px}
+.meter.cycle i{background:var(--pass)}
+.meter .tick.pause{background:var(--amber)}
+.meter.sm{height:6px;margin:var(--s1) 0 0;min-width:80px}
+/* mockup-only widths (the app sets these via CSSOM) */
+.w37{width:37%}.w25{width:25%}.w31{width:31%}.w3{width:3%}.w1{width:1%}.l80{left:80%}.l95{left:95%}.l73{left:73%}
+.spark{width:100%;height:28px;margin-top:var(--s1)}
+.spark path{fill:none;stroke:var(--chart-match);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.panel{background:var(--surface);border-radius:var(--r-card);box-shadow:var(--e1);padding:var(--s4) var(--s4) var(--s3);margin-top:var(--s4);min-width:0}
+.panel h2{font-family:var(--display);font-stretch:85%;font-weight:800;font-size:var(--fs-20);margin:0}
+.phead{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);margin-bottom:var(--s3)}
+.help{color:var(--muted);font-size:var(--fs-14);margin:var(--s2) 0}
+.small{font-size:var(--fs-12);color:var(--muted)}
+.sugg-list{list-style:none;margin:0;padding:0}
+.sugg{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:var(--s2) var(--s3);padding:var(--s3) 0;border-bottom:1px solid var(--line);font-size:var(--fs-14)}
+.sugg:last-child{border-bottom:0}
+.sugg .save{color:var(--keep);font-weight:700;white-space:nowrap}
+@media (max-width:720px){.sugg{grid-template-columns:1fr;justify-items:start}.sugg .btn{width:100%}}
+.charts{display:grid;gap:var(--s4);grid-template-columns:1fr;margin-top:var(--s4)}
+@media (min-width:1100px){.charts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.charts .panel{margin-top:0}
+.legend{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);font-size:var(--fs-12);color:var(--muted);font-weight:600}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:3px;background:var(--chart-match)}
+.legend i.off{background:var(--chart-off)}
+.legend i.proj{background:none;border-top:2px dashed var(--chart-match);border-radius:0;height:0;width:14px}
+.legend i.bud{background:none;border-top:1px dashed var(--ink-2);border-radius:0;height:0;width:14px}
+svg.chart{width:100%;height:auto;display:block;overflow:visible}
+.chart .grid{stroke:var(--chart-grid);stroke-width:1}
+.chart .base{stroke:var(--line-strong)}
+.chart .ax{fill:var(--muted);font:600 11px var(--body);font-variant-numeric:tabular-nums}
+.chart .s-match{fill:var(--chart-match)}
+.chart .s-off{fill:var(--chart-off)}
+.chart .s-cum{fill:none;stroke:var(--chart-match);stroke-width:2}
+.chart .s-dot{fill:var(--chart-match)}
+.chart .s-proj{fill:none;stroke:var(--chart-match);stroke-width:2;stroke-dasharray:4 4;opacity:.7}
+.chart .s-bud{stroke:var(--ink-2);stroke-width:1;stroke-dasharray:2 3}
+.chart .s-share{stroke:var(--muted);stroke-width:1;stroke-dasharray:4 4}
+.chart .s-pause{stroke:var(--amber);stroke-width:1}
+.chart .t-pause{fill:var(--amber);font:700 11px var(--body)}
+.chart .t-bud{fill:var(--ink-2);font:600 11px var(--body)}
+.chart .hit{fill:transparent}
+.tscroll{overflow-x:auto}
+.tbl{width:100%;border-collapse:collapse;font-size:var(--fs-14)}
+.tbl th{text-align:left;font-size:var(--fs-12);font-weight:600;color:var(--muted);padding:var(--s2) var(--s3);border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{padding:var(--s3);border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums;vertical-align:top}
+.tbl td.n,.tbl th.n{text-align:right}
+.tbl tbody tr:last-child td{border-bottom:0}
+.tbl tfoot td{font-weight:700;border-top:1px solid var(--line-strong);border-bottom:0}
+.tbl tbody tr:hover{background:var(--bg)}
+.tbl tr[tabindex]{cursor:pointer}
+.sharebar{display:block;width:100px;height:6px;margin-top:var(--s1)}
+.sharebar .tr{fill:var(--sunk)}.sharebar .fl{fill:var(--chart-match)}
+@media (max-width:720px){
+  .tbl thead{display:none}
+  .tbl,.tbl tbody,.tbl tfoot,.tbl tr,.tbl td{display:block}
+  .tbl tr{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--s2) var(--s3);padding:var(--s3) 0;border-bottom:1px solid var(--line)}
+  .tbl td{border:0!important;padding:0;text-align:left!important;white-space:normal}
+  .tbl td::before{content:attr(data-l);display:block;font-size:var(--fs-12);color:var(--muted);font-weight:600}
+  .tbl td.first{grid-column:1/3;font-weight:700}
+  .tbl td.first::before,.tbl td.stat::before{display:none}
+  .tbl td.stat{grid-column:3;text-align:right!important}
+  .tbl td:empty{display:none}
+}
+.calc{display:grid;gap:var(--s4)}
+@media (min-width:720px){.calc{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.lbl{display:block;font-size:var(--fs-14);font-weight:700;margin:var(--s3) 0 var(--s1)}
+.lbl:first-child{margin-top:0}
+.input{width:100%;min-height:44px;border-radius:var(--r-ctl);border:1px solid var(--line-strong);background:var(--surface);padding:var(--s2) var(--s3);font-variant-numeric:tabular-nums}
+.input[aria-invalid="true"]{border-color:var(--tolet-text)}
+.err{color:var(--tolet-text);font-size:var(--fs-12);font-weight:700;margin-top:var(--s1)}
+.stepper{display:inline-flex;align-items:center;border:1px solid var(--line-strong);border-radius:var(--r-ctl);overflow:hidden;background:var(--surface)}
+.stepper button{width:44px;height:44px;border:0;background:var(--sunk);font-size:var(--fs-18);font-weight:700;cursor:pointer}
+.stepper input{width:64px;height:44px;border:0;text-align:center;background:transparent;font-weight:700;font-variant-numeric:tabular-nums}
+.ro{font-weight:700}
+.calc output{display:block;background:var(--sunk);border-radius:14px;padding:var(--s4);font-size:var(--fs-14)}
+.calc output .v{font-family:var(--display);font-stretch:72%;font-weight:800;font-size:var(--fs-32);line-height:1.05;font-variant-numeric:tabular-nums}
+.calc output .v small{font-size:var(--fs-16);color:var(--muted);font-stretch:85%}
+.calc output.stale .v{opacity:.45}
+.calc output p{margin:var(--s2) 0 0}
+.mini{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s4);margin:var(--s3) 0 0;font-size:var(--fs-12);color:var(--muted)}
+.mini dt{display:inline}.mini dd{display:inline;margin:0 0 0 4px;color:var(--ink-2);font-weight:700}
+details summary{cursor:pointer;font-weight:700;font-size:var(--fs-14);color:var(--ink-2);min-height:44px;display:flex;align-items:center}
+.gallery{display:grid;gap:var(--s3);grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+.gallery h3{font-size:var(--fs-12);color:var(--muted);margin:0 0 var(--s2)}
+.gallery .verdict{font-size:var(--fs-16)}
+.tag{display:inline-block;font-size:var(--fs-12);font-weight:700;color:var(--muted);border:1px dashed var(--line-strong);border-radius:8px;padding:2px 8px;margin:var(--s6) 0 var(--s2)}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="brand">Flat Hunt</div>
+    <h3>Admin</h3>
+    <a href="#admin-scraper"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Scraper</a>
+    <a href="#admin-finance" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M14.8 9.2c-.5-.8-1.5-1.2-2.8-1.2-1.7 0-2.8.8-2.8 2s1.1 1.7 2.8 2 2.8.8 2.8 2-1.1 2-2.8 2c-1.3 0-2.3-.4-2.8-1.2M12 6.5V8M12 16v1.5"/></svg>Finance &amp; budget</a>
+    <a href="#admin-groups"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="13" height="17" rx="2"/><path d="M20 6v13a2 2 0 0 1-2 2H8"/></svg>Groups</a>
+    <a href="#admin-phone"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/></svg>Phone scans</a>
+    <a href="#admin-ai"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>AI extraction</a>
+    <a href="#admin-data"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>Data</a>
+    <a href="#admin-users"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Users</a>
+  </nav>
+
+  <main class="wrap" id="main">
+    <!-- A. Header -->
+    <div class="ahead">
+      <h1>Finance &amp; budget</h1>
+      <span class="pill warn">On track to go over</span>
+      <span class="fresh">Usage read 12 min ago</span>
+      <span class="sp"></span>
+      <button class="btn" type="button">Refresh usage</button>
+      <button class="btn" type="button">Set budget</button>
+    </div>
+
+    <!-- B. Verdict -->
+    <section class="verdict" data-s="watch" aria-labelledby="fin-verdict-h">
+      <h2 id="fin-verdict-h" class="sr">Summary</h2>
+      <p><strong>On track to go over.</strong> $1.86 spent of your $5.00 budget. At $0.19 a day you'll reach about $6.14 by 1 Dec. Scraping pauses on 23 Nov when Apify credit hits 95%.</p>
+    </section>
+
+    <!-- C. KPIs -->
+    <section class="kpis" aria-label="This cycle at a glance">
+      <div class="kpi"><span class="k">Spent this cycle</span><span class="v">$1.86<small> of $5.00</small></span>
+        <div class="meter" role="meter" aria-label="Spent this cycle" aria-valuemin="0" aria-valuemax="5" aria-valuenow="1.86" aria-valuetext="37% of budget"><i class="w37 mid"></i><span class="tick l80" title="Warn at 80%: posts per group halve"></span><span class="tick l95" title="Stop at 95%: runs pause"></span></div>
+        <span class="d">37% of budget · day 8 of 30</span></div>
+      <div class="kpi"><span class="k">Projected at cycle end</span><span class="v">$6.14</span>
+        <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path vector-effect="non-scaling-stroke" d="M0,2L14.3,3.7L28.6,8L42.9,9.7L57.1,10.6L71.4,12.3L85.7,13.1L100,18.3"/></svg>
+        <span class="d">at $0.19/day, last 7 days · <span class="warn-t">$1.14 over</span></span></div>
+      <div class="kpi"><span class="k">Scraping pauses</span><span class="v">23 Nov</span>
+        <div class="meter cycle" aria-hidden="true"><i class="w25"></i><span class="tick pause l73"></span></div>
+        <span class="d">15 days from now · fetches halve from 19 Nov</span></div>
+      <div class="kpi"><span class="k">Cost per new listing</span><span class="v">$0.008</span>
+        <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path vector-effect="non-scaling-stroke" d="M0,6L14.3,8L28.6,12L42.9,11L57.1,15L71.4,14L85.7,17L100,16"/></svg>
+        <span class="d"><span class="up">18% cheaper</span> than previous 7 days</span></div>
+    </section>
+
+    <!-- D. What to change -->
+    <section class="panel" aria-labelledby="h-sugg">
+      <div class="phead"><h2 id="h-sugg">What to change</h2></div>
+      <ul class="sugg-list">
+        <li class="sugg"><span class="pill warn">Watch</span><span>At $0.19 a day you'll pass your budget around 25 Nov. Pausing "Bangalore Flat &amp; Flatmates" would bring the cycle to about $4.92.</span><span class="save">Saves about $1.22 this cycle</span><a class="btn sm" href="#admin-groups">Review groups</a></li>
+        <li class="sugg"><span class="pill warn">Watch</span><span>1 group hit the 30-post cap in recent runs, so some posts were skipped: "HSR Layout Rentals". Add a run hour in the longest gap (9 PM to 6 AM, 9 h) rather than raising the cap; extra runs cost about $0.0002 each.</span><span></span><button class="btn sm" type="button">Open schedule</button></li>
+      </ul>
+    </section>
+
+    <!-- E. Charts -->
+    <div class="charts">
+      <section class="panel" aria-labelledby="h-ch1">
+        <div class="phead"><h2 id="h-ch1">Spend this cycle vs budget</h2><div class="legend"><span><i></i>Spent</span><span><i class="proj"></i>Projected</span><span><i class="bud"></i>Budget</span></div></div>
+        <svg class="chart" role="img" viewBox="0 0 600 200" aria-describedby="ch-same"><title>Spend this cycle vs budget</title><desc>Spent $1.86 of a $5.00 budget by 8 Nov. Projected $6.14 by 1 Dec. Scraping pauses 23 Nov.</desc>
+          <line class="grid base" x1="40" x2="592" y1="176" y2="176"/><text class="ax" x="34" y="180" text-anchor="end">$0</text>
+          <line class="grid" x1="40" x2="592" y1="134" y2="134"/><text class="ax" x="34" y="138" text-anchor="end">$2.50</text>
+          <line class="grid" x1="40" x2="592" y1="92" y2="92"/><text class="ax" x="34" y="96" text-anchor="end">$5</text>
+          <line class="grid" x1="40" x2="592" y1="50" y2="50"/><text class="ax" x="34" y="54" text-anchor="end">$7.50</text>
+          <line class="grid" x1="40" x2="592" y1="8" y2="8"/><text class="ax" x="34" y="12" text-anchor="end">$10</text>
+          <line class="s-bud" x1="40" x2="592" y1="92" y2="92"/><text class="t-bud" x="590" y="87" text-anchor="end">Budget $5.00 (= Apify credit)</text>
+          <line class="s-pause" x1="454" x2="454" y1="16" y2="176"/><text class="t-pause" x="454" y="12" text-anchor="middle">Pauses</text>
+          <path class="s-proj" d="M178,144.8L582.8,72.8"/>
+          <path class="s-cum" d="M49.2,170.5L67.6,165.2L86,161L104.4,157.2L122.8,153.5L141.2,150.1L159.6,146.9L178,144.8"/>
+          <circle class="s-dot" cx="178" cy="144.8" r="3.5"/>
+          <g><title>8 Nov: $1.86 spent so far ($0.12 that day, 5 runs)</title><rect class="hit" x="168.8" y="8" width="18.4" height="168"/></g>
+          <g><title>7 Nov: $1.73 spent so far ($0.18 that day, 8 runs)</title><rect class="hit" x="150.4" y="8" width="18.4" height="168"/></g>
+          <text class="ax" x="49.2" y="194" text-anchor="middle">1 Nov</text><text class="ax" x="122.8" y="194" text-anchor="middle">5 Nov</text><text class="ax" x="196.4" y="194" text-anchor="middle">9 Nov</text><text class="ax" x="270" y="194" text-anchor="middle">13 Nov</text><text class="ax" x="343.6" y="194" text-anchor="middle">17 Nov</text><text class="ax" x="417.2" y="194" text-anchor="middle">21 Nov</text><text class="ax" x="490.8" y="194" text-anchor="middle">25 Nov</text><text class="ax" x="564.4" y="194" text-anchor="middle">29 Nov</text>
+        </svg>
+      </section>
+      <section class="panel" aria-labelledby="h-ch2">
+        <div class="phead"><h2 id="h-ch2">Daily spend</h2><div class="legend"><span><i></i>Posts fetched</span><span><i class="off"></i>Platform and group details</span></div></div>
+        <svg class="chart" role="img" viewBox="0 0 600 200" aria-describedby="ch-same"><title>Daily spend</title><desc>Daily spend this cycle. Average $0.19 a day over the last 7 days; highest $0.31 on 1 Nov.</desc>
+          <line class="grid base" x1="40" x2="592" y1="176" y2="176"/><text class="ax" x="34" y="180" text-anchor="end">$0</text>
+          <line class="grid" x1="40" x2="592" y1="134" y2="134"/><text class="ax" x="34" y="138" text-anchor="end">$0.10</text>
+          <line class="grid" x1="40" x2="592" y1="92" y2="92"/><text class="ax" x="34" y="96" text-anchor="end">$0.20</text>
+          <line class="grid" x1="40" x2="592" y1="50" y2="50"/><text class="ax" x="34" y="54" text-anchor="end">$0.30</text>
+          <line class="grid" x1="40" x2="592" y1="8" y2="8"/><text class="ax" x="34" y="12" text-anchor="end">$0.40</text>
+          <g><title>1 Nov: $0.31 (258 rows, 8 runs, 31 new listings)</title><rect class="s-match" x="42.75" y="45.8" width="12.9" height="130.2"/><rect class="s-off" x="42.75" y="44.8" width="12.9" height="1"/></g>
+          <g><title>2 Nov: $0.29 (240 rows, 8 runs, 29 new listings)</title><rect class="s-match" x="61.15" y="54.2" width="12.9" height="121.8"/><rect class="s-off" x="61.15" y="53.2" width="12.9" height="1"/></g>
+          <g><title>3 Nov: $0.24 (199 rows, 8 runs, 30 new listings)</title><rect class="s-match" x="79.55" y="75.2" width="12.9" height="100.8"/><rect class="s-off" x="79.55" y="74.2" width="12.9" height="1"/></g>
+          <g><title>4 Nov: $0.22 (182 rows, 8 runs, 27 new listings)</title><rect class="s-match" x="97.95" y="83.6" width="12.9" height="92.4"/><rect class="s-off" x="97.95" y="82.6" width="12.9" height="1"/></g>
+          <g><title>5 Nov: $0.21 (174 rows, 8 runs, 26 new listings)</title><rect class="s-match" x="116.35" y="87.8" width="12.9" height="88.2"/><rect class="s-off" x="116.35" y="86.8" width="12.9" height="1"/></g>
+          <g><title>6 Nov: $0.19 (157 rows, 8 runs, 28 new listings)</title><rect class="s-match" x="134.75" y="96.2" width="12.9" height="79.8"/><rect class="s-off" x="134.75" y="95.2" width="12.9" height="1"/></g>
+          <g><title>7 Nov: $0.18 (149 rows, 8 runs, 25 new listings)</title><rect class="s-match" x="153.15" y="100.4" width="12.9" height="75.6"/><rect class="s-off" x="153.15" y="99.4" width="12.9" height="1"/></g>
+          <g><title>8 Nov: $0.12 so far (99 rows, 5 runs, 18 new listings)</title><rect class="s-match" x="171.55" y="125.6" width="12.9" height="50.4"/><rect class="s-off" x="171.55" y="124.6" width="12.9" height="1"/></g>
+          <line class="s-share" x1="40" x2="592" y1="105.9" y2="105.9"/><text class="t-bud" x="590" y="100" text-anchor="end">Daily share $0.17</text>
+          <text class="ax" x="49.2" y="194" text-anchor="middle">1 Nov</text><text class="ax" x="122.8" y="194" text-anchor="middle">5 Nov</text><text class="ax" x="196.4" y="194" text-anchor="middle">9 Nov</text><text class="ax" x="270" y="194" text-anchor="middle">13 Nov</text><text class="ax" x="343.6" y="194" text-anchor="middle">17 Nov</text><text class="ax" x="417.2" y="194" text-anchor="middle">21 Nov</text><text class="ax" x="490.8" y="194" text-anchor="middle">25 Nov</text><text class="ax" x="564.4" y="194" text-anchor="middle">29 Nov</text>
+        </svg>
+      </section>
+    </div>
+    <p id="ch-same" class="sr">The same numbers are in the Where the money goes and Run costs tables below.</p>
+
+    <!-- F. Spend by group -->
+    <section class="panel" aria-labelledby="h-groups">
+      <div class="phead"><h2 id="h-groups">Where the money goes</h2></div>
+      <p class="help">Facebook groups via Apify: $1.79 · Reddit: free · Phone scans: free · AI extraction: free</p>
+      <div class="tscroll"><table class="tbl">
+        <thead><tr><th>Group</th><th class="n">Spend this cycle</th><th class="n">Posts</th><th class="n">New listings</th><th class="n">Listings per $</th><th class="n">Monthly at this rate</th><th class="n">Failures</th><th></th></tr></thead>
+        <tbody>
+          <tr><td class="first">Bellandur Flats &amp; Flatmates<br><span class="small">34.6% of spend</span><svg class="sharebar" viewBox="0 0 100 6" aria-hidden="true"><rect class="tr" width="100" height="6" rx="3"/><rect class="fl" width="34.6" height="6" rx="3"/></svg></td><td class="n" data-l="Spend">$0.62</td><td class="n" data-l="Posts">517</td><td class="n" data-l="New">96 <span class="small">(18.6%)</span></td><td class="n" data-l="Per $">155</td><td class="n" data-l="Monthly">$1.82</td><td class="n" data-l="Failures">0</td><td class="stat"><a class="btn sm quiet" href="#admin-groups" aria-label="Manage Bellandur Flats &amp; Flatmates">Manage</a></td></tr>
+          <tr><td class="first">HSR Layout Rentals<br><span class="small">30.7% of spend</span><svg class="sharebar" viewBox="0 0 100 6" aria-hidden="true"><rect class="tr" width="100" height="6" rx="3"/><rect class="fl" width="30.7" height="6" rx="3"/></svg></td><td class="n" data-l="Spend">$0.55</td><td class="n" data-l="Posts">458</td><td class="n" data-l="New">71 <span class="small">(15.5%)</span></td><td class="n" data-l="Per $">129</td><td class="n" data-l="Monthly">$1.74</td><td class="n" data-l="Failures">0</td><td class="stat"><a class="btn sm quiet" href="#admin-groups" aria-label="Manage HSR Layout Rentals">Manage</a></td></tr>
+          <tr><td class="first">Bangalore Flat &amp; Flatmates<br><span class="small">26.8% of spend</span><svg class="sharebar" viewBox="0 0 100 6" aria-hidden="true"><rect class="tr" width="100" height="6" rx="3"/><rect class="fl" width="26.8" height="6" rx="3"/></svg></td><td class="n" data-l="Spend">$0.48</td><td class="n" data-l="Posts">400</td><td class="n" data-l="New">22 <span class="small">(5.5%)</span></td><td class="n" data-l="Per $">46 <span class="pill warn" title="20+ posts this cycle, under 15% became new listings">Low value</span></td><td class="n" data-l="Monthly">$1.65</td><td class="n" data-l="Failures">0</td><td class="stat"><a class="btn sm quiet" href="#admin-groups" aria-label="Manage Bangalore Flat &amp; Flatmates">Manage</a></td></tr>
+          <tr><td class="first">Sarjapur Road Homes<br><span class="small">7.8% of spend</span><svg class="sharebar" viewBox="0 0 100 6" aria-hidden="true"><rect class="tr" width="100" height="6" rx="3"/><rect class="fl" width="7.8" height="6" rx="3"/></svg></td><td class="n" data-l="Spend">$0.14</td><td class="n" data-l="Posts">117</td><td class="n" data-l="New">25 <span class="small">(21.4%)</span></td><td class="n" data-l="Per $">179</td><td class="n" data-l="Monthly">$0.56</td><td class="n" data-l="Failures">0</td><td class="stat"><a class="btn sm quiet" href="#admin-groups" aria-label="Manage Sarjapur Road Homes">Manage</a></td></tr>
+        </tbody>
+        <tfoot><tr><td class="first">All groups</td><td class="n" data-l="Spend">$1.79</td><td class="n" data-l="Posts">1,492</td><td class="n" data-l="New">214</td><td class="n" data-l="Per $">120</td><td class="n" data-l="Monthly">$5.77</td><td class="n" data-l="Failures">0</td><td></td></tr></tfoot>
+      </table></div>
+    </section>
+
+    <!-- G. What-if -->
+    <section class="panel" aria-labelledby="h-wi">
+      <div class="phead"><h2 id="h-wi">What if we add groups?</h2></div>
+      <p class="help">Cost comes from how many posts the groups write, not how often we run. Change the numbers to see a month's cost before adding groups.</p>
+      <div class="calc">
+        <div>
+          <label class="lbl" for="wi-groups">Groups</label>
+          <span class="stepper"><button type="button" data-dec aria-label="Fewer groups">−</button><input id="wi-groups" inputmode="numeric" value="4" aria-label="Groups"><button type="button" data-inc aria-label="More groups">+</button></span>
+          <label class="lbl" for="wi-pph">Posts per group per hour</label>
+          <input class="input" id="wi-pph" inputmode="decimal" value="1.65" aria-describedby="wi-pph-h wi-pph-e">
+          <p class="help" id="wi-pph-h">Measured: 1.65 over the last 7 days across 4 groups. <button class="btn sm quiet" type="button" id="wi-reset">Use measured</button></p>
+          <p class="err" id="wi-pph-e" hidden>Enter a number from 0 to 50</p>
+          <label class="lbl" for="wi-price">Price per post (US$)</label>
+          <input class="input" id="wi-price" inputmode="decimal" value="0.0012" aria-describedby="wi-price-h wi-price-e">
+          <p class="help" id="wi-price-h">automly charges $0.0012 per post. The official Apify scraper costs about $0.005.</p>
+          <p class="err" id="wi-price-e" hidden>Enter a price from $0.0001 to $0.05</p>
+          <span class="lbl">Runs per day</span><span class="ro">8 (at 6, 9, 11 AM, 1, 3, 5, 7, 9 PM IST)</span>
+        </div>
+        <div>
+          <output id="wi-out" for="wi-groups wi-pph wi-price" aria-live="polite">
+            <span class="v" id="wi-v">$5.84<small> a month</small></span>
+            <p id="wi-l1"><span class="warn-t">$0.84 over your budget</span>.</p>
+            <p id="wi-l2">Your budget covers up to <strong>3 groups</strong> at this rate. The free credit covers <strong>3</strong>.</p>
+            <p id="wi-l3">Longest gap between runs is 9 h, so about 15 posts per group per run (cap 30).</p>
+            <dl class="mini"><dt>Posts</dt><dd id="wi-b1">$5.78</dd><dt>Group details</dt><dd id="wi-b2">$0.02</dd><dt>Platform</dt><dd id="wi-b3">$0.04</dd></dl>
+          </output>
+          <p class="help">This doesn't change any settings. To add groups, go to <a href="#admin-groups">Groups</a>.</p>
+          <svg class="chart" id="wi-ch" role="img" viewBox="0 0 600 140"><title>Monthly cost by number of groups</title><desc id="wi-desc">Your budget covers up to 3 groups at this rate. The free credit covers 3.</desc>
+            <line class="grid base" x1="40" x2="592" y1="116" y2="116"/><text class="ax" x="34" y="120" text-anchor="end">$0</text>
+            <line class="grid" x1="40" x2="592" y1="89" y2="89"/><text class="ax" x="34" y="93" text-anchor="end">$5</text>
+            <line class="grid" x1="40" x2="592" y1="62" y2="62"/><text class="ax" x="34" y="66" text-anchor="end">$10</text>
+            <line class="grid" x1="40" x2="592" y1="35" y2="35"/><text class="ax" x="34" y="39" text-anchor="end">$15</text>
+            <line class="grid" x1="40" x2="592" y1="8" y2="8"/><text class="ax" x="34" y="12" text-anchor="end">$20</text>
+            <line class="s-bud" x1="40" x2="592" y1="89" y2="89"/><text class="t-bud" x="590" y="84" text-anchor="end">Budget $5.00</text>
+            <path class="s-cum" id="wi-line" d="M40,115.8L592,37.5"/>
+            <line class="s-share" id="wi-mx" x1="260.8" x2="260.8" y1="8" y2="116"/>
+            <circle class="s-dot" id="wi-dot" cx="260.8" cy="84.5" r="4"/>
+            <text class="t-bud" id="wi-lab" x="268" y="78">4 groups · $5.84</text>
+            <text class="ax" x="40" y="134" text-anchor="middle">0</text><text class="ax" x="150.4" y="134" text-anchor="middle">2</text><text class="ax" x="260.8" y="134" text-anchor="middle">4</text><text class="ax" x="371.2" y="134" text-anchor="middle">6</text><text class="ax" x="481.6" y="134" text-anchor="middle">8</text><text class="ax" x="592" y="134" text-anchor="middle">10 groups</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- H. Free services -->
+    <section class="panel" aria-labelledby="h-free">
+      <div class="phead"><h2 id="h-free">Free services</h2></div>
+      <p class="help">Everything except Apify runs on free plans today. Where we can measure use, it's shown against the free allowance.</p>
+      <div class="tscroll"><table class="tbl">
+        <thead><tr><th>Service</th><th>Free allowance</th><th class="n">Used</th><th>Resets</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="first">Cloudflare Workers<br><span class="small">Workers Free</span></td><td data-l="Allowance">100,000 requests a day, 10 ms CPU each</td><td class="n" data-l="Used"><span class="small">Free: not measured yet</span></td><td data-l="Resets">Daily, 05:30 IST</td><td class="stat"><span class="pill">Free</span></td></tr>
+          <tr><td class="first">Cloudflare D1<br><span class="small">D1 Free</span></td><td data-l="Allowance">5 million rows read and 100,000 written a day, 5 GB stored</td><td class="n" data-l="Used">46 MB of 5 GB stored<div class="meter sm" role="meter" aria-label="D1 storage" aria-valuemin="0" aria-valuemax="5000" aria-valuenow="46" aria-valuetext="1% of the 5 GB storage allowance"><i class="w1"></i></div><span class="small">Reads and writes not measured yet</span></td><td data-l="Resets">–</td><td class="stat"><span class="pill ok">OK</span></td></tr>
+          <tr><td class="first">Workers AI<br><span class="small">Workers Free</span></td><td data-l="Allowance">10,000 neurons a day (our cap 8,000)</td><td class="n" data-l="Used">3,120 of 10,000 neurons<div class="meter sm" role="meter" aria-label="Workers AI neurons today" aria-valuemin="0" aria-valuemax="10000" aria-valuenow="3120" aria-valuetext="31% of today's allowance"><i class="w31"></i></div></td><td data-l="Resets">Daily, 05:30 IST</td><td class="stat"><span class="pill ok">OK</span></td></tr>
+          <tr><td class="first">GitHub Actions<br><span class="small">Free</span></td><td data-l="Allowance">Free for public repos (2,000 min a month if private)</td><td class="n" data-l="Used"><span class="small">Free: not measured yet</span></td><td data-l="Resets">Monthly</td><td class="stat"><span class="pill">Free</span></td></tr>
+          <tr><td class="first">Reddit API<br><span class="small">Free (non-commercial)</span></td><td data-l="Allowance">100 requests a minute with OAuth</td><td class="n" data-l="Used"><span class="small">Free: not measured yet</span></td><td data-l="Resets">–</td><td class="stat"><span class="pill">Free</span></td></tr>
+        </tbody>
+      </table></div>
+      <p class="help">Free plans can change. Re-check the limits on each provider's pricing page once a quarter.</p>
+    </section>
+
+    <!-- I. Run costs -->
+    <section class="panel" aria-labelledby="h-runs">
+      <div class="phead"><h2 id="h-runs">Run costs</h2></div>
+      <div class="tscroll"><table class="tbl">
+        <thead><tr><th>Started</th><th>Status</th><th class="n">Posts</th><th class="n">Posts cost</th><th class="n">Platform</th><th class="n">Total</th><th class="n">New listings</th><th class="n">Per new listing</th><th class="n">Capped</th></tr></thead>
+        <tbody>
+          <tr tabindex="0"><td class="first">Today 13:00</td><td class="stat"><span class="pill ok">Done</span></td><td class="n" data-l="Posts">21</td><td class="n" data-l="Posts $">$0.0252</td><td class="n" data-l="Platform">$0.0002</td><td class="n" data-l="Total"><strong>$0.0254</strong></td><td class="n" data-l="New">4</td><td class="n" data-l="Per new">$0.006</td><td class="n" data-l="Capped"></td></tr>
+          <tr tabindex="0"><td class="first">Today 11:00</td><td class="stat"><span class="pill ok">Done</span></td><td class="n" data-l="Posts">17</td><td class="n" data-l="Posts $">$0.0204</td><td class="n" data-l="Platform">$0.0001</td><td class="n" data-l="Total"><strong>$0.0205</strong></td><td class="n" data-l="New">3</td><td class="n" data-l="Per new">$0.007</td><td class="n" data-l="Capped"></td></tr>
+          <tr tabindex="0"><td class="first">Today 06:00</td><td class="stat"><span class="pill ok">Done</span></td><td class="n" data-l="Posts">44</td><td class="n" data-l="Posts $">$0.0528</td><td class="n" data-l="Platform">$0.0002</td><td class="n" data-l="Total"><strong>$0.0530</strong></td><td class="n" data-l="New">6</td><td class="n" data-l="Per new">$0.009</td><td class="n" data-l="Capped"><span class="pill warn">1 capped</span></td></tr>
+          <tr tabindex="0"><td class="first">Yesterday 21:00</td><td class="stat"><span class="pill warn">Partial</span></td><td class="n" data-l="Posts">12</td><td class="n" data-l="Posts $">$0.0144</td><td class="n" data-l="Platform">$0.0001</td><td class="n" data-l="Total"><strong>$0.0145</strong></td><td class="n" data-l="New">2</td><td class="n" data-l="Per new">$0.007</td><td class="n" data-l="Capped"></td></tr>
+        </tbody>
+      </table></div>
+      <p><a class="small" href="#admin-scraper">All runs on Scraper</a></p>
+      <details><summary>How these numbers are worked out</summary>
+        <p class="help"><strong>Spent this cycle</strong> is Apify's own figure for this billing cycle (1 Nov to 1 Dec). If we can't read it, we add up our run records instead.</p>
+        <p class="help"><strong>Projected</strong> is spent so far plus the average daily spend over the last 7 days (fewer early in the cycle), times the days left.</p>
+        <p class="help"><strong>Scraping pauses</strong> is when credit used reaches the stop level (95%) at that daily rate. At the warn level (80%) each run fetches half as many posts per group.</p>
+        <p class="help"><strong>Group spend</strong> is posts fetched from that group times the price per post. Platform charges aren't split by group.</p>
+        <p class="help">Run frequency barely changes cost. Each run costs about $0.0002 in platform fees, and we only fetch posts newer than the last run.</p>
+      </details>
+    </section>
+
+    <!-- States gallery (spec §5) -->
+    <span class="tag">States (spec §5): not part of the live page</span>
+    <div class="gallery">
+      <div><h3>Inside budget</h3><section class="verdict" data-s="ok"><p><strong>Inside budget.</strong> $1.20 spent of your $5.00 budget. At $0.11 a day you'll end the cycle near $3.68, leaving $1.32 spare.</p></section></div>
+      <div><h3>Over budget (the only red state)</h3><section class="verdict" data-s="over"><p><strong>Over budget.</strong> $5.02 spent of your $5.00 budget, with 6 days left in the cycle. Scraping is paused until 1 Dec.</p></section></div>
+      <div><h3>No Apify token</h3><section class="verdict"><p>Nothing is being spent. Apify isn't connected (APIFY_TOKEN is not set), so Facebook groups aren't scraped. Reddit, phone scans and AI extraction are free.</p></section></div>
+      <div><h3>No runs yet</h3><section class="verdict"><p><strong>Not enough data yet.</strong> No paid runs this cycle, so nothing has been spent. The next run is at 18:30.</p></section></div>
+      <div><h3>Usage not read</h3><section class="verdict" data-s="ok"><p><strong>Inside budget.</strong> $0.94 spent of your $5.00 budget. At $0.12 a day you'll end the cycle near $4.30, leaving $0.70 spare.</p><p class="sub">Apify usage couldn't be read, so this uses our own run records, which can miss small platform charges. <a href="#">Refresh usage</a></p></section></div>
+      <div><h3>Endpoint failed</h3><section class="panel"><p class="help">Couldn't load finance data: HTTP 500.</p><button class="btn" type="button">Try again</button></section></div>
+    </div>
+  </main>
+</div>
+<script>
+/* Mockup-only: live what-if maths (spec §3G). In the app this lives in web/ui.js. */
+(function () {
+  var B = 5, LIMIT = 5, STOP = 0.95, RUNS = 8, PLAT = 0.00015, GAP = 9, CAP = 30, MEASURED = 1.65;
+  var $ = function (id) { return document.getElementById(id); };
+  var d2 = function (v) { return '$' + v.toFixed(2); };
+  var t;
+  function calc() {
+    var g = Number($('wi-groups').value), p = Number($('wi-pph').value), pr = Number($('wi-price').value);
+    var okP = isFinite(p) && $('wi-pph').value !== '' && p >= 0 && p <= 50, okR = isFinite(pr) && pr >= 0.0001 && pr <= 0.05, okG = Number.isInteger(g) && g >= 0 && g <= 200;
+    $('wi-pph').setAttribute('aria-invalid', String(!okP)); $('wi-pph-e').hidden = okP;
+    $('wi-price').setAttribute('aria-invalid', String(!okR)); $('wi-price-e').hidden = okR;
+    $('wi-out').classList.toggle('stale', !(okP && okR && okG));
+    if (!(okP && okR && okG)) return;
+    var posts = g * p * 24 * 30.4 * pr, det = g * 4.35 * pr, plat = RUNS * 30.4 * PLAT, m = posts + det + plat;
+    var per = p * 24 * 30.4 * pr + 4.35 * pr;
+    var maxG = per > 0 ? Math.floor((B - plat) / per) : 999, maxF = per > 0 ? Math.floor((LIMIT * STOP - plat) / per) : 999;
+    var ppr = Math.ceil(p * GAP);
+    $('wi-v').innerHTML = d2(m) + '<small> a month</small>';
+    $('wi-l1').innerHTML = m <= B ? '<span class="up">Inside your ' + d2(B) + ' budget</span>, ' + d2(B - m) + ' to spare.'
+      : m <= LIMIT ? '<span class="warn-t">' + d2(m - B) + ' over your budget</span>.'
+      : '<span class="warn-t">Over the ' + d2(LIMIT) + ' Apify credit</span>. Runs would pause around day ' + Math.ceil(LIMIT * STOP / (m / 30.4)) + '.';
+    if (m > B && m <= LIMIT) {} // budget == limit in this mock
+    $('wi-l2').innerHTML = 'Your budget covers up to <strong>' + maxG + ' groups</strong> at this rate. The free credit covers <strong>' + maxF + '</strong>.';
+    $('wi-l3').innerHTML = ppr <= CAP ? 'Longest gap between runs is ' + GAP + ' h, so about ' + ppr + ' posts per group per run (cap ' + CAP + ').'
+      : '<span class="warn-t">About ' + ppr + ' posts per group would arrive in the ' + GAP + ' h gap, over the ' + CAP + ' cap.</span> Add a run hour in that gap.';
+    $('wi-b1').textContent = d2(posts); $('wi-b2').textContent = d2(det); $('wi-b3').textContent = d2(plat);
+    $('wi-desc').textContent = 'Your budget covers up to ' + maxG + ' groups at this rate. The free credit covers ' + maxF + '.';
+    // chart: 0..10 groups on x, $0..$20 on y (mock keeps the axis fixed)
+    var x = function (n) { return 40 + Math.min(10, n) * 55.2; }, y = function (v) { return Math.max(8, 116 - 108 * v / 20); };
+    var mAt = function (n) { return n * per + plat; };
+    $('wi-line').setAttribute('d', 'M40,' + y(mAt(0)) + 'L592,' + y(mAt(10)));
+    $('wi-mx').setAttribute('x1', x(g)); $('wi-mx').setAttribute('x2', x(g));
+    $('wi-dot').setAttribute('cx', x(g)); $('wi-dot').setAttribute('cy', y(m));
+    var lab = $('wi-lab'); lab.textContent = g + ' groups · ' + d2(m);
+    lab.setAttribute('x', g > 6 ? x(g) - 8 : x(g) + 8); lab.setAttribute('text-anchor', g > 6 ? 'end' : 'start'); lab.setAttribute('y', y(m) - 6);
+  }
+  function soon() { clearTimeout(t); t = setTimeout(calc, 100); }
+  ['wi-groups', 'wi-pph', 'wi-price'].forEach(function (id) { $(id).addEventListener('input', soon); });
+  document.querySelector('.stepper').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    var i = $('wi-groups'); i.value = Math.max(0, Math.min(200, (Number(i.value) || 0) + (b.hasAttribute('data-inc') ? 1 : -1))); calc();
+  });
+  $('wi-reset').addEventListener('click', function () { $('wi-pph').value = MEASURED; calc(); });
+  calc();
+})();
+</script>
+</body>
+</html>
