@@ -13,6 +13,8 @@ import { budgeted, ingestDataset } from '../src/apify.js';
 import { createApp, HOURLY_CRONS } from '../src/app.js';
 import { alertStep, ALERT_CRON, inQuiet, istHourOf, istDayStart, alertText, GENERIC_NOTE, TEST_NOTE } from '../src/alerts.js';
 import { readFileSync } from 'node:fs';
+import { staticAssets } from '../src/node-server.js';
+import { SECURITY_HEADERS } from '../src/http.js';
 import { createUserSession, COOKIE } from '../src/auth.js';
 
 const DAY = 864e5;
@@ -577,4 +579,22 @@ test('test send: one push per own device, inbox shows the test text for 10 minut
   assert.equal((await h.call('POST', '/api/alerts/test', undefined, u.cookie)).status, 202);
   assert.equal((await h.call('POST', '/api/alerts/test', undefined, u.cookie)).status, 202);
   assert.equal((await h.call('POST', '/api/alerts/test', undefined, u.cookie)).status, 429, '4th test in an hour');
+});
+
+// ---------- service worker ----------
+test('/sw.js and /alerts.js are served to the public with security headers; sw.js revalidates; CSP unchanged; no fetch handler', async () => {
+  const t = await memoryDb();
+  const app = createApp({ repo: () => t.repo, assets: staticAssets() });
+  const env = { RUNTIME: 'worker', SESSION_SECRET: 'session-secret-0123456789abcdef0123', GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'x', PUBLIC_BASE_URL: BASE };
+  const sw = await app.fetch(new Request(BASE + '/sw.js'), env, {});
+  assert.equal(sw.status, 200); assert.match(sw.headers.get('content-type'), /javascript/);
+  assert.equal(sw.headers.get('cache-control'), 'no-cache');
+  assert.equal(sw.headers.get('content-security-policy'), SECURITY_HEADERS['Content-Security-Policy']);
+  assert.equal(sw.headers.get('x-content-type-options'), 'nosniff');
+  const src = await sw.text();
+  assert.doesNotMatch(src, /addEventListener\(\s*['"]fetch['"]/, 'no fetch handler: nothing is cached');
+  assert.match(src, /\/api\/alerts\/inbox/);
+  assert.equal((await app.fetch(new Request(BASE + '/alerts.js'), env, {})).status, 200, 'ui.js imports it: must load for the public too');
+  const csp = SECURITY_HEADERS['Content-Security-Policy'];
+  assert.match(csp, /script-src 'self';/); assert.doesNotMatch(csp, /worker-src|unsafe/);
 });

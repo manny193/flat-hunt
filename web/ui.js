@@ -3,6 +3,7 @@
 // Contact details for the public are removed by the server; post text arrives with [[phone]] tokens.
 
 import { usd2, cents, fdate, ftime, niceMoney, moneyTick, costDelta, whatIfCost, whatIfDefaults, statusPill as finPill, verdict, suggestions } from './finance.js';
+import { registerServiceWorker } from './alerts.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -1067,7 +1068,7 @@ document.addEventListener('visibilitychange', async () => { if (document.visibil
   await loadMe();
   const [h] = await Promise.all([fetch('/healthz').then(r => r.json()).catch(() => null), loadAreas()]);
   state.lastIngestMin = h?.lastIngestAgeMin ?? null;
-  if (signedIn()) { try { await syncListings({ full: true }); } catch (e) { fail(e); } }
+  if (signedIn()) { try { await syncListings({ full: true }); } catch (e) { fail(e); } registerServiceWorker(); }
   booted = true;
   if (state.me.role === 'pending') toast('Your account is waiting for an admin to approve it. You can browse listings meanwhile.', { ms: 8000 });
   await render();

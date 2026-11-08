@@ -24,7 +24,8 @@ const IMPORT_SOURCES = ['scraper', 'phone', 'manual', 'sample'];
 // stylesheet and icon, and browsers fetch the web manifest without cookies.
 // Cron strings that run the hourly scheduledJob(): the Worker trigger and the Node in-process timer.
 export const HOURLY_CRONS = ['30 * * * *', 'node-interval'];
-const PUBLIC_ASSETS = new Set(['/ui.js', '/finance.js', '/app.css', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.webmanifest', '/favicon.ico']);
+// /sw.js (alerts service worker) must be public too: the browser's update check carries no guarantee of a session.
+const PUBLIC_ASSETS = new Set(['/ui.js', '/finance.js', '/alerts.js', '/sw.js', '/app.css', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.webmanifest', '/favicon.ico']);
 
 /**
  * @param deps {repo(env) -> repository, assets(request, env) -> Response|null, fetch?}
@@ -96,7 +97,14 @@ async function route(request, env, ctx, deps, fetchFn) {
   if (path === '/auth/google/callback' && method === 'GET') return googleCallback(request, env, repo(), fetchFn);
   if (path === '/api/me' && method === 'GET') return json(meView(await identify(request, env, repo(), fetchFn), env));
   if (path.startsWith('/api/public/')) return publicApi(request, env, repo(), path, url);
-  if ((method === 'GET' || method === 'HEAD') && PUBLIC_ASSETS.has(path)) return (await deps.assets(request, env)) || errorJson(404, 'not_found');
+  if ((method === 'GET' || method === 'HEAD') && PUBLIC_ASSETS.has(path)) {
+    const res = await deps.assets(request, env);
+    if (!res) return errorJson(404, 'not_found');
+    if (path !== '/sw.js') return res;
+    // Service worker updates must roll out at once: revalidate on every check.
+    const h = new Headers(res.headers); h.set('cache-control', 'no-cache');
+    return new Response(res.body, { status: res.status, headers: h });
+  }
   // The app shell is public (the public can browse); it holds no data. Fails closed when login is unconfigured.
   if ((method === 'GET' || method === 'HEAD') && (path === '/' || path === '/index.html') && (request.headers.get('accept') || '').includes('text/html') && authMode(env) !== 'unconfigured') {
     return (await deps.assets(new Request(new URL('/', url), { method, headers: request.headers }), env)) || errorJson(404, 'not_found');
