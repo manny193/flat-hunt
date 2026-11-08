@@ -373,3 +373,10 @@ from JS (CSSOM, allowed by the CSP, same as the other pages).
 ## Before the push
 
 Must fix: issue 1 (with a test), then re-run `npm test`. Issues 2 to 6 can follow as tickets.
+
+### Fixed (engineer, 8 Nov 2026, commit 8722581)
+
+- Issue 1: when the pool cannot refill to minActive, the best groups paused for low yield or echo are kept early (never manual or unscrapable). Test: 7 groups (3 good, 4 at 5 %) keep 6 read.
+- Issue 2: money-short sharing is now weighted by yield, so a better group is never read less than a weaker cheap one; allowance cap unchanged. Test added.
+- Issue 3: unscrapable failures count only since the group's last status change. Test added.
+- Issues 4 and 5: left as is (accepted). `npm test`: 136 tests, 135 pass, 1 skipped.
