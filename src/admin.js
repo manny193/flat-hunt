@@ -151,8 +151,9 @@ export async function groupPlanView(repo, env, now) {
   const usage = s.apifyUsage || null;
   const cycleStart = Date.parse(usage?.cycleStart || '') || now - 30 * DAY;
   const rows = await repo.groupRuns(Math.min(now - 7 * DAY, cycleStart), 2000);
+  const failSince = {}; for (const [id, x] of Object.entries(state)) if (x?.at) failSince[id] = x.at;
   const since = {}; for (const [id, x] of Object.entries(state)) if (x?.status === 'trial' && x.since) since[id] = x.since;
-  const stats = groupStats(rows, s, { now, cycleStart, price, since });
+  const stats = groupStats(rows, s, { now, cycleStart, price, since, failSince });
   const pace = dailyAllowance({ budgetUsd: budgetOf(s), usage, now });
   const watched = groupsView(s.groups).filter(g => g.supported);
   const nameOf = id => { const w = watched.find(g => g.id === id); return w ? (w.name || w.url) : null; };

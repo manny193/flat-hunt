@@ -81,14 +81,16 @@ test('trial: new groups queue then start trial to reach minActive; early pause; 
   assert.equal(tight.state[G(3).id].status, 'paused'); assert.equal(tight.state[G(3).id].why, 'queued for trial');
   assert.equal(tight.summary.pool, 1);
 
+  // a second, good group keeps minActive (1) met, so the verdicts below are not overruled by the minActive backstop
+  const K = G(9); const kS = { [K.id]: { status: 'active', why: 'x', at: NOW - 30 * D } }; const kT = { [K.id]: st(168, 100) };
   const t0 = { status: 'trial', why: 'new group', at: NOW - 4 * D, since: NOW - 4 * D, history: [] };
-  r = allocate({ groups: [G(1)], state: { [G(1).id]: t0 }, stats: { [G(1).id]: st(40, 2, 48, { trial: { rows: 40, usable: 2, usd: 0.05 } }) }, plan: { ...P, minActive: 1 }, allowanceUsd: 1, now: NOW });
+  r = allocate({ groups: [G(1), K], state: { ...kS, [G(1).id]: t0 }, stats: { ...kT, [G(1).id]: st(40, 2, 48, { trial: { rows: 40, usable: 2, usd: 0.05 } }) }, plan: { ...P, minActive: 1 }, allowanceUsd: 1, now: NOW });
   assert.equal(r.state[G(1).id].status, 'paused'); assert.equal(r.state[G(1).id].why, 'low yield', 'day 3+, 20+ rows, under 10 %: paused early');
 
   const t7 = { ...t0, at: NOW - 7 * D, since: NOW - 7 * D };
   r = allocate({ groups: [G(1)], state: { [G(1).id]: t7 }, stats: { [G(1).id]: st(60, 24, 84, { trial: { rows: 60, usable: 24, usd: 0.07 } }) }, plan: { ...P, minActive: 1 }, allowanceUsd: 1, now: NOW });
   assert.equal(r.state[G(1).id].status, 'active'); assert.equal(r.state[G(1).id].why, 'passed trial');
-  r = allocate({ groups: [G(1)], state: { [G(1).id]: t7 }, stats: { [G(1).id]: st(60, 9, 84, { trial: { rows: 60, usable: 9, usd: 0.07 } }) }, plan: { ...P, minActive: 1 }, allowanceUsd: 1, now: NOW });
+  r = allocate({ groups: [G(1), K], state: { ...kS, [G(1).id]: t7 }, stats: { ...kT, [G(1).id]: st(60, 9, 84, { trial: { rows: 60, usable: 9, usd: 0.07 } }) }, plan: { ...P, minActive: 1 }, allowanceUsd: 1, now: NOW });
   assert.equal(r.state[G(1).id].why, 'low yield', '15 % at day 7: paused');
   const t2 = { ...t0, at: NOW - 2 * D, since: NOW - 2 * D };
   r = allocate({ groups: [G(1)], state: { [G(1).id]: t2 }, stats: { [G(1).id]: st(130, 60, 24, { trial: { rows: 130, usable: 60, usd: 0.16 } }) }, plan: { ...P, minActive: 1 }, allowanceUsd: 1, now: NOW });
@@ -216,4 +218,56 @@ test('due rules: hot every slot, normal every ~4 h, sample and trial at 13:00 an
   assert.equal(isGroupDue({ status: 'sample', mode: 'sample', lastRead: t13 + 10 * 60e3 }, NOW), false);
   assert.equal(isGroupDue({ status: 'paused' }, NOW), false);
   assert.equal(isGroupDue({ status: 'trial' }, NOW), true, 'a new trial starts at once');
+});
+
+test('QA r3 #1: minActive holds after rotation pauses with an empty pool; manual and unscrapable pauses are never taken back', () => {
+  const gs = [1, 2, 3, 4, 5, 6, 7].map(G);
+  const state = Object.fromEntries(gs.map(g => [g.id, { status: 'active', why: 'x', at: NOW - 30 * D, history: [] }]));
+  // 3 good groups, 4 at 5 % yield (yields differ a little so the order is clear)
+  const stats = Object.fromEntries(gs.map((g, i) => [g.id, i < 3 ? st(168, 100) : st(168, 10 - i)]));
+  const r = allocate({ groups: gs, state, stats, plan: P, allowanceUsd: 1, now: NOW });
+  const read = gs.filter(g => ['active', 'sample', 'trial'].includes(r.state[g.id].status));
+  assert.equal(read.length, 6, 'six groups still read');
+  assert.equal(r.state[G(7).id].status, 'paused'); assert.equal(r.state[G(7).id].why, 'low yield', 'the weakest is the one paused');
+  assert.equal(r.state[G(4).id].status, 'active', 'kept groups paused in this pass are simply not paused');
+  assert.equal(r.state[G(4).id].history.length, 0, 'no history churn');
+  assert.equal(r.events.filter(e => e.to === 'paused').length, 1);
+  // groups paused on an earlier day are brought back early as sample; manual and unscrapable ones never
+  const s2 = { ...state };
+  s2[G(4).id] = { status: 'paused', why: 'manual', manual: true, at: NOW - 2 * D };
+  s2[G(5).id] = { status: 'paused', why: 'unscrapable', at: NOW - 2 * D };
+  s2[G(6).id] = { status: 'paused', why: 'low yield', at: NOW - 2 * D };
+  s2[G(7).id] = { status: 'paused', why: 'echo', at: NOW - 2 * D };
+  const r2 = allocate({ groups: gs, state: s2, stats, plan: P, allowanceUsd: 1, now: NOW });
+  assert.equal(r2.state[G(4).id].status, 'paused'); assert.equal(r2.state[G(5).id].status, 'paused');
+  assert.equal(r2.state[G(6).id].why, 'kept to reach minimum'); assert.equal(r2.state[G(7).id].why, 'kept to reach minimum');
+  assert.equal(r2.summary.reading, 5, 'all that may be used; still below 6 and shown as such');
+});
+
+test('QA r3 #2: when money is short, coverage follows yield: a better group is never read less than a weaker cheap one', () => {
+  // 5 busy groups (6 rows/h) with yields 80..40 %, one quiet 30 % group (0.5 rows/h)
+  const gs = [1, 2, 3, 4, 5, 6].map(G);
+  const state = Object.fromEntries(gs.map(g => [g.id, { status: 'active', why: 'x', at: NOW - 30 * D }]));
+  const y = [0.8, 0.7, 0.6, 0.5, 0.4];
+  const stats = Object.fromEntries(gs.map((g, i) => [g.id, i < 5 ? st(1008, Math.round(1008 * y[i])) : st(84, 25)]));
+  const r = allocate({ groups: gs, state, stats, plan: { ...P, reservePct: 0 }, allowanceUsd: 0.15, now: NOW });
+  const cov = gs.map(g => r.state[g.id].coverage);
+  for (let i = 1; i < 6; i++) assert.ok(cov[i] <= cov[i - 1] + 1e-9, `coverage ordered by yield: ${cov}`);
+  assert.ok(cov[5] < 1, 'the cheap weak group is no longer read in full');
+  assert.ok(r.summary.projectedDailyUsd <= 0.15 + 1e-6, 'allowance still caps spend');
+});
+
+test('QA r3 #3: failures before the last status change do not re-pause a group re-tried after its cool-off', () => {
+  const settings = { groups: [{ name: 'A', url: url(111) }] };
+  const a = groupId(url(111));
+  const run = t => ({ startedAt: t, report: { fetchedByGroup: {}, newByGroup: {}, unscrapable: [{ name: 'A', reason: 'private' }], caps: { after: t - 2 * H, groupIds: [a] } } });
+  const rows = [run(NOW - 5 * D), run(NOW - 4 * D), run(NOW - 3 * D)];
+  assert.equal(groupStats(rows, settings, { now: NOW })[a].fails, 3);
+  const retriedAt = NOW - 2 * D;
+  const s = groupStats(rows, settings, { now: NOW, failSince: { [a]: retriedAt } });
+  assert.equal(s[a].fails, 0, 'old failures ignored after the retry');
+  const r = allocate({ groups: [G(111)], state: { [a]: { status: 'trial', why: 'retry after cool-off', at: retriedAt, since: retriedAt } }, stats: s, plan: { ...P, minActive: 1 }, allowanceUsd: 1, now: NOW });
+  assert.equal(r.state[a].status, 'trial');
+  const s3 = groupStats([...rows, run(NOW - D), run(NOW - 0.5 * D), run(NOW - 0.2 * D)], settings, { now: NOW, failSince: { [a]: retriedAt } });
+  assert.equal(s3[a].fails, 3, 'three new failures after the retry do count');
 });

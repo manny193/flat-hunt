@@ -134,7 +134,7 @@ export function nameIndex(settings) {
  * became new listings / rows) minus cross-posts; quantity = usable posts per 6 h of time actually read.
  * since: {gid: ms} counts trial numbers from that time.
  */
-export function groupStats(rows, settings, { now, cycleStart = now - 30 * DAY, price = 0.0012, since = {} } = {}) {
+export function groupStats(rows, settings, { now, cycleStart = now - 30 * DAY, price = 0.0012, since = {}, failSince = {} } = {}) {
   const idx = nameIndex(settings);
   const watchedNow = planGroups(settings).map(g => g.id);
   const out = {};
@@ -157,7 +157,9 @@ export function groupStats(rows, settings, { now, cycleStart = now - 30 * DAY, p
     const covered = Array.isArray(caps.groupIds) ? caps.groupIds : watchedNow;
     for (const id of new Set([...covered, ...Object.keys(fetched), ...bad])) {
       const s = S(id); const n = fetched[id] || 0, u = usable[id] || 0;
-      if (bad.has(id)) s.fails++; else if (covered.includes(id) || n) s.fails = 0;
+      // Failures count only since the group's last status change, so a group re-tried after its cool-off is
+      // not paused again for failures that happened before it was paused (QA round 3, issue 3).
+      if (!(failSince[id] && t < failSince[id])) { if (bad.has(id)) s.fails++; else if (covered.includes(id) || n) s.fails = 0; }
       if (n) s.lastSeenAt = Math.max(s.lastSeenAt || 0, t);
       if (in7) {
         s.rows7 += n; s.usable7 += u; s.usd7 += n * price;
@@ -232,10 +234,13 @@ export function allocate({ groups, state = {}, stats = {}, plan = PLAN_DEFAULTS,
     }
   }
   // 2. rotation
+  const before = {}; // state before this pass, to undo a pause the minActive backstop takes back
+  const keep = new Set(); // paused groups brought back early by the minActive backstop
   for (const g of groups) {
     const s = next[g.id]; const st = stats[g.id] || EMPTY;
     s.echo = echoOf(g.id, stats, next, plan);
     if (s.manual) continue;
+    before[g.id] = structuredClone(s);
     if (isReading(s) && s.fails >= plan.failPause) { setStatus(s, 'paused', 'unscrapable', now, events, g.id); continue; }
     if (s.status === 'trial') {
       const age = now - (s.since || now); const t = st.trial;
@@ -271,6 +276,21 @@ export function allocate({ groups, state = {}, stats = {}, plan = PLAN_DEFAULTS,
     const needed = keptOrRankable() < plan.minActive;
     if (needed || trialUsd() + cost <= Math.max(reserve, spare)) setStatus(next[id], 'trial', next[id].why === 'queued for trial' ? 'new group' : 'retry after cool-off', now, events, id);
   }
+  // minActive backstop (QA round 3, issue 1): if the pool could not refill to minActive, keep the best paused
+  // groups (by smoothed yield) that were paused for low yield or echo, before their cool-off. Never manual or
+  // unscrapable ones. A group paused in this very pass is simply not paused (no history churn).
+  if (keptOrRankable() < plan.minActive) {
+    const back = ids.filter(id => { const s = next[id]; return s.status === 'paused' && !s.manual && (s.why === 'low yield' || s.why === 'echo'); })
+      .sort((a, b) => st(b).yield - st(a).yield || (a < b ? -1 : 1));
+    for (const id of back) {
+      if (keptOrRankable() >= plan.minActive) break;
+      const prev = before[id];
+      if (prev && next[id].at === now && isReading(prev) && prev.status !== 'trial') {
+        next[id] = prev;
+        const i = events.findIndex(e => e.id === id && e.at === now && e.to === 'paused'); if (i >= 0) events.splice(i, 1);
+      } else { keep.add(id); next[id].status = 'sample'; } // the status event is written once the money step decides full or sample
+    }
+  }
   // Money for ranked groups after trials.
   let left = Math.max(0, A - Math.max(trialUsd(), Math.min(reserve, A)));
   if (!Number.isFinite(A)) left = Infinity;
@@ -286,15 +306,28 @@ export function allocate({ groups, state = {}, stats = {}, plan = PLAN_DEFAULTS,
   const need = Math.max(0, plan.minActive - trials().length);
   const kept = cands.filter(id => cover[id] > 0).length;
   if (kept < Math.min(need, cands.length) && Number.isFinite(left)) {
-    // Water-fill: the best `need` groups share what is left; cheap ones get full coverage, the rest equal money.
-    const top = cands.slice(0, Math.min(need, cands.length)).sort((a, b) => fullCostPerDay(st(a), price) - fullCostPerDay(st(b), price));
+    // Water-fill weighted by yield (QA round 3, issue 2): coverage c = k x yield, so a better group is never read
+    // less than a weaker one; groups that reach full coverage drop out and the rest share what is left.
+    let rest = cands.slice(0, Math.min(need, cands.length));
     for (const id of cands) cover[id] = 0;
     let rem = left;
-    top.forEach((id, i) => { const full = fullCostPerDay(st(id), price); const share = rem / (top.length - i); if (full <= share) { cover[id] = 1; rem -= full; } else { cover[id] = share / full; rem -= share; } });
+    while (rest.length) {
+      const k = rem / rest.reduce((a, id) => a + st(id).yield * fullCostPerDay(st(id), price), 0);
+      const sat = rest.filter(id => k * st(id).yield >= 1);
+      if (!sat.length) { for (const id of rest) cover[id] = k * st(id).yield; break; }
+      for (const id of sat) { cover[id] = 1; rem -= fullCostPerDay(st(id), price); }
+      rest = rest.filter(id => !sat.includes(id));
+    }
   }
   for (const id of cands) {
     const s = next[id]; const c = cover[id] || 0;
     if (s.manual && s.status === 'active') { s.mode = c >= 0.999 ? 'full' : 'sample'; s.coverage = Math.round(Math.max(c, 1 / 12) * 100) / 100; s.lookbackH = s.mode === 'sample' ? lookbackFor(s.coverage) : null; continue; }
+    if (keep.has(id)) {
+      s.status = 'paused'; // keeps its pause reason; nothing changes if there is no money for it
+      if (c > 0) { setStatus(s, c >= 0.999 ? 'active' : 'sample', 'kept to reach minimum', now, events, id); s.mode = c >= 0.999 ? 'full' : 'sample'; s.coverage = c >= 0.999 ? 1 : Math.floor(c * 100) / 100; s.lookbackH = c >= 0.999 ? null : lookbackFor(c); }
+      else { s.mode = null; s.coverage = 0; s.lookbackH = null; }
+      continue;
+    }
     if (c <= 0) { setStatus(s, 'paused', 'budget', now, events, id); s.mode = null; s.coverage = 0; s.lookbackH = null; continue; }
     const full = c >= 0.999;
     if (s.status === 'paused') setStatus(s, full ? 'active' : 'sample', 'budget allows', now, events, id);

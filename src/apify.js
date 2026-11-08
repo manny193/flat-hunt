@@ -294,8 +294,9 @@ export async function runGroupPlan(repo, settings, { now = Date.now(), env = {} 
   const cycleStart = Date.parse(usage?.cycleStart || '') || now - 30 * DAY;
   const rows = await repo.groupRuns(Math.min(now - 7 * DAY, cycleStart), 2000);
   const state = settings.groupState && typeof settings.groupState === 'object' ? settings.groupState : {};
+  const failSince = {}; for (const [id, x] of Object.entries(state)) if (x?.at) failSince[id] = x.at;
   const since = {}; for (const [id, s] of Object.entries(state)) if (s?.status === 'trial' && s.since) since[id] = s.since;
-  const stats = groupStats(rows, settings, { now, cycleStart, price, since });
+  const stats = groupStats(rows, settings, { now, cycleStart, price, since, failSince });
   const pace = dailyAllowance({ budgetUsd: budgetOf(settings), usage, now });
   const res = allocate({ groups, state, stats, plan, allowanceUsd: pace.allowanceUsd, price, now });
   const patch = {};
