@@ -29,11 +29,12 @@ const I = {
   chart: svg('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'),
   coin: svg('<circle cx="12" cy="12" r="9"/><path d="M14.8 9.2c-.5-.8-1.5-1.2-2.8-1.2-1.7 0-2.8.8-2.8 2s1.1 1.7 2.8 2 2.8.8 2.8 2-1.1 2-2.8 2c-1.3 0-2.3-.4-2.8-1.2M12 6.5V8M12 16v1.5"/>'),
   copy: svg('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
+  rotate: svg('<path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/>'),
 };
 const GOOGLE = '<svg class="g" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.3 5.7c4.3-3.9 7-9.8 7-17z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.3-5.7c-2 1.4-4.7 2.3-8.6 2.3-6.2 0-11.5-4.1-13.4-9.8l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>';
 const MASKED = `<span class="masked" aria-label="Phone number hidden">${svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>')}number hidden</span>`;
 const STAGES = ['To call', 'Called – waiting', 'Visit booked', 'Visited', 'Negotiating', 'Token paid'];
-const ADMIN_PAGES = [['admin-scraper', 'Scraper', I.chart], ['admin-finance', 'Finance & budget', I.coin], ['admin-groups', 'Groups', I.cards], ['admin-phone', 'Phone scans', I.phone], ['admin-ai', 'AI extraction', I.star], ['admin-data', 'Data', I.bin], ['admin-users', 'Users', I.user]];
+const ADMIN_PAGES = [['admin-scraper', 'Scraper', I.chart], ['admin-finance', 'Finance & budget', I.coin], ['admin-groups', 'Groups', I.cards], ['admin-groups-performance', 'Group performance', I.rotate], ['admin-phone', 'Phone scans', I.phone], ['admin-ai', 'AI extraction', I.star], ['admin-data', 'Data', I.bin], ['admin-users', 'Users', I.user]];
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const store = { get(k, d) { try { const v = localStorage.getItem('fh.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set(k, v) { try { localStorage.setItem('fh.' + k, JSON.stringify(v)); } catch { /* private mode */ } } };
 
@@ -937,6 +938,63 @@ async function renderGroups() {
   $('#main').onchange = async e => { const tr = e.target.closest('tr[data-id]'); if (tr && e.target.matches('[data-toggle]')) { try { await api('PATCH', `/api/admin/groups/${tr.dataset.id}`, { active: e.target.checked }); } catch (err) { fail(err); } } };
 }
 
+// ---------- #admin-groups-performance (docs/ai/GROUP-SCHEDULING.md) ----------
+const GP_PILL = { trial: 'run', active: 'ok', sample: '', paused: '', off: '' };
+const gpPill = g => {
+  if (!g.status) return '<span class="pill">Not placed</span>';
+  const bad = g.status === 'paused' && ['low yield', 'echo', 'unscrapable'].includes(g.why);
+  return `<span class="pill ${bad ? 'bad' : GP_PILL[g.status] ?? ''}">${esc(g.status[0].toUpperCase() + g.status.slice(1))}</span>${g.why ? ` <span class="small">${esc(g.why)}</span>` : ''}`;
+};
+const pctTxt = v => v == null ? '–' : v + '%';
+const left = t => { const ms = t - Date.now(); if (ms <= 0) return 'ends now'; const d = Math.floor(ms / 864e5), h = Math.floor(ms % 864e5 / 36e5); return (d ? d + ' d ' : '') + h + ' h left'; };
+const evTxt = e => `${e.from ? esc(e.from) + ' → ' : ''}<b>${esc(e.to)}</b> <span class="small">${esc(e.why)}</span>`;
+async function renderGroupPerf() {
+  const d = await api('GET', '/api/admin/group-plan');
+  if (route() !== 'admin-groups-performance') return;
+  const P = d.plan, S = d.summary, L = d.limits;
+  const below = S.enabled && S.reading < S.minActive;
+  const share = S.budgetUsd > 0 ? Math.min(100, Math.round(100 * S.projectedCycleUsd / S.budgetUsd)) : 0;
+  const tune = [['minYield', 'Minimum usable yield (%)', 100, 1], ['earlyMinYield', 'Early pause below (%)', 100, 1], ['echoShare', 'Echo: cross-post share (%)', 100, 5], ['hotPer6h', 'Hot: usable per 6 h', 1, 0.5], ['normalPer6h', 'Normal: usable per 6 h', 1, 0.5], ['trialDays', 'Trial length (days)', 1, 1], ['failPause', 'Pause after failed runs', 1, 1], ['reservePct', 'Trial reserve (%)', 1, 5]];
+  const st = (k, mul, step) => stepper('gp-' + k, Math.round(P[k] * mul * 100) / 100, L[k][0] * mul, L[k][1] * mul, step, k);
+  $('#main').innerHTML = `<div class="wrap gp">${adminHead('Group performance', `<span class="status"><span class="dot${S.enabled ? '' : ' off'}"></span>${S.enabled ? `Rotation on${S.lastAllocationAt ? ', last placed ' + ago(S.lastAllocationAt) : ''}` : 'Rotation off: every enabled group is read on each run'}</span><span class="sp"></span><button class="btn" type="button" data-act="refresh">Refresh</button>`)}
+    <div class="kpis"><div class="kpi"><span class="k">Groups read now</span><span class="v">${S.reading}<small> of min ${S.minActive}</small></span><span class="d">${below ? '<span class="down">Below the minimum:</span> add Bangalore groups' : S.enabled ? 'trial, active and sampled groups' : 'turn rotation on to place groups'}</span></div>
+      <div class="kpi"><span class="k">Waiting in the pool</span><span class="v">${S.pool}</span><span class="d">paused for low value, echo or failures, or queued for a trial</span></div>
+      <div class="kpi"><span class="k">Projected spend this cycle</span><span class="v">${usd(S.projectedCycleUsd)}<small> of ${usd(S.budgetUsd)}</small></span><div class="meter"><i id="gp-meter"></i></div><span class="d">${usd(S.spentUsd)} spent, about ${usd(S.projectedDailyUsd)} a day planned</span></div>
+      <div class="kpi"><span class="k">Daily allowance</span><span class="v">${usd(S.allowanceUsd)}</span><span class="d">${Math.round(S.daysLeft)} days left in the cycle; runs never spend past it</span></div></div>
+    <div class="panel"><div class="phead"><h2>Plan</h2></div>
+      <p class="help">With rotation on, new groups get a ${P.trialDays}-day trial, weak or copy-cat groups are paused and re-tried after ${P.retryDays} days, and the money goes to the groups with the most usable listings. At least ${P.minActive} groups are always read; when the budget is short they are sampled (only the last few hours before each read) instead of paused. Rules are fixed and free (no AI).</p>
+      <label class="toggle"><span>Rotate groups automatically</span><input type="checkbox" role="switch" id="gp-on"${P.enabled ? ' checked' : ''}></label>
+      <div class="form-grid"><div><span class="lbl">Always read at least</span>${stepper('gp-minActive', P.minActive, L.minActive[0], L.minActive[1], 1, 'Minimum groups read')}</div><div><span class="lbl">Re-try paused groups after (days)</span>${stepper('gp-retryDays', P.retryDays, L.retryDays[0], L.retryDays[1], 5, 'Retry days')}</div></div>
+      <details class="section-gap"><summary>Thresholds</summary><div class="form-grid">${tune.map(([k, l, m, step]) => `<div><span class="lbl">${esc(l)}</span>${st(k, m, step)}</div>`).join('')}</div></details>
+      <button class="btn primary section-gap" type="button" data-act="save">Save plan</button></div>
+    <div class="panel"><div class="phead"><h2>Groups</h2></div><p class="help">Usable = housing posts that became new listings. Yield = usable / posts read. Cross-posts = posts that merged into a listing first seen in another group. Spend = posts read × $0.0012.</p>
+    <div class="tscroll"><table class="tbl"><thead><tr><th>Group</th><th>Status</th><th>Tier</th><th class="n">Posts 7d / cycle</th><th class="n">Usable 7d / cycle</th><th class="n">Yield</th><th class="n">Usable per 6 h</th><th class="n">Cross-posts</th><th class="n">Spend 7d / cycle</th><th class="n">Listings per $</th><th class="n">Failures</th><th>Trial / last change</th><th></th></tr></thead><tbody>
+    ${d.groups.map(g => `<tr data-id="${esc(g.id)}"><td class="first" data-l="Group">${esc(g.name || g.url)}<br><a class="small" href="${esc(g.url)}" target="_blank" rel="noopener">${esc(g.url.replace('https://www.facebook.com', ''))}</a></td>
+      <td data-l="Status">${gpPill(g)}${g.manual && g.why !== 'manual' ? ' <span class="pill">Manual</span>' : ''}${g.mode === 'sample' && g.coverage ? `<br><span class="small">reads about ${Math.round(g.coverage * 100)}% of posts</span>` : ''}</td>
+      <td data-l="Tier">${esc(g.tier || '–')}</td><td class="n" data-l="Posts 7d / cycle">${g.posts7d} / ${g.postsCycle}</td><td class="n" data-l="Usable 7d / cycle">${g.usable7d} / ${g.usableCycle}</td>
+      <td class="n" data-l="Yield">${pctTxt(g.yieldPct)}${g.smoothedYieldPct != null && g.posts7d < 20 ? ` <span class="small" title="Smoothed: few posts so far">(~${g.smoothedYieldPct}%)</span>` : ''}</td><td class="n" data-l="Usable per 6 h">${g.usablePer6h ?? '–'}</td>
+      <td class="n" data-l="Cross-posts">${pctTxt(g.crossSharePct)}${g.echoOf ? `<br><span class="small">echo of ${esc(g.echoOf)}</span>` : ''}</td>
+      <td class="n" data-l="Spend 7d / cycle">${usd(g.spend7dUsd)} / ${usd(g.spendCycleUsd)}</td><td class="n" data-l="Listings per $">${g.listingsPerUsd ?? '–'}</td><td class="n" data-l="Failures">${g.failures}</td>
+      <td data-l="Trial / last change">${g.trialEndsAt ? `${left(g.trialEndsAt)}${g.trialSpendUsd != null ? `<br><span class="small">${usd(g.trialSpendUsd)} of ${usd(P.trialMaxUsd)}</span>` : ''}` : g.lastEvent ? `${evTxt(g.lastEvent)}<br><span class="small">${when(g.lastEvent.at)}</span>` : '–'}</td>
+      <td class="gp-acts">${g.status === 'off' ? '' : `${g.status !== 'paused' || !g.manual ? '<button class="btn sm" type="button" data-gp="pause">Pause</button>' : ''}${g.status !== 'active' || !g.manual ? ' <button class="btn sm" type="button" data-gp="promote">Promote</button>' : ''}${g.manual || g.status === 'paused' ? ' <button class="btn sm quiet" type="button" data-gp="resume">Resume</button>' : ''}`}</td></tr>`).join('') || '<tr><td>No groups yet. Add Bangalore group links on the Groups page.</td></tr>'}</tbody></table></div>
+    <p class="help">Pause and Promote are kept until you press Resume, which starts a fresh trial. Turned-off groups (Groups page) are left alone.</p></div>
+    <div class="panel"><div class="phead"><h2>Recent rotations</h2></div>${d.log.length ? `<ul class="gp-log">${d.log.map(e => `<li><span class="small">${when(e.at)}</span> <b>${esc(e.name)}</b>: ${evTxt(e)}</li>`).join('')}</ul>` : '<p class="help">No status changes yet.</p>'}</div></div>`;
+  $('#gp-meter').style.width = share + '%';
+  if (share > 95) $('#gp-meter').classList.add('hi'); else if (share > 80) $('#gp-meter').classList.add('mid');
+  $('#main').onclick = async e => {
+    const act = e.target.closest('[data-act]')?.dataset.act; const gp = e.target.closest('[data-gp]'); const tr = e.target.closest('tr[data-id]');
+    try {
+      if (act === 'refresh') renderGroupPerf();
+      if (act === 'save') {
+        const body = { enabled: $('#gp-on').checked, minActive: stepVal('gp-minActive'), retryDays: stepVal('gp-retryDays') };
+        for (const [k, , m] of tune) body[k] = Math.round(stepVal('gp-' + k) / m * 10000) / 10000;
+        await api('PUT', '/api/admin/group-plan', body); toast(body.enabled ? 'Plan saved and groups placed' : 'Plan saved'); renderGroupPerf();
+      }
+      if (gp && tr) { gp.disabled = true; await api('POST', `/api/admin/group-plan/${encodeURIComponent(tr.dataset.id)}`, { action: gp.dataset.gp }); toast({ pause: 'Paused until you resume it', promote: 'Promoted: it will not be paused automatically', resume: 'Back in trial' }[gp.dataset.gp]); renderGroupPerf(); }
+    } catch (err) { fail(err); if (gp) gp.disabled = false; }
+  };
+}
+
 // ---------- #admin-phone ----------
 function reportTable(r) {
   const rows = [['Posts read', r.total], ['New listings', r.newListings], ['Merged into existing', r.merged], ['Exact duplicates', r.dupes], ['Not housing', r.notHousing || 0], ['In no area yet (stored)', r.offArea || 0], ['Seeking', r.seeking], ['No text', r.noText]];
@@ -1041,7 +1099,7 @@ async function renderUsers() {
 
 // ---------- router ----------
 const SCREENS = { browse: renderBrowse, review: renderReview, shortlist: renderShortlist, passed: renderPassed, areas: renderAreas, account: renderAccount,
-  'admin-scraper': renderScraper, 'admin-finance': renderFinance, 'admin-groups': renderGroups, 'admin-phone': renderPhone, 'admin-ai': renderAi, 'admin-data': renderData, 'admin-users': renderUsers };
+  'admin-scraper': renderScraper, 'admin-finance': renderFinance, 'admin-groups': renderGroups, 'admin-groups-performance': renderGroupPerf, 'admin-phone': renderPhone, 'admin-ai': renderAi, 'admin-data': renderData, 'admin-users': renderUsers };
 const LOCKED = { review: 'Sign in to get your own swipe deck.', shortlist: 'Sign in to keep a shortlist.', passed: 'Sign in to keep a shortlist.', areas: 'Sign in to pick your areas.', account: '' };
 async function render() {
   chartObservers.splice(0).forEach(o => o.disconnect());

@@ -173,7 +173,7 @@ export async function groupPlanView(repo, env, now) {
       lastEvent: hist.at(-1) || null, history: hist,
     };
   });
-  const log = groups.flatMap(g => g.history.map(e => ({ ...e, id: g.id, name: g.name || g.url }))).sort((a, b) => b.at - a.at).slice(0, 30);
+  const log = groups.flatMap(g => g.history.map((e, i) => ({ ...e, i, id: g.id, name: g.name || g.url }))).sort((a, b) => b.at - a.at || b.i - a.i).slice(0, 30).map(({ i, ...e }) => e);
   const ids = watched.filter(g => g.active).map(g => g.id);
   const daily = projectedDailyUsd(state, stats, plan, price, ids);
   const used = usage?.usedUsd ?? 0;
