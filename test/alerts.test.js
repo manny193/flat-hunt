@@ -598,3 +598,29 @@ test('/sw.js and /alerts.js are served to the public with security headers; sw.j
   const csp = SECURITY_HEADERS['Content-Security-Policy'];
   assert.match(csp, /script-src 'self';/); assert.doesNotMatch(csp, /worker-src|unsafe/);
 });
+
+// ---------- admin ----------
+test('admin alerts: admin only, counts only, switches validated and stored, test goes to own devices only', async () => {
+  const push = fakePush();
+  const h = await apiHarness({ alerts: null, fetchFn: push.fn });
+  const boss = await h.sessionFor('boss@example.com'), u = await h.sessionFor('u@example.com');
+  for (const [m, p, b] of [['GET', '/api/admin/alerts'], ['PUT', '/api/admin/alerts', { enabled: true }], ['POST', '/api/admin/alerts/test']]) assert.equal((await h.call(m, p, b, u.cookie)).status, 403, `${m} ${p} for a user`);
+  let v = (await h.call('GET', '/api/admin/alerts', undefined, boss.cookie)).data;
+  assert.equal(v.configured, true); assert.equal(v.enabled, false); assert.equal(v.adminOnly, true, 'soft launch defaults');
+  assert.deepEqual(v.defaults, { quietStart: 22, quietEnd: 8, maxListings: 30, maxDigests: 6, minGapMin: 60 });
+  for (const b of [{ enabled: 'yes' }, { maxPushesPerDay: 50 }, { maxListings: 99 }, { quietEnd: -1 }]) assert.equal((await h.call('PUT', '/api/admin/alerts', b, boss.cookie)).status, 400, JSON.stringify(b));
+  v = (await h.call('PUT', '/api/admin/alerts', { enabled: true, adminOnly: false, maxPushesPerDay: 500, maxListings: 20 }, boss.cookie)).data;
+  assert.deepEqual([v.enabled, v.adminOnly, v.maxPushesPerDay, v.defaults.maxListings], [true, false, 500, 20]);
+  assert.equal((await h.call('PUT', '/api/admin/alerts', { maxDigests: 4 }, boss.cookie)).data.enabled, true, 'partial update keeps the rest');
+  // Users can now use alerts; the admin card counts them without naming anyone.
+  const gg = await h.repo.createArea(GREEN_GLEN, Date.now()); await h.repo.linkArea(u.user.id, gg.id, Date.now());
+  await h.call('PUT', '/api/alerts/areas', { areas: [{ areaId: gg.id }] }, u.cookie);
+  await h.call('POST', '/api/alerts/targets', sub('https://fcm.googleapis.com/fcm/send/USER-DEVICE'), u.cookie);
+  await h.call('POST', '/api/alerts/targets', sub('https://web.push.apple.com/BOSS-DEVICE'), boss.cookie);
+  const r = await h.call('GET', '/api/admin/alerts', undefined, boss.cookie);
+  assert.deepEqual([r.data.targets.webpush, r.data.usersWithAlerts, r.data.areasWithAlerts], [2, 1, 1]);
+  assert.doesNotMatch(r.text, /DEVICE|example\.com|fcm\.googleapis|apple\.com/, 'no endpoints or emails');
+  const t = await h.call('POST', '/api/admin/alerts/test', undefined, boss.cookie);
+  assert.equal(t.status, 202); assert.deepEqual(t.data, { sent: 1, failed: 0 });
+  assert.deepEqual(push.calls.map(c => c.url), ['https://web.push.apple.com/BOSS-DEVICE'], "only the admin's own device");
+});

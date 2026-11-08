@@ -7,7 +7,7 @@ export function registerServiceWorker() {
   return navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => null);
 }
 
-const BELL = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>';
+export const BELL = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>';
 // BHK chips -> listing_match.bhk values (src/alerts.js BHK_VALUES).
 const BHK_CHIPS = [['1RK', '1 RK', ['1RK']], ['1', '1', ['1', '1.5']], ['2', '2', ['2', '2.5']], ['3', '3', ['3', '3.5']], ['4', '4+', ['4', '4.5', '5', '6']]];
 const TARGET_KEY = 'fh.alertTarget';
@@ -44,7 +44,7 @@ export function iosSigninNote(esc) {
 
 /**
  * ctx: { api, esc, toast, fail, openSheet, closeSheet, cardHtml, isAdmin }.
- * Returns the pieces ui.js mounts: account panel, area bells, #alerts screen, sign-out hook.
+ * Returns the pieces ui.js mounts: account panel, area bells, #alerts screen, sign-out hook, admin page.
  */
 export function createAlertsUI(ctx) {
   const { api, esc, toast, fail, openSheet, closeSheet } = ctx;
@@ -193,5 +193,35 @@ export function createAlertsUI(ctx) {
     main.onclick = e => { const o = e.target.closest('[data-open]'); if (o && !e.target.closest('a')) location.hash = '#listing-' + o.dataset.open; };
   }
 
-  return { load, mountAccount, decorateAreas, renderScreen, beforeSignOut };
+  // ---------- #admin-alerts ----------
+  async function renderAdmin(main, adminHead) {
+    const v = await api('GET', '/api/admin/alerts');
+    const n = x => (x ?? 0).toLocaleString('en-IN');
+    main.innerHTML = `<div class="wrap">${adminHead('Alerts')}
+      <div class="panel"><div class="phead"><h2>Switches</h2></div>
+        ${v.configured ? '' : '<p class="help warn-txt">VAPID secrets are not set on the server, so alerts stay off. See docs/DEPLOY.md.</p>'}
+        <div><label class="toggle"><span>Alerts on</span><input type="checkbox" role="switch" id="aa-en"${v.enabled ? ' checked' : ''}></label></div>
+        <div><label class="toggle"><span>Admins only (soft launch)</span><input type="checkbox" role="switch" id="aa-ao"${v.adminOnly ? ' checked' : ''}></label></div>
+        <p class="help">While “Admins only” is on, only admins see alerts and receive them.</p>
+        <div class="field-row"><label class="lbl" for="aa-max">Max pushes per day (all users)</label><input class="input al-num" id="aa-max" inputmode="numeric" value="${v.maxPushesPerDay}"><button class="btn sm" type="button" data-aa="save">Save</button></div>
+        <h3 class="stage-h">Defaults for new users</h3>
+        <p class="help">Quiet ${v.defaults.quietStart}:00 to ${v.defaults.quietEnd}:00 IST, at most ${v.defaults.maxListings} flats in ${v.defaults.maxDigests} alerts a day, ${v.defaults.minGapMin} min apart. Listings and alerts per day are also the most anyone can pick.</p>
+        <button class="btn sm" type="button" data-aa="test">${BELL}Send a test to my devices</button></div>
+      <div class="panel"><div class="phead"><h2>Usage</h2><span class="sub">today (IST)</span></div><div class="tscroll"><table class="tbl"><tbody>
+        <tr><td>Devices</td><td class="n">${n(v.targets.webpush)}</td></tr><tr><td>Not reachable devices</td><td class="n">${n(v.failingTargets)}</td></tr>
+        <tr><td>Users with alert areas</td><td class="n">${n(v.usersWithAlerts)}</td></tr><tr><td>Areas with alerts</td><td class="n">${n(v.areasWithAlerts)}</td></tr>
+        <tr><td>Waiting to send</td><td class="n">${n(v.queue.pending)}</td></tr><tr><td>Listings sent today</td><td class="n">${n(v.queue.sentToday)}</td></tr>
+        <tr><td>Not pushed today (limit or no device)</td><td class="n">${n(v.queue.cappedToday)}</td></tr><tr><td>Pushes today</td><td class="n">${n(v.pushesToday)} of ${n(v.maxPushesPerDay)}</td></tr>
+        <tr><td>Last run</td><td class="n">${v.lastRunAt ? esc(new Date(v.lastRunAt).toLocaleString('en-IN')) : '–'}</td></tr><tr><td>Last error</td><td class="n">${esc(v.lastError || '–')}</td></tr>
+      </tbody></table></div></div></div>`;
+    const put = async body => { try { await api('PUT', '/api/admin/alerts', body); toast('Saved'); } catch (err) { fail(err); } renderAdmin(main, adminHead); };
+    main.onchange = e => { if (e.target.id === 'aa-en') put({ enabled: e.target.checked }); if (e.target.id === 'aa-ao') put({ adminOnly: e.target.checked }); };
+    main.onclick = async e => {
+      const act = e.target.closest('[data-aa]')?.dataset.aa;
+      if (act === 'save') put({ maxPushesPerDay: Number(main.querySelector('#aa-max').value.replace(/[^\d]/g, '')) });
+      if (act === 'test') { try { const r = await api('POST', '/api/admin/alerts/test'); toast(`Test sent to ${r.sent} device${r.sent === 1 ? '' : 's'}${r.failed ? `, ${r.failed} failed` : ''}`, { err: !r.sent }); } catch (err) { fail(err); } }
+    };
+  }
+
+  return { load, mountAccount, decorateAreas, renderScreen, renderAdmin, beforeSignOut };
 }

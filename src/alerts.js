@@ -156,6 +156,38 @@ export async function alertsApi(request, env, method, seg, url, repo, fetchFn, w
   return errorJson(404, 'not_found', 'No such API route.');
 }
 
+// ---------- admin API: /api/admin/alerts (the router has already checked the caller is an admin) ----------
+async function adminView(repo, env, now) {
+  const settings = await repo.getSettings();
+  const cfg = alertsConfig(settings); const run = settings.alertsRun || {};
+  const c = (await repo.alertAdminCounts(istDayStart(now))) || {};
+  const today = run.day === istDayStart(now);
+  return {
+    configured: vapidConfigured(env), enabled: cfg.enabled, adminOnly: cfg.adminOnly, maxPushesPerDay: cfg.maxPushesPerDay,
+    defaults: { quietStart: cfg.quietStart, quietEnd: cfg.quietEnd, maxListings: cfg.maxListings, maxDigests: cfg.maxDigests, minGapMin: cfg.minGapMin },
+    targets: { webpush: c.webpush || 0 }, failingTargets: c.failing || 0, usersWithAlerts: c.users || 0, areasWithAlerts: c.areas || 0,
+    queue: { pending: c.pending || 0, sentToday: c.sent_today || 0, cappedToday: c.capped_today || 0, expired7d: c.expired || 0 },
+    pushesToday: today ? run.pushesToday || 0 : 0, lastRunAt: run.lastRunAt || null, lastError: run.lastError || null,
+  };
+}
+export async function alertsAdminApi(request, env, method, id, repo, fetchFn, who, deps = {}) {
+  const now = deps.now ?? Date.now();
+  if (!id && method === 'GET') return json(await adminView(repo, env, now));
+  if (!id && method === 'PUT') {
+    const b = await readJson(request, 4 * KB);
+    if (!b || typeof b !== 'object') throw new HttpError(400, 'bad_body');
+    const cur = (await repo.getSettings()).alerts; const next = { ...(cur && typeof cur === 'object' ? cur : {}) };
+    for (const k of ['enabled', 'adminOnly']) if (b[k] !== undefined) { if (typeof b[k] !== 'boolean') throw new HttpError(400, 'bad_' + k); next[k] = b[k]; }
+    const num = (k, lo, hi) => { if (b[k] === undefined) return; if (!intIn(b[k], lo, hi)) throw new HttpError(400, 'bad_' + k, `${k} must be a whole number from ${lo} to ${hi}.`); next[k] = b[k]; };
+    num('maxPushesPerDay', 100, 10000); num('quietStart', 0, 23); num('quietEnd', 0, 23); num('maxListings', 1, 50); num('maxDigests', 1, 12); num('minGapMin', 30, 720);
+    await repo.putSettings({ alerts: next });
+    return json(await adminView(repo, env, now));
+  }
+  // Admins test only their own devices: there is no way to push to another user.
+  if (id === 'test' && method === 'POST') return json(await testSend(repo, env, who.user.id, { fetchFn, now }), 202);
+  return errorJson(404, 'not_found', 'No such API route.');
+}
+
 // ---------- notification text (inbox) ----------
 // Built from an allowlist only: type/BHK, rent, area name. Every one of these is public on #browse, so a
 // lock-screen preview shows nothing the public site does not. Never post text, phones, emails, links,

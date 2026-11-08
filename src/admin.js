@@ -11,6 +11,7 @@ import { backfillState } from './backfill.js';
 import { adminEmails } from './auth.js';
 import { aiStatus, acceptSuggestion, aiConfigOf, runEnrich } from './ai.js';
 import { financeView, validateBudget } from './finance.js';
+import { alertsAdminApi } from './alerts.js';
 
 const DAY = 864e5;
 const int = v => (v != null && /^\d{1,15}$/.test(String(v)) ? Number(v) : null);
@@ -143,6 +144,9 @@ export async function adminApi(request, env, method, path, url, repo, fetchFn, w
   const now = Date.now();
   const q = url.searchParams;
   const body = () => readJson(request, LIMITS.smallBytes);
+
+  // Area alerts: switches, counts, test send (src/alerts.js).
+  if (res === 'alerts' && !sub) return alertsAdminApi(request, env, method, id, repo, fetchFn, who);
 
   // ---------- scraper / sources ----------
   if (res === 'scraper' && !id) {

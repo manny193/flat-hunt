@@ -3,7 +3,7 @@
 // Contact details for the public are removed by the server; post text arrives with [[phone]] tokens.
 
 import { usd2, cents, fdate, ftime, niceMoney, moneyTick, costDelta, whatIfCost, whatIfDefaults, statusPill as finPill, verdict, suggestions } from './finance.js';
-import { registerServiceWorker, createAlertsUI, iosSigninNote } from './alerts.js';
+import { registerServiceWorker, createAlertsUI, iosSigninNote, BELL } from './alerts.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -34,7 +34,7 @@ const I = {
 const GOOGLE = '<svg class="g" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.3 5.7c4.3-3.9 7-9.8 7-17z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.3-5.7c-2 1.4-4.7 2.3-8.6 2.3-6.2 0-11.5-4.1-13.4-9.8l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>';
 const MASKED = `<span class="masked" aria-label="Phone number hidden">${svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>')}number hidden</span>`;
 const STAGES = ['To call', 'Called – waiting', 'Visit booked', 'Visited', 'Negotiating', 'Token paid'];
-const ADMIN_PAGES = [['admin-scraper', 'Scraper', I.chart], ['admin-finance', 'Finance & budget', I.coin], ['admin-groups', 'Groups', I.cards], ['admin-phone', 'Phone scans', I.phone], ['admin-ai', 'AI extraction', I.star], ['admin-data', 'Data', I.bin], ['admin-users', 'Users', I.user]];
+const ADMIN_PAGES = [['admin-scraper', 'Scraper', I.chart], ['admin-finance', 'Finance & budget', I.coin], ['admin-groups', 'Groups', I.cards], ['admin-phone', 'Phone scans', I.phone], ['admin-ai', 'AI extraction', I.star], ['admin-data', 'Data', I.bin], ['admin-users', 'Users', I.user], ['admin-alerts', 'Alerts', BELL]];
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const store = { get(k, d) { try { const v = localStorage.getItem('fh.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set(k, v) { try { localStorage.setItem('fh.' + k, JSON.stringify(v)); } catch { /* private mode */ } } };
 
@@ -1047,7 +1047,7 @@ async function renderUsers() {
 const alertsUI = createAlertsUI({ api, esc, toast, fail, openSheet, closeSheet, cardHtml });
 
 // ---------- router ----------
-const SCREENS = { browse: renderBrowse, review: renderReview, shortlist: renderShortlist, passed: renderPassed, areas: renderAreas, account: renderAccount, alerts: () => alertsUI.renderScreen($('#main')),
+const SCREENS = { browse: renderBrowse, review: renderReview, shortlist: renderShortlist, passed: renderPassed, areas: renderAreas, account: renderAccount, alerts: () => alertsUI.renderScreen($('#main')), 'admin-alerts': () => alertsUI.renderAdmin($('#main'), adminHead),
   'admin-scraper': renderScraper, 'admin-finance': renderFinance, 'admin-groups': renderGroups, 'admin-phone': renderPhone, 'admin-ai': renderAi, 'admin-data': renderData, 'admin-users': renderUsers };
 const LOCKED = { alerts: 'Sign in to get alerts for new flats in your areas.', review: 'Sign in to get your own swipe deck.', shortlist: 'Sign in to keep a shortlist.', passed: 'Sign in to keep a shortlist.', areas: 'Sign in to pick your areas.', account: '' };
 async function render() {

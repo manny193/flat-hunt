@@ -560,6 +560,18 @@ export function createRepo(db) {
       return (await db.first('SELECT id FROM alert_targets WHERE channel = ? AND address = ?', [channel, address]))?.id ?? null;
     },
     async deleteAlertTarget(userId, id) { return (await db.run('DELETE FROM alert_targets WHERE id = ? AND user_id = ?', [id, userId])).changes > 0; },
+    /** Admin card: counts only (no endpoints, no per-user rows), one query. */
+    async alertAdminCounts(dayStart) {
+      return db.first(`SELECT
+          (SELECT count(*) FROM alert_targets WHERE channel = 'webpush') AS webpush,
+          (SELECT count(*) FROM alert_targets WHERE failures > 0) AS failing,
+          (SELECT count(DISTINCT aa.user_id) FROM alert_areas aa JOIN alert_prefs p ON p.user_id = aa.user_id AND p.enabled = 1) AS users,
+          (SELECT count(DISTINCT area_id) FROM alert_areas) AS areas,
+          (SELECT count(*) FROM alert_queue WHERE status = 'pending') AS pending,
+          (SELECT count(*) FROM alert_queue WHERE status = 'sent' AND sent_at >= ?) AS sent_today,
+          (SELECT count(*) FROM alert_queue WHERE status = 'capped' AND created_at >= ?) AS capped_today,
+          (SELECT count(*) FROM alert_queue WHERE status = 'expired') AS expired`, [dayStart, dayStart]);
+    },
     /** Inbox (service worker): the user's latest pushed batch, only the public-safe columns the text needs. */
     async alertInbox(userId, limit = 50) {
       return db.all(`SELECT q.listing_id, q.sent_at, q.area_id, a.name AS area_name, l.bhk, l.rent, json_extract(l.data, '$.type') AS type, l.last_posted_at
