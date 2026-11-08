@@ -175,7 +175,7 @@ export function webhookParam(env) {
 export async function getUsage(env, fetchFn = fetch) {
   const { data } = await apify(env, '/users/me/limits', {}, fetchFn);
   const used = Number(data?.current?.monthlyUsageUsd ?? 0), limit = Number(data?.limits?.maxMonthlyUsageUsd ?? 5);
-  return { usedUsd: Math.round(used * 100) / 100, limitUsd: limit, ratio: limit > 0 ? used / limit : 1, cycleEnd: data?.monthlyUsageCycle?.endAt || null };
+  return { usedUsd: Math.round(used * 100) / 100, limitUsd: limit, ratio: limit > 0 ? used / limit : 1, cycleStart: data?.monthlyUsageCycle?.startAt || null, cycleEnd: data?.monthlyUsageCycle?.endAt || null };
 }
 
 /**

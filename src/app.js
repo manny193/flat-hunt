@@ -21,7 +21,7 @@ export const LIMITS = { importBytes: 2 * KB * KB, webhookBytes: 16 * KB, smallBy
 const IMPORT_SOURCES = ['scraper', 'phone', 'manual', 'sample'];
 // Paths reachable without a session. Static files here hold no data: the login page needs the
 // stylesheet and icon, and browsers fetch the web manifest without cookies.
-const PUBLIC_ASSETS = new Set(['/ui.js', '/app.css', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.webmanifest', '/favicon.ico']);
+const PUBLIC_ASSETS = new Set(['/ui.js', '/finance.js', '/app.css', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.webmanifest', '/favicon.ico']);
 
 /**
  * @param deps {repo(env) -> repository, assets(request, env) -> Response|null, fetch?}

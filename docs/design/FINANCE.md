@@ -637,3 +637,18 @@ Worked example (matches the mockup): budget $5, limit $5, used $1.86 on day 7.5 
 - **Q1.** Should the founder's budget also drive the guard (warn/stop as % of `min(budget, Apify credit)`)? Recommendation: yes, once the page has shipped and the numbers have been checked against Apify's bill for one cycle. It's a one-line change in `startRun`.
 - **Q2.** Should "Low value" groups be auto-paused after two cycles? Recommendation: no. Keep it a suggestion; the founder decides.
 - **Q3.** Should Cloudflare analytics (a new API token) be measured now or later? Recommendation: later. Nothing is near its limit today.
+
+## 11. Build notes: where the shipped page differs (engineering, 8 Nov 2026)
+
+- **No `report.perGroupCap`.** Runs already store `report.caps` at start and `report.truncated` after ingest. `capHits` and each run's `cappedGroups` come from `truncated.groups` / `truncated.perGroup`.
+- **Rate window** = min(7 days, days into the cycle, days since our first Apify run). The spec's min(7, daysElapsed) underestimates the rate when scraping started mid-cycle. With under a day of data, spend is divided by one full day rather than extrapolated, and the status stays `unknown` unless it is already `over` or `watch`.
+- **Scraping switched off:** projection = spent so far, and `warnAt`/`pauseAt` are null (nothing more will be spent).
+- **Cycle days** are indexed from the cycle start (day i = start + i days, labelled with its IST date), so an Apify cycle that starts at 00:00 UTC has 30 days, not 31.
+- **Extra response fields:** `forecast.reason` (`budget`/`credit`/`projection`/`warn`), `forecast.paused`, `forecast.creditUsedUsd`, `forecast.limitUsd`; `cycle` is otherwise as in §8.1.
+- **D1 size** uses one query (`pragma_page_count() × pragma_page_size()`); where the platform refuses it, `d1.measured` is false. Workers AI use comes from `settings.ai` (no extra query). Workers requests and D1 reads/writes stay "Free: not measured yet" (§10 Q3).
+- **Q1 (budget drives the guard): not done**, per the recommendation. The warn/stop guard stays relative to the Apify credit; `FINANCE` in `src/finance.js` holds the tunables.
+- Pure client logic (`suggestions`, `whatIfCost`, `verdict`, formatting) lives in `web/finance.js` so `test/finance.test.js` can import it; `ui.js` imports it as a module (`/finance.js` added to the public assets).
+- **The forecast respects the Apify stop guard (QA, 8 Nov).** The guard stops runs once credit used passes the stop level (`ratio > stopPct`, the same strict comparison as `startRun`). So: once paused, the forward rate is 0 and the projection equals spend so far (status `watch`, reason `paused`); before that, the projection is capped at spend so far plus the credit left below the stop level (`projectionCapped`, `uncappedProjectedUsd` kept for reference), and `budgetAt` is null when the pause comes first. A coming pause is its own `watch` reason (`pause`), with verdict "Scraping will pause…" and rule R9 (which groups to pause so runs last the cycle); an active pause gets R10. **The spec's own worked example has this flaw:** $6.14 at the end of the cycle can't happen on a $5 credit with a 95% stop; the page shows "Scraping will pause on 23 Nov… Spending stops near $4.75". R2 only fires when the budget really is crossed before any pause.
+- **Money axes** use 4 equal steps of whole cents (1, 2, 2.5, 5 × 10^k), so every tick label is exact ($0.31 → $0.40 axis, $6.45 → $8, not $10).
+- **Budget PUT** accepts a JSON number or a plain decimal string (`/^\d+(\.\d{1,2})?$/`); "0x10" and "1e2" are refused. A malformed stored budget falls back to $5.
+- With scraping switched off or paused, the page shows no $/day rate ("no more spend").

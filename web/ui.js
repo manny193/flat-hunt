@@ -2,6 +2,8 @@
 // dynamic sizes go through the CSSOM or SVG attributes). Three roles: public, user, admin (/api/me).
 // Contact details for the public are removed by the server; post text arrives with [[phone]] tokens.
 
+import { usd2, cents, fdate, ftime, niceMoney, moneyTick, costDelta, whatIfCost, whatIfDefaults, statusPill as finPill, verdict, suggestions } from './finance.js';
+
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -25,12 +27,13 @@ const I = {
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   gear: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>'),
   chart: svg('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'),
+  coin: svg('<circle cx="12" cy="12" r="9"/><path d="M14.8 9.2c-.5-.8-1.5-1.2-2.8-1.2-1.7 0-2.8.8-2.8 2s1.1 1.7 2.8 2 2.8.8 2.8 2-1.1 2-2.8 2c-1.3 0-2.3-.4-2.8-1.2M12 6.5V8M12 16v1.5"/>'),
   copy: svg('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
 };
 const GOOGLE = '<svg class="g" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.3 5.7c4.3-3.9 7-9.8 7-17z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.3-5.7c-2 1.4-4.7 2.3-8.6 2.3-6.2 0-11.5-4.1-13.4-9.8l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>';
 const MASKED = `<span class="masked" aria-label="Phone number hidden">${svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>')}number hidden</span>`;
 const STAGES = ['To call', 'Called – waiting', 'Visit booked', 'Visited', 'Negotiating', 'Token paid'];
-const ADMIN_PAGES = [['admin-scraper', 'Scraper', I.chart], ['admin-groups', 'Groups', I.cards], ['admin-phone', 'Phone scans', I.phone], ['admin-ai', 'AI extraction', I.star], ['admin-data', 'Data', I.bin], ['admin-users', 'Users', I.user]];
+const ADMIN_PAGES = [['admin-scraper', 'Scraper', I.chart], ['admin-finance', 'Finance & budget', I.coin], ['admin-groups', 'Groups', I.cards], ['admin-phone', 'Phone scans', I.phone], ['admin-ai', 'AI extraction', I.star], ['admin-data', 'Data', I.bin], ['admin-users', 'Users', I.user]];
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const store = { get(k, d) { try { const v = localStorage.getItem('fh.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set(k, v) { try { localStorage.setItem('fh.' + k, JSON.stringify(v)); } catch { /* private mode */ } } };
 
@@ -520,9 +523,9 @@ function chart(el, draw) {
   paint();
   if ('ResizeObserver' in window) { const ro = new ResizeObserver(() => paint()); ro.observe(el); chartObservers.push(ro); }
 }
-function axes(W, H, max, pad, desc, title) {
+function axes(W, H, max, pad, desc, title, attrs = '') {
   const ticks = [0, 1, 2, 3, 4].map(i => (max / 4) * i);
-  return `<svg class="chart" role="img" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><title>${esc(title)}</title><desc>${esc(desc)}</desc>${ticks.map((t, i) => { const y = H - pad.b - (H - pad.t - pad.b) * (t / max); return `<line class="grid${i === 0 ? ' base' : ''}" x1="${pad.l}" x2="${W - pad.r}" y1="${y}" y2="${y}"/><text class="ax" x="${pad.l - 6}" y="${y + 4}" text-anchor="end">${pad.pct ? Math.round(t) + '%' : Math.round(t)}</text>`; }).join('')}`;
+  return `<svg class="chart" role="img" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"${attrs}><title>${esc(title)}</title><desc>${esc(desc)}</desc>${ticks.map((t, i) => { const y = H - pad.b - (H - pad.t - pad.b) * (t / max); return `<line class="grid${i === 0 ? ' base' : ''}" x1="${pad.l}" x2="${W - pad.r}" y1="${y}" y2="${y}"/><text class="ax" x="${pad.l - 6}" y="${y + 4}" text-anchor="end">${pad.pct ? Math.round(t) + '%' : pad.usd ? moneyTick(t) : Math.round(t)}</text>`; }).join('')}`;
 }
 function xLabels(W, H, days, pad, x, bw) { const every = W < 720 ? 4 : 2; return days.map((d, i) => i % every === 0 ? `<text class="ax" x="${x(i) + bw / 2}" y="${H - 6}" text-anchor="middle">${dLabel(d.day)}</text>` : '').join(''); }
 function barsChart(days, keyA, keyB, cls, title) {
@@ -572,7 +575,7 @@ function spark(values, cls = '') {
 }
 const delta = (cur, prev, word) => { if (!prev && !cur) return '<span>no change</span>'; const pct = prev ? Math.round(100 * (cur - prev) / prev) : 100; return pct >= 0 ? `<span class="up">+${pct}% up</span> vs previous ${word}` : `<span class="down">${pct}% down</span> vs previous ${word}`; };
 const statusPill = s => ({ done: '<span class="pill ok">Done</span>', partial: '<span class="pill warn">Partial</span>', failed: '<span class="pill bad">Failed</span>', ingesting: '<span class="pill run">Ingesting</span>', running: '<span class="pill run">Running</span>' }[s] || `<span class="pill">${esc(s)}</span>`);
-function stepper(id, value, min, max, step = 1) { return `<span class="stepper" data-stepper="${id}" data-min="${min}" data-max="${max}" data-step="${step}"><button type="button" data-dec aria-label="Less">−</button><input id="${id}" inputmode="numeric" value="${value}" aria-label="${id}"><button type="button" data-inc aria-label="More">+</button></span>`; }
+function stepper(id, value, min, max, step = 1, label = id) { return `<span class="stepper" data-stepper="${id}" data-min="${min}" data-max="${max}" data-step="${step}"><button type="button" data-dec aria-label="Less">−</button><input id="${id}" inputmode="numeric" value="${value}" aria-label="${esc(label)}"><button type="button" data-inc aria-label="More">+</button></span>`; }
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-stepper] button'); if (!b) return;
   const s = b.closest('[data-stepper]'); const inp = $('input', s); const step = Number(s.dataset.step), min = Number(s.dataset.min), max = Number(s.dataset.max);
@@ -620,7 +623,7 @@ async function renderScraper() {
   chart($('#ch4'), groupChart(st.groups));
   main.onclick = async e => {
     const dd = e.target.closest('[data-days]'); if (dd) { state.statsDays = Number(dd.dataset.days); renderScraper(); return; }
-    const row = e.target.closest('[data-run]'); if (row) { const r = runs.runs[Number(row.dataset.run)]; openSheet(`<div class="shead"><h2>Run details</h2><button class="btn quiet sm" type="button" data-close>Close</button></div><table class="report"><tr><td>Source</td><td>${esc(r.source)} (${esc(r.actor || '')})</td></tr><tr><td>Started</td><td>${when(r.startedAt)}</td></tr><tr><td>Finished</td><td>${when(r.finishedAt)}</td></tr><tr><td>Not housing</td><td>${r.notHousing}</td></tr>${r.truncated ? `<tr><td>Hit limits</td><td>${r.truncated.rows ? 'Row limit reached. ' : ''}${r.truncated.charge ? 'Spend limit reached. ' : ''}${r.truncated.groups.length ? `${r.truncated.groups.length} group(s) returned the maximum ${r.truncated.perGroup} posts: ${esc(r.truncated.groups.join(', '))}. ` : ''}${r.truncated.recover ? 'This was already a re-read, so some older posts may be missing.' : 'The next run re-reads this window.'}</td></tr>` : ''}${r.cost ? `<tr><td>Cost</td><td>${usd(r.cost.totalUsd)}: ${r.cost.rows ?? '?'} rows ${usd(r.cost.resultsUsd)} + platform ${usd(r.cost.platformUsd)}</td></tr>` : ''}<tr><td>Seeking</td><td>${r.seeking}</td></tr>${r.error ? `<tr><td>Error</td><td>${esc(r.error)}</td></tr>` : ''}</table><h3 class="stage-h">Groups that couldn't be scraped</h3>${r.unscrapableGroups.length ? `<ul>${r.unscrapableGroups.map(g => `<li>${esc(g.name || g.url)}: ${esc(g.reason || '')}</li>`).join('')}</ul>` : '<p class="help">None.</p>'}`, { label: 'Run details' }).onclick = ev => { if (ev.target.closest('[data-close]')) closeSheet(); }; return; }
+    const row = e.target.closest('[data-run]'); if (row) { runSheet(runs.runs[Number(row.dataset.run)]); return; }
     const act = e.target.closest('[data-act]')?.dataset.act;
     try {
       if (act === 'run') { e.target.closest('button').disabled = true; const r = await api('POST', '/api/admin/scraper/run', {}); toast(r.action === 'started' ? 'Run started. New posts arrive when it finishes.' : (r.detail || 'Nothing to do.'), { ms: 6000 }); renderScraper(); }
@@ -629,7 +632,11 @@ async function renderScraper() {
     } catch (err) { fail(err); }
   };
 }
-function scheduleSheet(sc) {
+/** Run details sheet (Scraper runs table and Finance run costs). */
+function runSheet(r) {
+  openSheet(`<div class="shead"><h2>Run details</h2><button class="btn quiet sm" type="button" data-close>Close</button></div><table class="report"><tr><td>Source</td><td>${esc(r.source)} (${esc(r.actor || '')})</td></tr><tr><td>Started</td><td>${when(r.startedAt)}</td></tr><tr><td>Finished</td><td>${when(r.finishedAt)}</td></tr><tr><td>Not housing</td><td>${r.notHousing}</td></tr>${r.truncated ? `<tr><td>Hit limits</td><td>${r.truncated.rows ? 'Row limit reached. ' : ''}${r.truncated.charge ? 'Spend limit reached. ' : ''}${r.truncated.groups.length ? `${r.truncated.groups.length} group(s) returned the maximum ${r.truncated.perGroup} posts: ${esc(r.truncated.groups.join(', '))}. ` : ''}${r.truncated.recover ? 'This was already a re-read, so some older posts may be missing.' : 'The next run re-reads this window.'}</td></tr>` : ''}${r.cost ? `<tr><td>Cost</td><td>${usd(r.cost.totalUsd)}: ${r.cost.rows ?? '?'} rows ${usd(r.cost.resultsUsd)} + platform ${usd(r.cost.platformUsd)}</td></tr>` : ''}<tr><td>Seeking</td><td>${r.seeking}</td></tr>${r.error ? `<tr><td>Error</td><td>${esc(r.error)}</td></tr>` : ''}</table><h3 class="stage-h">Groups that couldn't be scraped</h3>${r.unscrapableGroups.length ? `<ul>${r.unscrapableGroups.map(g => `<li>${esc(g.name || g.url)}: ${esc(g.reason || '')}</li>`).join('')}</ul>` : '<p class="help">None.</p>'}`, { label: 'Run details' }).onclick = ev => { if (ev.target.closest('[data-close]')) closeSheet(); };
+}
+function scheduleSheet(sc, after = renderScraper) {
   const s = sc.schedule;
   const sh = openSheet(`<div class="shead"><h2>Schedule</h2><button class="btn quiet sm" type="button" data-close>Close</button></div>
     <label class="toggle"><span>Scraping on</span><input type="checkbox" role="switch" id="sc-on"${s.enabled ? ' checked' : ''}></label>
@@ -652,9 +659,257 @@ function scheduleSheet(sc) {
     if (hb) { const on = hb.getAttribute('aria-pressed') !== 'true'; hb.setAttribute('aria-pressed', String(on)); hb.classList.toggle('set', on); }
     if (e.target.closest('#sc-save')) {
       const runHoursIst = $$('[data-hour][aria-pressed="true"]', sh).map(b => Number(b.dataset.hour));
-      try { await api('PUT', '/api/admin/scraper', { mode, runHoursIst, maxRunUsd: Number($('#sc-max').value), enabled: $('#sc-on').checked, redditEnabled: $('#sc-rd').checked, intervalHours: stepVal('sc-int'), resultsPerGroup: stepVal('sc-rpg'), budgetWarnPct: stepVal('sc-warn'), budgetStopPct: stepVal('sc-stop'), backfillDays: stepVal('sc-back'), retentionDays: stepVal('sc-ret') }); closeSheet(); toast('Schedule saved'); renderScraper(); }
+      try { await api('PUT', '/api/admin/scraper', { mode, runHoursIst, maxRunUsd: Number($('#sc-max').value), enabled: $('#sc-on').checked, redditEnabled: $('#sc-rd').checked, intervalHours: stepVal('sc-int'), resultsPerGroup: stepVal('sc-rpg'), budgetWarnPct: stepVal('sc-warn'), budgetStopPct: stepVal('sc-stop'), backfillDays: stepVal('sc-back'), retentionDays: stepVal('sc-ret') }); closeSheet(); toast('Schedule saved'); after(); }
       catch (err) { fail(err); }
     }
+  };
+}
+
+// ---------- #admin-finance (docs/design/FINANCE.md) ----------
+const FIN_SAME = '<p id="fin-same" class="sr">The same numbers are in the Where the money goes and Run costs tables below.</p>';
+const finEmpty = F => `<p class="help">No paid runs this cycle yet.${F.schedule.enabled && F.schedule.nextRunAt ? ` The next run is at ${ftime(F.schedule.nextRunAt)}.` : ''}</p>`;
+const nDays = d => { const n = Math.max(1, Math.round(d)); return n === 1 ? 'day' : `${n} days`; };
+/** E1: cumulative spend this cycle, the projection to the cycle end, the budget (and Apify credit) lines. */
+/** Date labels for cycle charts: about one per 56 px, so "13 Nov" never overlaps on a phone. */
+function finXLabels(W, H, days, pad, step) {
+  const every = Math.max(1, Math.ceil(56 / step));
+  return days.map((d, i) => i % every === 0 ? `<text class="ax" x="${pad.l + i * step + step / 2}" y="${H - 6}" text-anchor="middle">${dLabel(d)}</text>` : '').join('');
+}
+function cumChart(F) {
+  return W => {
+    const H = W < 720 ? 180 : 200, pad = { l: 48, r: 8, t: 18, b: 24, usd: true };
+    const days = F.cycle.days, n = days.length, f = F.forecast, b = F.budget.monthlyUsd, lim = F.apify.usage?.limitUsd ?? null;
+    const sum = F.perDay.reduce((a, d) => a + d.costUsd, 0);
+    // Apify's own figure includes platform pennies our run records miss: scale the line to end on it.
+    const scale = f.mtdSource === 'apify' && sum > 0 ? f.mtdUsd / sum : 1;
+    let c = 0; const cum = F.perDay.map(d => (c += d.costUsd * scale));
+    if (cum.length && sum === 0) cum[cum.length - 1] = f.mtdUsd;
+    const last = cum.at(-1) ?? 0, ti = cum.length - 1;
+    const max = niceMoney(Math.max(b, lim || 0, f.projectedUsd, last) * 1.05);
+    const step = (W - pad.l - pad.r) / n, x = i => pad.l + (i + 0.5) * step, y = v => H - pad.b - (H - pad.t - pad.b) * Math.min(1, v / max);
+    const pi = f.pauseAt && f.pauseAt > F.now && f.pauseAt < F.cycle.end ? Math.min(n - 1, Math.floor((f.pauseAt - F.cycle.start) / 864e5)) : -1;
+    const desc = `Spent ${usd2(f.mtdUsd)} of a ${usd2(b)} budget by ${fdate(F.now)}. Projected ${usd2(f.projectedUsd)} by ${fdate(F.cycle.end)}.${pi >= 0 ? ` Scraping pauses ${fdate(f.pauseAt)}.` : ''}`;
+    const yb = y(b), pts = cum.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+    let o = axes(W, H, max, pad, desc, 'Spend this cycle vs budget', ' aria-describedby="fin-same"');
+    o += `<line class="s-bud" x1="${pad.l}" x2="${W - pad.r}" y1="${yb}" y2="${yb}"/><text class="ax" x="${pad.l + 4}" y="${yb - 5}">Budget ${usd2(b)}${lim === b ? ' (= Apify credit)' : ''}</text>`;
+    if (lim != null && lim !== b) o += `<line class="s-cap" x1="${pad.l}" x2="${W - pad.r}" y1="${y(lim)}" y2="${y(lim)}"/><text class="ax" x="${W - pad.r - 2}" y="${y(lim) - 5}" text-anchor="end">Apify credit ${usd2(lim)}</text>`;
+    if (pi >= 0) o += `<line class="s-pause" x1="${x(pi)}" x2="${x(pi)}" y1="${pad.t}" y2="${H - pad.b}"/><text class="ax t-pause" x="${x(pi)}" y="${pad.t - 6}" text-anchor="middle">Pauses</text>`;
+    if (ti >= 0 && f.status !== 'unknown') {
+      const xEnd = (pad.l + n * step).toFixed(1), yp = y(f.projectedUsd).toFixed(1);
+      const xp = f.projectionCapped && f.pauseAt ? (pad.l + step * (f.pauseAt - F.cycle.start) / 864e5).toFixed(1) : null;
+      o += `<path class="s-proj" d="M${x(ti).toFixed(1)},${y(last).toFixed(1)}${xp ? `L${xp},${yp}` : ''}L${xEnd},${yp}"/>`;
+    }
+    if (ti >= 0) {
+      o += `<path class="s-cum" d="${pts}"/>`;
+      // The part above the budget is the only red on the page, and only once spend really passed it.
+      if (last >= b) o += `<clipPath id="fin-over"><rect x="0" y="0" width="${W}" height="${yb}"/></clipPath><path class="s-cum over" clip-path="url(#fin-over)" d="${pts}"/>`;
+      o += `<circle class="s-dot" cx="${x(ti)}" cy="${y(last)}" r="3.5"/>${last >= b ? `<circle class="s-ring" cx="${x(ti)}" cy="${y(last)}" r="6"/>` : ''}`;
+      o += F.perDay.map((d, i) => `<g><title>${dLabel(d.day)}: ${usd2(cum[i])} spent so far (${usd(d.costUsd)} that day, ${d.runs} run${d.runs === 1 ? '' : 's'})</title><rect class="hit" x="${pad.l + i * step}" y="${pad.t}" width="${step}" height="${H - pad.t - pad.b}"/></g>`).join('');
+    }
+    return o + finXLabels(W, H, days, pad, step) + '</svg>';
+  };
+}
+/** E2: daily spend, posts (rows) under platform and group-detail charges, with the budget's daily share. */
+function moneyBars(F) {
+  return W => {
+    const H = W < 720 ? 180 : 200, pad = { l: 48, r: 8, t: 18, b: 24, usd: true };
+    const days = F.cycle.days, n = days.length, by = new Map(F.perDay.map(d => [d.day, d])), f = F.forecast;
+    const share = F.budget.monthlyUsd / Math.max(1, F.cycle.daysTotal);
+    const max = niceMoney(Math.max(share, ...F.perDay.map(d => d.costUsd)) * 1.1);
+    const step = (W - pad.l - pad.r) / n, bw = Math.max(2, step * 0.7), x = i => pad.l + i * step + (step - bw) / 2, h = v => (H - pad.t - pad.b) * Math.min(1, v / max);
+    const top = F.perDay.reduce((a, d) => (d.costUsd > (a?.costUsd ?? 0) ? d : a), null);
+    const desc = `Daily spend this cycle. Average ${usd(f.dailyRateUsd)} a day over the last ${nDays(f.rateWindowDays)}; highest ${usd(top?.costUsd ?? 0)}${top ? ` on ${dLabel(top.day)}` : ''}.`;
+    let o = axes(W, H, max, pad, desc, 'Daily spend', ' aria-describedby="fin-same"');
+    o += days.map((day, i) => {
+      const d = by.get(day); if (!d || !d.costUsd) return '';
+      const a = h(d.rowsUsd), bb = d.otherUsd > 0 ? Math.max(1, h(d.otherUsd)) : 0, ya = H - pad.b - a;
+      return `<g><title>${dLabel(day)}: ${usd(d.costUsd)} (${d.rows} rows, ${d.runs} runs, ${d.newListings} new listings)</title><rect class="s-match" x="${x(i)}" y="${ya}" width="${bw}" height="${a}"/>${bb ? `<rect class="s-off" x="${x(i)}" y="${ya - bb}" width="${bw}" height="${bb}"/>` : ''}</g>`;
+    }).join('');
+    const ys = H - pad.b - h(share);
+    o += `<line class="s-avg" x1="${pad.l}" x2="${W - pad.r}" y1="${ys}" y2="${ys}"/><text class="ax" x="${W - pad.r - 2}" y="${ys - 5}" text-anchor="end">Daily share ${usd(share)}</text>`;
+    return o + finXLabels(W, H, days, pad, step) + '</svg>';
+  };
+}
+/** G: monthly cost by number of groups for the current what-if inputs. */
+function wiChart(wi) {
+  return W => {
+    const H = 140, pad = { l: 48, r: 8, t: 12, b: 22, usd: true }, c = wi.res, i = wi.inp, g = i.groups;
+    const gmax = Math.min(Math.max(2 * g, (Number.isFinite(c.maxFree) ? c.maxFree : 0) + 2, 10), Math.max(200, 2 * g));
+    const max = niceMoney(Math.max(c.monthlyAt(gmax), i.budget, i.limitUsd) * 1.05);
+    const x = k => pad.l + (W - pad.l - pad.r) * k / gmax, y = v => H - pad.b - (H - pad.t - pad.b) * Math.min(1, v / max);
+    const line2 = `Your budget covers up to ${c.maxGroups} group${c.maxGroups === 1 ? '' : 's'} at this rate. The free credit covers ${c.maxFree}.`;
+    let o = axes(W, H, max, pad, line2, 'Monthly cost by number of groups');
+    o += `<line class="s-bud" x1="${pad.l}" x2="${W - pad.r}" y1="${y(i.budget)}" y2="${y(i.budget)}"/><text class="ax" x="${W - pad.r - 2}" y="${y(i.budget) - 5}" text-anchor="end">Budget ${usd2(i.budget)}</text>`;
+    if (i.limitUsd !== i.budget) o += `<line class="s-cap" x1="${pad.l}" x2="${W - pad.r}" y1="${y(i.limitUsd)}" y2="${y(i.limitUsd)}"/><text class="ax" x="${pad.l + 4}" y="${y(i.limitUsd) - 5}">Apify credit ${usd2(i.limitUsd)}</text>`;
+    o += `<path class="s-cum" d="M${x(0)},${y(c.monthlyAt(0))}L${x(gmax)},${y(c.monthlyAt(gmax))}"/>`;
+    const right = x(g) > W * 0.6;
+    o += `<line class="s-avg" x1="${x(g)}" x2="${x(g)}" y1="${pad.t}" y2="${H - pad.b}"/><circle class="s-dot" cx="${x(g)}" cy="${y(c.monthlyUsd)}" r="4"/><text class="lbl" x="${right ? x(g) - 8 : x(g) + 8}" y="${Math.max(pad.t + 10, y(c.monthlyUsd) - 8)}" text-anchor="${right ? 'end' : 'start'}">${g} group${g === 1 ? '' : 's'} · ${usd2(c.monthlyUsd)}</text>`;
+    o += [0, 1, 2, 3, 4].map(k => Math.round(gmax * k / 4)).map(v => `<text class="ax" x="${x(v)}" y="${H - 6}" text-anchor="middle">${v}</text>`).join('');
+    return o + '</svg>';
+  };
+}
+function wiOutput(wi, cap) {
+  const c = wi.res, i = wi.inp, m = c.monthlyUsd;
+  const l1 = m <= i.budget ? `<span class="up">Inside your ${usd2(i.budget)} budget</span>, ${usd2(i.budget - m)} to spare.`
+    : m <= i.limitUsd ? `<span class="warn-t">${usd2(m - i.budget)} over your budget</span>.`
+    : `<span class="warn-t">Over the ${usd2(i.limitUsd)} Apify credit</span>. Runs would pause around day ${Math.ceil((i.limitUsd * i.stopPct / 100) / (m / 30.4))}.`;
+  const l3 = c.postsPerRun <= cap ? `Longest gap between runs is ${i.longestGapHours} h, so about ${c.postsPerRun} posts per group per run (cap ${cap}).`
+    : `<span class="warn-t">About ${c.postsPerRun} posts per group would arrive in the ${i.longestGapHours} h gap, over the ${cap} cap.</span> Add a run hour in that gap.`;
+  return `<span class="v">${usd2(m)}<small> a month</small></span><p>${l1}</p><p>Your budget covers up to <strong>${c.maxGroups} group${c.maxGroups === 1 ? '' : 's'}</strong> at this rate. The free credit covers <strong>${c.maxFree}</strong>.</p><p>${l3}</p>
+    <dl class="mini"><dt>Posts</dt><dd>${usd2(c.postsUsd)}</dd><dt>Group details</dt><dd>${usd2(c.detailsUsd)}</dd><dt>Platform</dt><dd>${usd2(c.platformUsd)}</dd></dl>`;
+}
+function budgetSheet(F) {
+  const f = F.forecast, lim = F.apify.usage?.limitUsd ?? 5;
+  const sh = openSheet(`<div class="shead"><h2>Monthly budget</h2><button class="btn quiet sm" type="button" data-close>Close</button></div>
+    <label class="lbl" for="bud-usd">Monthly budget (US$)</label><input class="input" id="bud-usd" inputmode="decimal" value="${Number(F.budget.monthlyUsd).toFixed(2)}" aria-describedby="bud-e bud-h">
+    <p class="err" id="bud-e" hidden>Enter an amount from $0.50 to $500.</p>
+    <p class="help" id="bud-h">${F.apify.plan === 'free' ? `The Apify free plan gives ${usd2(lim)} of credit each cycle and can't overspend. A budget above ${usd2(lim)} only helps on a paid Apify plan.` : `Your Apify plan allows up to ${usd2(lim)} a cycle.`}</p>
+    ${F.apify.configured ? `<p class="help">Current: ${usd2(f.mtdUsd)} spent this cycle; projected ${usd2(f.projectedUsd)}.</p>` : ''}
+    <button class="btn keep block section-gap" type="button" id="bud-save">Save budget</button>`, { label: 'Monthly budget' });
+  const save = async () => {
+    const inp = $('#bud-usd'); const raw = inp.value.trim().replace(/^\$/, ''); const v = Number(raw);
+    const ok = raw !== '' && Number.isFinite(v) && v >= 0.5 && v <= 500;
+    inp.setAttribute('aria-invalid', String(!ok)); $('#bud-e').hidden = ok; if (!ok) { inp.focus(); return; }
+    try { const r = await api('PUT', '/api/admin/finance', { monthlyBudgetUsd: Math.round(v * 100) / 100 }); closeSheet(); toast(`Budget saved: ${usd2(r.budget.monthlyUsd)} a month`); renderFinance(); }
+    catch (err) { fail(err); }
+  };
+  sh.onclick = e => { if (e.target.closest('[data-close]')) closeSheet(); if (e.target.closest('#bud-save')) save(); };
+  $('#bud-usd').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+  $('#bud-usd').focus();
+}
+async function renderFinance(refresh = false) {
+  const main = $('#main');
+  if (refresh !== true) { refresh = false; main.innerHTML = `<div class="wrap">${adminHead('Finance & budget')}<div id="fin-skel"></div></div>`; }
+  const skel = setTimeout(() => { const k = $('#fin-skel'); if (k) k.outerHTML = '<div class="skel"><i></i><i></i></div>'; }, 300);
+  let F;
+  try { F = await api('GET', '/api/admin/finance' + (refresh ? '?refresh=1' : '')); }
+  catch (err) {
+    clearTimeout(skel); if (route() !== 'admin-finance') return;
+    main.innerHTML = `<div class="wrap">${adminHead('Finance & budget')}<div class="panel"><p class="help">Couldn't load finance data: ${esc(err.data?.message || err.message)}.</p><button class="btn" type="button" data-act="retry">Try again</button></div></div>`;
+    main.onclick = e => { if (e.target.closest('[data-act="retry"]')) renderFinance(); };
+    return;
+  }
+  clearTimeout(skel);
+  if (route() !== 'admin-finance') return;
+  if (refresh && F.apify.usageError) toast("Couldn't read Apify usage. Showing the last reading.", { err: true });
+  drawFinance(F);
+}
+function drawFinance(F) {
+  const main = $('#main'); const f = F.forecast, B = F.budget.monthlyUsd, sch = F.schedule, u = F.apify.usage, conf = F.apify.configured, e = F.efficiency;
+  const [pc, pt] = finPill(F);
+  const fresh = !conf ? '' : u?.checkedAt ? `Usage read ${ago(u.checkedAt)}${F.now - u.checkedAt > 6 * 36e5 ? ' (old)' : ''}` : 'Usage not read yet';
+  const V = verdict(F);
+  const pct = B > 0 ? Math.round(100 * f.mtdUsd / B) : 0;
+  const ticks = !!u && u.limitUsd === B;
+  const unk = !conf || f.status === 'unknown';
+  const end = fdate(F.cycle.end);
+  let c3v, c3d;
+  if (!conf) { c3v = '–'; c3d = 'Needs Apify'; }
+  else if (f.paused) { c3v = 'Paused'; c3d = `Resumes ${end}`; }
+  else if (!sch.enabled) { c3v = 'Not this cycle'; c3d = 'Scraping is switched off'; }
+  else if (f.pauseAt && f.pauseAt < F.cycle.end) { const n = Math.max(0, Math.round((f.pauseAt - F.now) / 864e5)); c3v = fdate(f.pauseAt); c3d = `${n} day${n === 1 ? '' : 's'} from now${f.warnAt && f.warnAt > F.now ? ` · fetches halve from ${fdate(f.warnAt)}` : ''}`; }
+  else { c3v = 'Not this cycle'; c3d = `Credit resets ${end} with ${usd2(Math.max(0, f.limitUsd - (f.creditUsedUsd + (f.projectedUsd - f.mtdUsd))))} to spare`; }
+  // C2 detail: no $/day when nothing more will be spent (switched off or paused by the guard).
+  const tail = f.projectedUsd > B ? `<span class="warn-t">${usd2(f.projectedUsd - B)} over</span>` : `<span class="up">${usd2(B - f.projectedUsd)} spare</span>`;
+  const c2d = !conf ? 'Needs Apify' : !sch.enabled ? `Scraping is switched off: no more spend · ${tail}` : f.paused ? `Scraping paused until ${end}: no more spend · ${tail}`
+    : f.rateWindowDays < 1 || unk ? 'Forecast after the first full day'
+    : `${f.rateWindowDays < 3 ? 'Early estimate: ' : ''}at ${usd2(f.forwardRateUsd)}/day, last ${nDays(f.rateWindowDays)} · ${f.projectionCapped && f.pauseAt ? `<span class="warn-t">stops ${fdate(f.pauseAt)}, when runs pause</span>` : tail}`;
+  const pauseTick = conf && !f.paused && f.pauseAt && f.pauseAt > F.now && f.pauseAt < F.cycle.end;
+  const S = suggestions(F);
+  const SEV = { over: ['bad', 'Over budget'], watch: ['warn', 'Watch'], tip: ['run', 'Tip'] };
+  const G = F.groups;
+  const tot = G.reduce((a, g) => ({ usd: a.usd + g.cycleUsd, posts: a.posts + g.postsFetched, nw: a.nw + g.newListings, mo: a.mo + g.dailyUsd * 30.4, fl: a.fl + g.failures }), { usd: 0, posts: 0, nw: 0, mo: 0, fl: 0 });
+  const D = whatIfDefaults(F); const wi = { inp: { ...D }, res: whatIfCost(D) };
+  const actorShort = /^automly~/.test(F.apify.actor) ? 'automly' : F.apify.actor === 'apify~facebook-groups-scraper' ? 'The official scraper' : esc(F.apify.actor);
+  const resets = r => r === 'daily-utc' ? 'Daily, 05:30 IST' : r === 'monthly' ? 'Monthly' : '–';
+  const freeRow = s => {
+    const p = s.measured && s.limit ? Math.round(100 * s.used / s.limit) : null;
+    const used = s.measured ? `${s.unit === 'bytes' ? `${(s.used / 1e6).toFixed(1)} MB of 5 GB stored` : `${s.used.toLocaleString('en-US')} of ${s.limit.toLocaleString('en-US')} ${esc(s.unit)}`}<div class="meter sm" role="meter" aria-label="${esc(s.name)} use" aria-valuemin="0" aria-valuemax="${s.limit}" aria-valuenow="${s.used}" aria-valuetext="${p}% of ${s.period === 'day' ? "today's allowance" : 'the allowance'}"><i data-w="${Math.min(100, p)}" class="${p >= 100 ? 'hi' : p >= 80 ? 'mid' : ''}"></i></div>${s.note ? `<span class="small">${esc(s.note)}</span>` : ''}`
+      : `<span class="small">${s.id === 'groq' && s.note ? esc(s.note) : 'Free: not measured yet'}</span>`;
+    const st = !s.measured ? '<span class="pill">Free</span>' : p >= 100 ? '<span class="pill bad">Limit reached</span>' : p >= 80 ? '<span class="pill warn">Near limit</span>' : '<span class="pill ok">OK</span>';
+    return `<tr><td class="first">${esc(s.name)}<br><span class="small">${esc(s.plan)}</span></td><td data-l="Allowance">${esc(s.allowanceText)}</td><td class="n" data-l="Used">${used}</td><td data-l="Resets">${resets(s.resets)}</td><td class="stat">${st}</td></tr>`;
+  };
+  main.innerHTML = `<div class="wrap fin" id="fin-root">${adminHead('Finance & budget', `<span class="status-line"><span class="pill${pc ? ' ' + pc : ''}">${pt}</span>${fresh ? ` <span class="small" id="fin-fresh">${fresh}</span>` : ''}</span><span class="sp"></span>${conf ? '<button class="btn" type="button" data-act="refresh">Refresh usage</button>' : ''}<button class="btn" type="button" data-act="budget">Set budget</button>`)}
+    <section class="verdict" data-s="${V.s}" aria-labelledby="fin-verdict-h"><h2 id="fin-verdict-h" class="sr">Summary</h2><p>${V.html}</p>${V.sub ? `<p class="sub">${V.sub} <button class="linkish" type="button" data-act="refresh">Refresh usage</button></p>` : ''}</section>
+    <section class="kpis fin-kpis" aria-label="This cycle at a glance">
+      <div class="kpi"><span class="k">Spent this cycle</span><span class="v">${usd2(conf ? f.mtdUsd : 0)}<small> of ${usd2(B)}</small></span><div class="meter" role="meter" aria-label="Spent this cycle" aria-valuemin="0" aria-valuemax="${B}" aria-valuenow="${conf ? f.mtdUsd : 0}" aria-valuetext="${pct}% of budget"><i id="fin-m1" class="${f.mtdUsd >= B ? 'hi' : pct >= 80 || f.projectedUsd > B ? 'mid' : ''}"></i>${ticks ? `<span class="tick" id="fin-tw" title="Warn at ${sch.budgetWarnPct}%: posts per group halve"></span><span class="tick" id="fin-ts" title="Stop at ${sch.budgetStopPct}%: runs pause"></span>` : ''}</div><span class="d">${conf ? `${pct}% of budget · day ${Math.min(F.cycle.daysTotal, Math.max(1, Math.ceil(F.cycle.daysElapsed)))} of ${F.cycle.daysTotal}${f.mtdSource === 'runs' ? ' · from our runs' : ''}` : 'APIFY_TOKEN not set'}</span></div>
+      <div class="kpi"><span class="k">Projected at cycle end</span><span class="v">${unk ? '–' : usd2(f.projectedUsd)}</span>${conf ? spark(F.perDay.map(d => d.costUsd)) : ''}<span class="d">${c2d}</span></div>
+      <div class="kpi"><span class="k">Scraping pauses</span><span class="v">${c3v}</span><div class="meter cycle" aria-hidden="true"><i id="fin-cyc"></i>${pauseTick ? '<span class="tick pause" id="fin-tp"></span>' : ''}</div><span class="d">${c3d}</span></div>
+      <div class="kpi"><span class="k">Cost per new listing</span><span class="v">${cents(e.costPerNewListingUsd)}</span>${conf ? spark(F.perDay.map(d => d.newListings ? d.costUsd / d.newListings : 0)) : ''}<span class="d">${conf ? costDelta(e.costPerNewListingUsd, e.prevCostPerNewListingUsd) : 'Needs Apify'}</span></div>
+    </section>
+    <section class="panel" aria-labelledby="fin-h-sugg"><div class="phead"><h2 id="fin-h-sugg">What to change</h2></div>${S.length ? `<ul class="sugg-list">${S.map(x => `<li class="sugg"><span class="pill ${SEV[x.severity][0]}">${SEV[x.severity][1]}</span><span>${x.html}</span><span class="save">${x.savingUsd ? `Saves about ${usd2(x.savingUsd)} this cycle` : ''}</span>${!x.action ? '' : x.action.href ? `<a class="btn sm" href="${x.action.href}">${esc(x.action.label)}</a>` : `<button class="btn sm" type="button" data-act="${x.action.act}"${x.action.k != null ? ` data-k="${x.action.k}"` : ''}>${esc(x.action.label)}</button>`}</li>`).join('')}</ul>` : '<p class="help">Nothing to change. Spending is on track and every group earns its keep.</p>'}</section>
+    <div class="charts"><section class="panel" aria-labelledby="fin-h-ch1"><div class="phead"><h2 id="fin-h-ch1">Spend this cycle vs budget</h2><div class="legend"><span><i class="cum"></i>Spent</span><span><i class="proj"></i>Projected</span><span><i class="bud"></i>Budget</span></div></div><div id="fin-ch1"></div></section>
+      <section class="panel" aria-labelledby="fin-h-ch2"><div class="phead"><h2 id="fin-h-ch2">Daily spend</h2><div class="legend"><span><i></i>Posts fetched</span><span><i class="off"></i>Platform and group details</span></div></div><div id="fin-ch2"></div></section></div>${FIN_SAME}
+    <section class="panel" aria-labelledby="fin-h-groups"><div class="phead"><h2 id="fin-h-groups">Where the money goes</h2></div><p class="help">Facebook groups via Apify: ${usd2(F.bySource.apify.costUsd)} · Reddit: free · Phone scans: free · AI extraction: free</p>
+      <div class="tscroll"><table class="tbl"><thead><tr><th>Group</th><th class="n">Spend this cycle</th><th class="n">Posts</th><th class="n">New listings</th><th class="n">Listings per $</th><th class="n">Monthly at this rate</th><th class="n">Failures</th><th><span class="sr">Manage</span></th></tr></thead><tbody>
+      ${G.map(g => `<tr><td class="first">${esc(g.group)}${g.active === false ? ' <span class="pill">Paused</span>' : ''}<br><span class="small">${g.sharePct}% of spend</span><svg class="sharebar" viewBox="0 0 100 6" aria-hidden="true"><rect class="tr" width="100" height="6" rx="3"/><rect class="fl" width="${Math.max(0, Math.min(100, g.sharePct))}" height="6" rx="3"/></svg></td><td class="n" data-l="Spend">${usd(g.cycleUsd)}</td><td class="n" data-l="Posts">${g.postsFetched}</td><td class="n" data-l="New">${g.newListings}${g.yieldPct != null ? ` <span class="small">(${g.yieldPct}%)</span>` : ''}</td><td class="n" data-l="Per $">${g.listingsPerUsd ?? '–'}${g.lowValue ? ' <span class="pill warn" title="20+ posts this cycle, under 15% became new listings">Low value</span>' : ''}</td><td class="n" data-l="Monthly">${usd2(g.dailyUsd * 30.4)}</td><td class="n" data-l="Failures">${g.failures}${!g.postsFetched && g.failures ? ' <span class="pill warn">Failed</span>' : ''}</td><td class="stat"><a class="btn sm quiet" href="#admin-groups" aria-label="Manage ${esc(g.group)}">Manage</a></td></tr>`).join('') || '<tr><td colspan="8">No group spend this cycle.</td></tr>'}</tbody>
+      ${G.length ? `<tfoot><tr><td class="first">All groups</td><td class="n" data-l="Spend">${usd(tot.usd)}</td><td class="n" data-l="Posts">${tot.posts.toLocaleString('en-US')}</td><td class="n" data-l="New">${tot.nw}</td><td class="n" data-l="Per $">${tot.usd > 0 ? Math.round(tot.nw / tot.usd) : '–'}</td><td class="n" data-l="Monthly">${usd2(tot.mo)}</td><td class="n" data-l="Failures">${tot.fl}</td><td></td></tr></tfoot>` : ''}</table></div></section>
+    <section class="panel" aria-labelledby="fin-h-wi"><div class="phead"><h2 id="fin-h-wi">What if we add groups?</h2></div><p class="help">Cost comes from how many posts the groups write, not how often we run. Change the numbers to see a month's cost before adding groups.</p>
+      <div class="calc"><div>
+        <label class="lbl" for="wi-groups">Groups</label>${stepper('wi-groups', D.groups, 0, 200, 1, 'Groups')}
+        <label class="lbl" for="wi-pph">Posts per group per hour</label><input class="input" id="wi-pph" inputmode="decimal" value="${D.pph}" aria-describedby="wi-pph-h wi-pph-e">
+        <p class="help" id="wi-pph-h">${F.whatIf.measured ? `Measured: ${F.whatIf.postsPerGroupPerHour} over the last 7 days across ${F.whatIf.activeGroups} group${F.whatIf.activeGroups === 1 ? '' : 's'}.` : 'Estimate: about 1.5 for an area group. Busy city-wide groups post 5 or more.'} <button class="btn sm quiet" type="button" data-act="wi-reset">${F.whatIf.measured ? 'Use measured' : 'Use estimate'}</button></p>
+        <p class="err" id="wi-pph-e" hidden>Enter a number from 0 to 50</p>
+        <label class="lbl" for="wi-price">Price per post (US$)</label><input class="input" id="wi-price" inputmode="decimal" value="${D.price}" aria-describedby="wi-price-h wi-price-e">
+        <p class="help" id="wi-price-h">${actorShort} charges ${usd(D.price)} per post. The official Apify scraper costs about $0.005.</p>
+        <p class="err" id="wi-price-e" hidden>Enter a price from $0.0001 to $0.05</p>
+        <span class="lbl">Runs per day</span><span class="ro">${sch.runsPerDay} (${esc(scheduleText(sch))})</span>
+      </div><div>
+        <output id="wi-out" for="wi-groups wi-pph wi-price" aria-live="polite">${wiOutput(wi, sch.resultsPerGroup)}</output>
+        <p class="help">This doesn't change any settings. To add groups, go to <a href="#admin-groups">Groups</a>.</p>
+        <div id="wi-ch"></div>
+      </div></div></section>
+    <section class="panel" aria-labelledby="fin-h-free"><div class="phead"><h2 id="fin-h-free">Free services</h2></div><p class="help">Everything except Apify runs on free plans today. Where we can measure use, it's shown against the free allowance.</p>
+      <div class="tscroll"><table class="tbl"><thead><tr><th>Service</th><th>Free allowance</th><th class="n">Used</th><th>Resets</th><th>Status</th></tr></thead><tbody>${F.free.map(freeRow).join('')}</tbody></table></div>
+      <p class="help">Free plans can change. Re-check the limits on each provider's pricing page once a quarter.</p></section>
+    <section class="panel" aria-labelledby="fin-h-runs"><div class="phead"><h2 id="fin-h-runs">Run costs</h2></div>
+      <div class="tscroll"><table class="tbl"><thead><tr><th>Started</th><th>Status</th><th class="n">Posts</th><th class="n">Posts cost</th><th class="n">Platform</th><th class="n">Total</th><th class="n">New listings</th><th class="n">Per new listing</th><th class="n">Capped</th></tr></thead><tbody>
+      ${F.runs.map((r, i) => `<tr data-run="${i}" tabindex="0" aria-label="Run started ${esc(when(r.startedAt || r.finishedAt))}: open details"><td class="first" data-l="Started">${when(r.startedAt || r.finishedAt)}</td><td class="stat">${statusPill(r.status)}</td><td class="n" data-l="Posts">${r.cost?.rows ?? r.postsFetched}</td><td class="n" data-l="Posts $">${usd(r.cost?.resultsUsd ?? null)}</td><td class="n" data-l="Platform">${usd(r.cost?.platformUsd ?? null)}</td><td class="n" data-l="Total"><b>${usd(r.costUsd)}</b></td><td class="n" data-l="New">${r.newListings}</td><td class="n" data-l="Per new">${r.newListings && r.costUsd != null ? cents(r.costUsd / r.newListings) : '–'}</td><td class="n" data-l="Capped">${r.cappedGroups.length ? `<span class="pill warn">${r.cappedGroups.length} capped</span>` : ''}</td></tr>`).join('') || '<tr><td colspan="9">No paid runs this cycle yet.</td></tr>'}</tbody></table></div>
+      <p><a class="small" href="#admin-scraper">All runs on Scraper</a></p>
+      <details class="how"><summary>How these numbers are worked out</summary>
+        <p class="help"><strong>Spent this cycle</strong> is Apify's own figure for this billing cycle (${F.cycle.source === 'apify' ? `${fdate(F.cycle.start)} to ${end}` : 'calendar month (Apify cycle not read yet)'}). If we can't read it, we add up our run records instead.</p>
+        <p class="help"><strong>Projected</strong> is spent so far plus the average daily spend over the last 7 days (fewer early in the cycle), times the days left.</p>
+        <p class="help"><strong>Scraping pauses</strong> is when credit used reaches the stop level (${sch.budgetStopPct}%) at that daily rate. At the warn level (${sch.budgetWarnPct}%) each run fetches half as many posts per group.</p>
+        <p class="help"><strong>Group spend</strong> is posts fetched from that group times the price per post. Platform charges aren't split by group.</p>
+        <p class="help">Run frequency barely changes cost. Each run costs about $0.0002 in platform fees, and we only fetch posts newer than the last run.</p>
+      </details></section></div>`;
+  // Sizes go through the CSSOM (CSP: no inline styles).
+  $('#fin-m1').style.width = Math.min(100, B > 0 ? 100 * (conf ? f.mtdUsd : 0) / B : 0) + '%';
+  if (ticks) { $('#fin-tw').style.left = sch.budgetWarnPct + '%'; $('#fin-ts').style.left = sch.budgetStopPct + '%'; }
+  $('#fin-cyc').style.width = Math.min(100, 100 * F.cycle.daysElapsed / Math.max(1, F.cycle.daysTotal)) + '%';
+  if (pauseTick) $('#fin-tp').style.left = (100 * (f.pauseAt - F.cycle.start) / (F.cycle.end - F.cycle.start)) + '%';
+  $$('[data-w]', main).forEach(el => { el.style.width = el.dataset.w + '%'; });
+  const noRuns = !F.perDay.some(d => d.runs);
+  if (noRuns) { $('#fin-ch1').innerHTML = finEmpty(F); $('#fin-ch2').innerHTML = finEmpty(F); }
+  else { chart($('#fin-ch1'), cumChart(F)); chart($('#fin-ch2'), moneyBars(F)); }
+  const wiEl = $('#wi-ch'); chart(wiEl, W => wiChart(wi)(W));
+  // What-if: recalculate on input (100 ms debounce); invalid input keeps the last valid numbers, faded.
+  const field = (id, lo, hi) => { const el = $('#' + id); const raw = el.value.trim(); const v = Number(raw); const ok = raw !== '' && Number.isFinite(v) && v >= lo && v <= hi; el.setAttribute('aria-invalid', String(!ok)); const er = $('#' + id + '-e'); if (er) er.hidden = ok; return ok ? v : null; };
+  const calc = () => {
+    if (!$('#wi-out')) return;
+    const gRaw = $('#wi-groups').value.trim(), g = Number(gRaw); const okG = gRaw !== '' && Number.isInteger(g) && g >= 0 && g <= 200; $('#wi-groups').setAttribute('aria-invalid', String(!okG));
+    const pph = field('wi-pph', 0, 50), price = field('wi-price', 0.0001, 0.05);
+    const ok = okG && pph != null && price != null; $('#wi-out').classList.toggle('stale', !ok); if (!ok) return;
+    wi.inp = { ...D, groups: g, pph, price }; wi.res = whatIfCost(wi.inp);
+    $('#wi-out').innerHTML = wiOutput(wi, sch.resultsPerGroup);
+    wiEl.innerHTML = wiChart(wi)(Math.max(240, Math.floor(wiEl.clientWidth)));
+  };
+  let wt = null; const soon = () => { clearTimeout(wt); wt = setTimeout(calc, 100); };
+  const root = $('#fin-root');
+  root.addEventListener('input', ev => { if (ev.target.closest('.calc')) soon(); });
+  root.addEventListener('keydown', ev => { const row = ev.target.closest('tr[data-run]'); if (row && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); runSheet(F.runs[Number(row.dataset.run)]); } });
+  main.onchange = null;
+  main.onclick = async ev => {
+    if (ev.target.closest('[data-stepper="wi-groups"] button')) { soon(); return; }
+    const row = ev.target.closest('tr[data-run]'); if (row) { runSheet(F.runs[Number(row.dataset.run)]); return; }
+    const a = ev.target.closest('[data-act]'); if (!a) return;
+    try {
+      if (a.dataset.act === 'refresh') { $$('[data-act="refresh"]', main).forEach(b => { b.style.width = b.offsetWidth + 'px'; b.setAttribute('aria-busy', 'true'); b.disabled = true; }); await renderFinance(true); }
+      if (a.dataset.act === 'budget') budgetSheet(F);
+      if (a.dataset.act === 'schedule') { const sc = await api('GET', '/api/admin/scraper'); if (route() === 'admin-finance') scheduleSheet(sc, () => renderFinance()); }
+      if (a.dataset.act === 'calc') { const inp = $('#wi-groups'); inp.value = String(Math.min(200, F.whatIf.activeGroups + Number(a.dataset.k || 0))); calc(); inp.scrollIntoView({ block: 'center', behavior: reduceMotion() ? 'auto' : 'smooth' }); inp.focus({ preventScroll: true }); }
+      if (a.dataset.act === 'wi-reset') { $('#wi-pph').value = String(F.whatIf.postsPerGroupPerHour); calc(); }
+    } catch (err) { fail(err); $$('[data-act="refresh"][aria-busy]', main).forEach(b => { b.removeAttribute('aria-busy'); b.disabled = false; b.style.width = ''; }); }
   };
 }
 
@@ -786,7 +1041,7 @@ async function renderUsers() {
 
 // ---------- router ----------
 const SCREENS = { browse: renderBrowse, review: renderReview, shortlist: renderShortlist, passed: renderPassed, areas: renderAreas, account: renderAccount,
-  'admin-scraper': renderScraper, 'admin-groups': renderGroups, 'admin-phone': renderPhone, 'admin-ai': renderAi, 'admin-data': renderData, 'admin-users': renderUsers };
+  'admin-scraper': renderScraper, 'admin-finance': renderFinance, 'admin-groups': renderGroups, 'admin-phone': renderPhone, 'admin-ai': renderAi, 'admin-data': renderData, 'admin-users': renderUsers };
 const LOCKED = { review: 'Sign in to get your own swipe deck.', shortlist: 'Sign in to keep a shortlist.', passed: 'Sign in to keep a shortlist.', areas: 'Sign in to pick your areas.', account: '' };
 async function render() {
   chartObservers.splice(0).forEach(o => o.disconnect());

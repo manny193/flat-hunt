@@ -359,6 +359,11 @@ export function createRepo(db) {
       await db.batch(stmts);
     },
 
+    /** Database size in bytes (one statement), or null where the platform does not allow page-count pragmas. */
+    async dbSizeBytes() {
+      try { const r = await db.first('SELECT page_count * page_size AS size FROM pragma_page_count(), pragma_page_size()'); return Number.isFinite(Number(r?.size)) ? Number(r.size) : null; } catch { return null; }
+    },
+
     // ---------- runs ----------
     async listRuns(limit = 20, { source } = {}) {
       const rows = source

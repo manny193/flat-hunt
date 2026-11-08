@@ -321,5 +321,6 @@ Root cause confirmed live: the actor rejects milliseconds, so the cutoff fell ba
 - **8 Nov:**
   - 3 scheduled runs succeeded, 94 listings stored, 2 in Green Glen.
   - Found the Apify cost risk (9.1) and the AI failures (9.2).
+  - Agent team set up (chief of staff + engineer, QA, designer, architect). Docs for AI (CLAUDE.md, docs/ai/) and humans (docs/human/), tracking plan (docs/TRACKING.md, awaiting founder approval), Finance & budget admin page (#admin-finance) built and QA'd.
   - Apify cost work: live experiment found the millisecond bug; exact cutoff, weekly group details, IST run hours, run caps, run cost and group value built (D10, D11, §9.1).
   - Founder reset the scope: a worldwide flat-hunt app, Bangalore first. Homepage now shows every Bangalore post with an area filter (D22); manual imports keep unmatched posts too. Not deployed yet.

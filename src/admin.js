@@ -10,6 +10,7 @@ import { watchedGroups, isKnownGroup } from './core/logic.js';
 import { backfillState } from './backfill.js';
 import { adminEmails } from './auth.js';
 import { aiStatus, acceptSuggestion, aiConfigOf, runEnrich } from './ai.js';
+import { financeView, validateBudget } from './finance.js';
 
 const DAY = 864e5;
 const int = v => (v != null && /^\d{1,15}$/.test(String(v)) ? Number(v) : null);
@@ -82,6 +83,18 @@ export function groupValue(g) {
   };
 }
 
+/** Add one run's per-group posts, matches, new listings, spend and failures into a Map of group rows (feed groupValue). */
+export function addRunToGroups(groups, r, v, t) {
+  const p = r.report || {};
+  // Each fetched Apify row is charged, so a group's spend is its rows times the actor's row price.
+  const price = r.source === 'apify' ? rowPrice(r.actor || actorDefault) : 0;
+  for (const [g, n] of Object.entries(p.fetchedByGroup || {})) { const x = groups.get(g) || { group: g, source: r.source, postsFetched: 0, matched: 0, newListings: 0, failures: 0, lastSeenAt: null, costUsd: 0 }; x.postsFetched += n; x.costUsd = (x.costUsd || 0) + n * price; x.lastSeenAt = Math.max(x.lastSeenAt || 0, t); groups.set(g, x); }
+  for (const [g, n] of Object.entries(p.matchedByGroup || {})) { const x = groups.get(g); if (x) x.matched += n; }
+  for (const [g, n] of Object.entries(p.newByGroup || {})) { const x = groups.get(g); if (x) x.newListings += n; }
+  for (const u of v.unscrapableGroups) { const k = u.name || u.url; const x = groups.get(k) || { group: k, url: u.url, source: r.source, postsFetched: 0, matched: 0, newListings: 0, failures: 0, lastSeenAt: null, costUsd: 0 }; x.failures++; x.failReason = u.reason; groups.set(k, x); }
+  return groups;
+}
+
 /** Per-day, per-source, per-group and per-area numbers for the dashboard. */
 async function stats(repo, days, now) {
   const runs = (await repo.runsSince(now - 2 * days * DAY, 2000)).map(r => ({ r, v: runView(r) }));
@@ -100,13 +113,7 @@ async function stats(repo, days, now) {
     }
     const so = sources[r.source] ||= { runs: 0, postsFetched: 0, matched: 0, newListings: 0, merged: 0, failed: 0, costUsd: 0, lastRunAt: null };
     so.runs++; so.postsFetched += v.postsFetched; so.matched += v.matchedArea; so.newListings += v.newListings; so.merged += v.merged; if (r.status === 'failed') so.failed++; so.costUsd += v.costUsd || 0; so.lastRunAt = Math.max(so.lastRunAt || 0, t);
-    const p = r.report || {};
-    // Each fetched Apify row is charged, so a group's spend is its rows times the actor's row price.
-    const price = r.source === 'apify' ? rowPrice(r.actor || actorDefault) : 0;
-    for (const [g, n] of Object.entries(p.fetchedByGroup || {})) { const x = groups.get(g) || { group: g, source: r.source, postsFetched: 0, matched: 0, newListings: 0, failures: 0, lastSeenAt: null, costUsd: 0 }; x.postsFetched += n; x.costUsd = (x.costUsd || 0) + n * price; x.lastSeenAt = Math.max(x.lastSeenAt || 0, t); groups.set(g, x); }
-    for (const [g, n] of Object.entries(p.matchedByGroup || {})) { const x = groups.get(g); if (x) x.matched += n; }
-    for (const [g, n] of Object.entries(p.newByGroup || {})) { const x = groups.get(g); if (x) x.newListings += n; }
-    for (const u of v.unscrapableGroups) { const k = u.name || u.url; const x = groups.get(k) || { group: k, url: u.url, source: r.source, postsFetched: 0, matched: 0, newListings: 0, failures: 0, lastSeenAt: null, costUsd: 0 }; x.failures++; x.failReason = u.reason; groups.set(k, x); }
+    addRunToGroups(groups, r, v, t);
   }
   for (const d of perDay.values()) d.matchRate = d.postsFetched ? Math.round(1000 * d.matched / d.postsFetched) / 10 : null;
   const totals = [...perDay.values()].reduce((a, d) => ({ postsFetched: a.postsFetched + d.postsFetched, matched: a.matched + d.matched, newListings: a.newListings + d.newListings, merged: a.merged + d.merged }), { postsFetched: 0, matched: 0, newListings: 0, merged: 0 });
@@ -157,6 +164,10 @@ export async function adminApi(request, env, method, path, url, repo, fetchFn, w
     }
     if (!env.APIFY_TOKEN) throw new HttpError(503, 'apify_not_configured', 'APIFY_TOKEN is not set on the server.');
     return json(await scheduledJob(repo, env, { fetchFn, now, force: true }));
+  }
+  if (res === 'finance' && !id) {
+    if (method === 'GET') return json(await financeView(repo, env, fetchFn, { now, refresh: q.get('refresh') === '1' }));
+    if (method === 'PUT') { const b = await body(); const budget = { monthlyUsd: validateBudget(b?.monthlyBudgetUsd), updatedAt: now }; await repo.putSettings({ budget }); return json({ budget }); }
   }
   if (res === 'sources' && !id && method === 'GET') return json(await sourcesView(repo, env, now));
   if (res === 'subreddits' && !id) {
