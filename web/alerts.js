@@ -107,6 +107,7 @@ export function createAlertsUI(ctx) {
     const listingOpts = [5, 10, 20, 30, 50].filter(n => n <= L.maxListings); if (!listingOpts.includes(p.maxListings)) listingOpts.push(p.maxListings);
     const digestOpts = Array.from({ length: Math.max(L.maxDigests, p.maxDigests) }, (_, i) => i + 1);
     el.innerHTML = `<div class="panel" id="alerts"><div class="phead"><h2>Alerts</h2><span class="sp"></span><a class="btn sm quiet" href="#alerts">Latest alerts</a></div>
+      ${cfg.adminTesting ? '<p class="help warn-txt">Alerts are switched off for everyone. As an admin you can still set up this device and send tests.</p>' : ''}
       ${deviceHtml(st)}
       <h3 class="stage-h">Areas</h3><p class="help">${cfg.areas.length ? 'Alerts for ' + esc(cfg.areas.map(a => a.name).join(', ')) + '.' : 'No areas yet. Tap the bell next to an area.'}</p><a class="btn sm" href="#areas">${BELL}Choose alert areas</a>
       <h3 class="stage-h">Quiet hours (IST)</h3><div class="field-row al-row"><span>From</span>${hourSel('al-qs', p.quietStart, 'Quiet hours start')}<span>until</span>${hourSel('al-qe', p.quietEnd, 'Quiet hours end')}</div>
@@ -194,8 +195,17 @@ export function createAlertsUI(ctx) {
   }
 
   // ---------- #admin-alerts ----------
+  function testDeviceHtml(st, mine) {
+    if (st === 'on') return `<p><span class="chip keep">On</span> This device gets alerts.${mine > 1 ? ` Tests also go to your other ${mine - 1} device${mine === 2 ? '' : 's'}.` : ''}</p>`;
+    const other = mine ? `<p class="help">This device is not set up, but tests will go to your ${mine} other device${mine === 1 ? '' : 's'}.</p>` : '';
+    if (st === 'not_ready') return `<p class="help">${esc(cfg?.message || 'Alerts are not set up on this server yet.')}</p>`;
+    if (st === 'off') return `${other}<button class="btn sm" type="button" data-aa="on">${BELL}Turn on alerts on this device</button>`;
+    return other + deviceHtml(st).replace(/data-al="on"/g, 'data-aa="on"');
+  }
   async function renderAdmin(main, adminHead) {
-    const v = await api('GET', '/api/admin/alerts');
+    const [v] = await Promise.all([api('GET', '/api/admin/alerts'), load(true)]);
+    const st = cfg?.enabled ? await deviceState() : 'not_ready';
+    const mine = cfg?.targets?.length || 0;
     const n = x => (x ?? 0).toLocaleString('en-IN');
     main.innerHTML = `<div class="wrap">${adminHead('Alerts')}
       <div class="panel"><div class="phead"><h2>Switches</h2></div>
@@ -206,7 +216,12 @@ export function createAlertsUI(ctx) {
         <div class="field-row"><label class="lbl" for="aa-max">Max pushes per day (all users)</label><input class="input al-num" id="aa-max" inputmode="numeric" value="${v.maxPushesPerDay}"><button class="btn sm" type="button" data-aa="save">Save</button></div>
         <h3 class="stage-h">Defaults for new users</h3>
         <p class="help">Quiet ${v.defaults.quietStart}:00 to ${v.defaults.quietEnd}:00 IST, at most ${v.defaults.maxListings} flats in ${v.defaults.maxDigests} alerts a day, ${v.defaults.minGapMin} min apart. Listings and alerts per day are also the most anyone can pick.</p>
-        <button class="btn sm" type="button" data-aa="test">${BELL}Send a test to my devices</button></div>
+      </div>
+      <div class="panel" id="aa-testp"><div class="phead"><h2>Test notifications</h2></div>
+        <p class="help">Sends only to your own devices. Works even while alerts are off for everyone. 3 tests an hour.</p>
+        ${testDeviceHtml(st, mine)}
+        <div class="field-row"><button class="btn sm" type="button" data-aa="test"${mine ? '' : ' disabled'}>${BELL}Basic test</button><button class="btn sm primary" type="button" data-aa="sample"${mine ? '' : ' disabled'}>${BELL}Sample alert (newest listing)</button></div>
+        <p class="help">The sample looks exactly like a real alert (BHK, rent and area) and opens that listing when tapped. If nothing arrives within a minute, check that notifications for this site are allowed in your phone or browser settings.</p></div>
       <div class="panel"><div class="phead"><h2>Usage</h2><span class="sub">today (IST)</span></div><div class="tscroll"><table class="tbl"><tbody>
         <tr><td>Devices</td><td class="n">${n(v.targets.webpush)}</td></tr><tr><td>Not reachable devices</td><td class="n">${n(v.failingTargets)}</td></tr>
         <tr><td>Users with alert areas</td><td class="n">${n(v.usersWithAlerts)}</td></tr><tr><td>Areas with alerts</td><td class="n">${n(v.areasWithAlerts)}</td></tr>
@@ -219,7 +234,14 @@ export function createAlertsUI(ctx) {
     main.onclick = async e => {
       const act = e.target.closest('[data-aa]')?.dataset.aa;
       if (act === 'save') put({ maxPushesPerDay: Number(main.querySelector('#aa-max').value.replace(/[^\d]/g, '')) });
-      if (act === 'test') { try { const r = await api('POST', '/api/admin/alerts/test'); toast(`Test sent to ${r.sent} device${r.sent === 1 ? '' : 's'}${r.failed ? `, ${r.failed} failed` : ''}`, { err: !r.sent }); } catch (err) { fail(err); } }
+      if (act === 'on') { try { if (await turnOn()) toast('Alerts on for this device. Now send a test.'); } catch (err) { fail(err); } renderAdmin(main, adminHead); }
+      if (act === 'test' || act === 'sample') {
+        try {
+          const r = await api('POST', '/api/admin/alerts/test', act === 'sample' ? { kind: 'sample' } : {});
+          const what = act === 'sample' ? `Sample “${r.notification.title}”` : 'Test';
+          toast(r.sent ? `${what} sent to ${r.sent} device${r.sent === 1 ? '' : 's'}${r.failed ? `, ${r.failed} failed` : ''}` : 'The test could not be delivered. Turn alerts off and on again on the device.', { err: !r.sent });
+        } catch (err) { fail(err); }
+      }
     };
   }
 

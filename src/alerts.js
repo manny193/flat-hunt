@@ -64,7 +64,7 @@ const vapidStatus = env => !(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && en
 /** Why this caller cannot use alerts right now, or null. Admin switch, VAPID secrets, soft launch. */
 export function alertsBlocked(cfg, env, role) {
   if (!vapidConfigured(env)) return 'not_configured';
-  if (!cfg.enabled) return 'off';
+  if (!cfg.enabled) return role === 'admin' ? null : 'off'; // admins can set up and test their own devices while alerts are off
   if (cfg.adminOnly && role !== 'admin') return 'admin_only';
   return null;
 }
@@ -86,7 +86,7 @@ export async function alertsApi(request, env, method, seg, url, repo, fetchFn, w
   if (res === 'config' && !id && method === 'GET') {
     const [prefs, areas, targets] = await Promise.all([repo.alertPrefs(uid), repo.alertAreas(uid), repo.alertTargets(uid)]);
     return json({
-      enabled: !blocked, reason: blocked, message: blocked ? BLOCKED_MSG[blocked] : null,
+      enabled: !blocked, reason: blocked, message: blocked ? BLOCKED_MSG[blocked] : null, adminTesting: !blocked && !cfg.enabled,
       vapidPublicKey: blocked ? null : env.VAPID_PUBLIC_KEY,
       prefs: prefs || { ...defaultPrefs(cfg), enabled: false }, areas, targets: targets.map(targetView),
       limits: { maxAreas: MAX_ALERT_AREAS, maxTargets: MAX_TARGETS, maxListings: cfg.maxListings, maxDigests: cfg.maxDigests, bhks: BHK_VALUES },
@@ -140,7 +140,10 @@ export async function alertsApi(request, env, method, seg, url, repo, fetchFn, w
     }
     const [prefs, rows] = await Promise.all([repo.alertPrefs(uid), repo.alertInbox(uid)]);
     const latest = rows[0]?.sent_at ?? null;
-    if (prefs?.testAt && now - prefs.testAt < TEST_SHOW_MS && (!latest || prefs.testAt > latest)) return json({ notification: TEST_NOTE, count: 0 });
+    if (prefs?.testAt && now - prefs.testAt < TEST_SHOW_MS && (!latest || prefs.testAt > latest)) {
+      const sample = settings.alertTestNotes?.[uid];
+      return json({ notification: sample?.at === prefs.testAt && sample.note ? sample.note : TEST_NOTE, count: 0 });
+    }
     if (!rows.length || now - latest > DAY) return json({ notification: GENERIC_NOTE, count: 0 });
     return json({ notification: alertText(rows), count: rows.length });
   }
@@ -186,7 +189,18 @@ export async function alertsAdminApi(request, env, method, id, repo, fetchFn, wh
     return json(await adminView(repo, env, now));
   }
   // Admins test only their own devices: there is no way to push to another user.
-  if (id === 'test' && method === 'POST') return json(await testSend(repo, env, who.user.id, { fetchFn, now }), 202);
+  // {kind: 'sample'} sends a real-looking alert for the newest listing (in the admin's alert areas first); tapping it opens that listing.
+  if (id === 'test' && method === 'POST') {
+    const b = request.body ? await readJson(request, KB).catch(() => null) : null; // no body = the plain test
+    const kind = b?.kind === 'sample' ? 'sample' : 'basic';
+    let note = null;
+    if (kind === 'sample') {
+      const item = await repo.alertSampleItem(who.user.id);
+      if (!item) throw new HttpError(409, 'no_listings', 'There is no listing with an area yet to build a sample alert from.');
+      note = { ...alertText([item]), title: 'Sample: ' + alertText([item]).title };
+    }
+    return json({ kind, ...await testSend(repo, env, who.user.id, { fetchFn, now, note }), notification: note || TEST_NOTE }, 202);
+  }
   return errorJson(404, 'not_found', 'No such API route.');
 }
 
@@ -227,7 +241,7 @@ export function alertText(items) {
 }
 
 /** Test push to the caller's own devices (3 an hour). Sets prefs.test_at first so the inbox answers with the test text. */
-export async function testSend(repo, env, uid, { fetchFn = fetch, now = Date.now() } = {}) {
+export async function testSend(repo, env, uid, { fetchFn = fetch, now = Date.now(), note = null } = {}) {
   const targets = await repo.alertTargetsForSend([uid]);
   if (!targets.length) throw new HttpError(409, 'no_devices', 'Turn on alerts on this device first.');
   if ((await repo.hitRate(`alert-test:${uid}`, now, HOUR)) > TESTS_PER_HOUR) throw new HttpError(429, 'too_many_tests', 'You can send 3 tests an hour. Try again later.');
@@ -235,6 +249,7 @@ export async function testSend(repo, env, uid, { fetchFn = fetch, now = Date.now
   try { vapid = await channels.webpush.importVapid(env); } catch { throw new HttpError(503, 'alerts_not_configured', 'Alerts are not set up on this server.'); }
   const prefs = (await repo.alertPrefs(uid)) || defaultPrefs(alertsConfig(await repo.getSettings()));
   await repo.putAlertPrefs(uid, { ...prefs, testAt: now }, now);
+  await repo.patchSettings('alertTestNotes', { [uid]: note ? { at: now, note } : null }); // the inbox answers with this note for 10 minutes
   const ctx = { fetchFn, vapid, now, skipOrigins: new Set() };
   const results = await Promise.all(targets.slice(0, MAX_TARGETS).map(async t => ({ t, r: await (channels[t.channel]?.send(t, null, ctx) ?? { ok: false, error: 'no_channel' }) })));
   const okIds = results.filter(x => x.r.ok).map(x => x.t.id);

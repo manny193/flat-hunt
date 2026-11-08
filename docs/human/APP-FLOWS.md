@@ -111,7 +111,7 @@ Public JSON tested 9 Nov 2026; Reddit requires login (403 from Cloudflare, login
 
 1. Admin → **Alerts**: turn alerts on or off for everyone, and keep **Admins only** on while testing.
 2. Set the most notifications the app sends in a day (all users together, default 2,000).
-3. **Send a test to my devices** checks that your own phone or browser receives them.
+3. **Test notifications** (works even while alerts are off for everyone): tap **Turn on alerts on this device** once, then **Basic test** ("Alerts work on this device") or **Sample alert**, which looks exactly like a real alert for the newest listing (your alert areas first) and opens that listing when tapped. Tests go only to your own devices, 3 an hour.
 4. The usage table shows devices, people with alert areas, alerts waiting and sent today, devices that stopped answering, and the last error.
 
 ### 11. Users and data
