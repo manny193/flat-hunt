@@ -5,6 +5,7 @@
 // step and the notification text builder.
 import { HttpError, json, errorJson, readJson } from './http.js';
 import { channels } from './channels/index.js';
+import { adminEmails } from './auth.js';
 
 const HOUR = 36e5;
 const DAY = 24 * HOUR;
@@ -131,6 +132,96 @@ export async function alertsApi(request, env, method, seg, url, repo, fetchFn, w
     return json({ id: tid }, 201);
   }
   return errorJson(404, 'not_found', 'No such API route.');
+}
+
+// ---------- cron send step ----------
+// A dedicated Cron Trigger runs only this step, so it starts with the full 48-query / 50-subrequest budget.
+export const ALERT_CRON = '*/10 * * * *';
+export const MAX_SENDS = 40;          // pushes per invocation: 1 subrequest each, 10 of 50 kept spare
+const SEND_CONCURRENCY = 6;           // Workers allow 6 simultaneous open connections
+const DUE_USERS = 60;
+export const EXPIRE_MS = 36 * HOUR;   // a night of quiet hours plus a day of failures
+export const istHourOf = t => Math.floor((((t + IST) % DAY) + DAY) % DAY / HOUR);
+export const istDayStart = t => Math.floor((t + IST) / DAY) * DAY - IST;
+/** Quiet window in IST hours; it may wrap midnight (22 → 8). start == end means no quiet hours. */
+export function inQuiet(hour, start, end) {
+  if (start === end) return false;
+  return start < end ? hour >= start && hour < end : hour >= start || hour < end;
+}
+/** Wrap fetch so every call counts as a subrequest (like budgeted() for D1 queries). */
+export function countedFetch(fetchFn, cap = 50) {
+  let n = 0;
+  const f = (...a) => { n++; return fetchFn(...a); };
+  f.used = () => n; f.left = () => cap - n;
+  return f;
+}
+const isAdminRow = (u, env) => u.role === 'admin' || adminEmails(env).includes(String(u.email || '').toLowerCase());
+
+/**
+ * One alert run. repo should be budgeted() (has left()). Constant D1 cost: settings + due users +
+ * targets + one write-back batch (<= 6) + one settings write = at most 10; an idle run is 2.
+ * Users who cannot be sent this run (quiet hours, min gap, digest cap, send budget) keep their rows
+ * pending for the next run, oldest first. Returns a small status object (no personal data).
+ */
+export async function alertStep(repo, env, { fetchFn = fetch, now = Date.now(), maxSends = MAX_SENDS } = {}) {
+  if (!vapidConfigured(env)) return { action: 'off', reason: 'not_configured' };
+  if (repo.left && repo.left() < 10) return { action: 'skipped', reason: 'budget' };
+  const settings = await repo.getSettings();
+  const cfg = alertsConfig(settings);
+  if (!cfg.enabled) return { action: 'off', reason: 'off' };
+  const dayStart = istDayStart(now);
+  const prev = settings.alertsRun && typeof settings.alertsRun === 'object' ? settings.alertsRun : {};
+  const pushedToday = prev.day === dayStart ? prev.pushesToday || 0 : 0;
+  const due = await repo.alertDueUsers(dayStart, DUE_USERS);
+  if (!due.length) return { action: 'idle' };
+
+  const hour = istHourOf(now);
+  const capped = [], eligible = [];
+  for (const u of due) {
+    if (cfg.adminOnly && !isAdminRow(u, env)) continue; // soft launch: rows wait (and expire) until opened up
+    if (inQuiet(hour, u.quiet_start, u.quiet_end)) continue;
+    if (u.sent_today >= Math.min(u.max_listings, cfg.maxListings)) { capped.push(u.user_id); continue; }
+    if (u.digests_today >= Math.min(u.max_digests, cfg.maxDigests)) continue;
+    if (u.last_sent && now - u.last_sent < u.min_gap_min * 60e3) continue;
+    eligible.push(u.user_id);
+  }
+  const cf = countedFetch(fetchFn);
+  let budget = Math.max(0, Math.min(maxSends, cf.left() - 10, cfg.maxPushesPerDay - pushedToday));
+  const targets = eligible.length && budget ? await repo.alertTargetsForSend(eligible) : [];
+  const byUser = new Map(eligible.map(id => [id, []]));
+  for (const t of targets) byUser.get(t.user_id)?.push(t);
+  const chosen = [], chosenUsers = [];
+  for (const [uid, list] of byUser) {
+    if (!budget) break;
+    if (!list.length) { capped.push(uid); continue; } // no working device: shown on #alerts, not pushed
+    if (list.length > budget) break;                   // keep users whole; the rest go next run, in order
+    chosen.push(...list); chosenUsers.push(uid); budget -= list.length;
+  }
+
+  const results = [];
+  let lastError = null;
+  if (chosen.length) {
+    let vapid;
+    try { const { importVapid } = channels.webpush; vapid = await importVapid(env); } catch { lastError = 'vapid_invalid'; }
+    if (vapid) {
+      const ctx = { fetchFn: cf, vapid, now, skipOrigins: new Set() };
+      for (let i = 0; i < chosen.length; i += SEND_CONCURRENCY) {
+        const part = chosen.slice(i, i + SEND_CONCURRENCY);
+        results.push(...await Promise.all(part.map(async t => ({ t, r: channels[t.channel] ? await channels[t.channel].send(t, null, ctx) : { ok: false, error: 'no_channel' } }))));
+      }
+    }
+  }
+  const okIds = [], goneIds = [], failed = [], sentUsers = new Set();
+  for (const { t, r } of results) {
+    if (r.ok) { okIds.push(t.id); sentUsers.add(t.user_id); continue; }
+    lastError = r.error || 'error';
+    if (r.gone) goneIds.push(t.id);
+    else if (r.error !== 'http_429') failed.push({ id: t.id, error: r.error || 'error' }); // 429: not the device's fault
+  }
+  await repo.alertWriteBack({ now, sentUsers: [...sentUsers], cappedUsers: capped, expireBefore: now - EXPIRE_MS, goneIds, failed, okIds });
+  const status = { action: 'sent', due: due.length, users: sentUsers.size, pushes: okIds.length, failed: failed.length, gone: goneIds.length, capped: capped.length, waiting: due.length - sentUsers.size - capped.length };
+  await repo.putSettings({ alertsRun: { day: dayStart, pushesToday: pushedToday + cf.used(), lastRunAt: now, lastError, last: status } });
+  return status;
 }
 
 export { HOUR, DAY, IST };

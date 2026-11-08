@@ -560,6 +560,42 @@ export function createRepo(db) {
       return (await db.first('SELECT id FROM alert_targets WHERE channel = ? AND address = ?', [channel, address]))?.id ?? null;
     },
     async deleteAlertTarget(userId, id) { return (await db.run('DELETE FROM alert_targets WHERE id = ? AND user_id = ?', [id, userId])).changes > 0; },
+    /**
+     * Send step, one query: users with pending alerts (active accounts, alerts not paused), oldest first,
+     * with their caps and today's counts (dayStart = IST midnight). Role and email decide the admin-only soft launch.
+     */
+    async alertDueUsers(dayStart, limit = 60) {
+      return db.all(`SELECT q.user_id, COUNT(*) AS pending, MIN(q.created_at) AS oldest,
+          p.quiet_start, p.quiet_end, p.max_listings, p.max_digests, p.min_gap_min, u.role, u.email,
+          (SELECT COUNT(*) FROM alert_queue s WHERE s.user_id = q.user_id AND s.status = 'sent' AND s.sent_at >= ?) AS sent_today,
+          (SELECT COUNT(DISTINCT sent_at) FROM alert_queue s WHERE s.user_id = q.user_id AND s.status = 'sent' AND s.sent_at >= ?) AS digests_today,
+          (SELECT MAX(sent_at) FROM alert_queue s WHERE s.user_id = q.user_id AND s.status = 'sent') AS last_sent
+        FROM alert_queue q
+        JOIN alert_prefs p ON p.user_id = q.user_id AND p.enabled = 1
+        JOIN users u ON u.id = q.user_id AND u.status = 'active'
+        WHERE q.status = 'pending'
+        GROUP BY q.user_id ORDER BY oldest, q.user_id LIMIT ?`, [dayStart, dayStart, limit]);
+    },
+    /**
+     * Send step write-back, one batch of at most 6 statements: expire old pending rows, mark sent
+     * (sent_at = batch id), mark not pushed (over the cap or no working device), delete gone devices, count
+     * failures (per-target error code), reset devices that worked. Empty parts are left out.
+     */
+    async alertWriteBack({ now, sentUsers = [], cappedUsers = [], expireBefore, goneIds = [], failed = [], okIds = [] }) {
+      const j = a => JSON.stringify(a);
+      const stmts = [];
+      // Expire first, so a digest never claims rows older than the expiry window.
+      if (expireBefore != null) stmts.push({ sql: "UPDATE alert_queue SET status = 'expired' WHERE status = 'pending' AND created_at < ?", params: [expireBefore] });
+      if (sentUsers.length) stmts.push({ sql: "UPDATE alert_queue SET status = 'sent', sent_at = ? WHERE status = 'pending' AND created_at <= ? AND user_id IN (SELECT value FROM json_each(?))", params: [now, now, j(sentUsers)] });
+      if (cappedUsers.length) stmts.push({ sql: "UPDATE alert_queue SET status = 'capped' WHERE status = 'pending' AND created_at <= ? AND user_id IN (SELECT value FROM json_each(?))", params: [now, j(cappedUsers)] });
+      if (goneIds.length) stmts.push({ sql: 'DELETE FROM alert_targets WHERE id IN (SELECT value FROM json_each(?))', params: [j(goneIds)] });
+      if (failed.length) stmts.push({ sql: `UPDATE alert_targets SET failures = failures + 1, updated_at = ?,
+          last_error = (SELECT ${je('e')} FROM json_each(?) WHERE ${je('i')} = alert_targets.id)
+          WHERE id IN (SELECT ${je('i')} FROM json_each(?))`, params: [now, j(failed.map(f => ({ i: f.id, e: f.error }))), j(failed.map(f => ({ i: f.id })))] });
+      if (okIds.length) stmts.push({ sql: 'UPDATE alert_targets SET failures = 0, last_error = NULL, last_ok_at = ? WHERE id IN (SELECT value FROM json_each(?))', params: [now, j(okIds)] });
+      if (stmts.length) await db.batch(stmts);
+      return stmts.length;
+    },
 
     // ---------- retention ----------
     /**

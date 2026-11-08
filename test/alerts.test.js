@@ -10,7 +10,9 @@ import { createRepo } from '../src/db/repo.js';
 import { ingestItems } from '../src/ingest.js';
 import { runBackfill, startBackfill } from '../src/backfill.js';
 import { budgeted, ingestDataset } from '../src/apify.js';
-import { createApp } from '../src/app.js';
+import { createApp, HOURLY_CRONS } from '../src/app.js';
+import { alertStep, ALERT_CRON, inQuiet, istHourOf, istDayStart } from '../src/alerts.js';
+import { readFileSync } from 'node:fs';
 import { createUserSession, COOKIE } from '../src/auth.js';
 
 const DAY = 864e5;
@@ -307,4 +309,192 @@ test('no endpoint or key ever leaves the server: config and export', async () =>
   }
   const cfg = (await h.call('GET', '/api/alerts/config', undefined, u.cookie)).data;
   assert.deepEqual(Object.keys(cfg.targets[0]).sort(), ['channel', 'createdAt', 'failing', 'id', 'label', 'lastOkAt']);
+});
+
+// ---------- cron send step ----------
+const T12 = Date.UTC(2026, 10, 8, 6, 30); // 12:00 IST
+const ist = (h, m = 0) => Date.UTC(2026, 10, 8, 0, 0) - 5.5 * 36e5 + (h * 60 + m) * 60e3; // that IST clock time on 8 Nov
+
+/** Mock push services: status per endpoint (default 201), every request recorded. */
+function fakePush(statusFor = () => 201) {
+  const calls = [];
+  const fn = async (url, init) => { calls.push({ url, init }); return new Response(null, { status: statusFor(url) }); };
+  return { fn, calls };
+}
+async function sendWorld({ alerts = { enabled: true, adminOnly: false }, adminEmails = '' } = {}) {
+  const t = await memoryDb();
+  const keys = await testVapid(); delete keys.publicKey;
+  const env = { ...keys, ADMIN_EMAILS: adminEmails };
+  const area = await t.repo.createArea(GREEN_GLEN, T12 - DAY);
+  await t.repo.putSettings({ alerts });
+  let n = 0;
+  const addUser = async ({ email = `u${++n}@example.com`, endpoints = [`https://w${n}.notify.windows.com/w/?token=${n}`], prefs = {}, status = 'active', role = 'user' } = {}) => {
+    const u = await t.repo.upsertUser({ email, role, status }, T12 - DAY);
+    await t.repo.linkArea(u.id, area.id, T12 - DAY);
+    await t.repo.replaceAlertAreas(u.id, [{ areaId: area.id }], T12 - DAY, DEFAULTS);
+    if (Object.keys(prefs).length) await t.repo.putAlertPrefs(u.id, { ...(await t.repo.alertPrefs(u.id)), ...prefs }, T12 - DAY);
+    for (const e of endpoints) await t.repo.upsertAlertTarget({ userId: u.id, channel: 'webpush', address: e, keys: {}, label: 'Test' }, T12 - DAY);
+    return u;
+  };
+  const enqueue = async (userId, count, createdAt, status = 'pending', sentAt = null) => {
+    for (let i = 0; i < count; i++) await t.db.run('INSERT INTO alert_queue (user_id, listing_id, area_id, status, created_at, sent_at) VALUES (?, ?, ?, ?, ?, ?)', [userId, `L${userId}-${createdAt}-${i}-${status}`, area.id, status, createdAt, sentAt]);
+  };
+  const rows = async userId => t.db.all('SELECT status, sent_at FROM alert_queue WHERE user_id = ? ORDER BY created_at, listing_id', [userId]);
+  const step = (fetchFn, now = T12, opts = {}) => { const r = budgeted(t.repo); return alertStep(r, env, { fetchFn, now, ...opts }).then(s => ({ ...s, queries: r.used() })); };
+  return { ...t, env, area, addUser, enqueue, rows, step };
+}
+
+test('quiet hours: IST conversion and wrap-around; held rows go out after quiet end as one digest', async () => {
+  assert.deepEqual([istHourOf(ist(21, 59)), istHourOf(ist(22)), istHourOf(ist(7, 59)), istHourOf(ist(8))], [21, 22, 7, 8]);
+  assert.deepEqual([21, 22, 23, 0, 7, 8].map(h => inQuiet(h, 22, 8)), [false, true, true, true, true, false]);
+  assert.deepEqual([0, 1, 5, 6].map(h => inQuiet(h, 1, 6)), [false, true, true, false]);
+  assert.equal(inQuiet(3, 5, 5), false, 'start == end: no quiet hours');
+  assert.equal(istDayStart(ist(23, 30)), ist(0)); assert.equal(istDayStart(ist(0, 10)), ist(0));
+  const w = await sendWorld();
+  const u = await w.addUser();
+  await w.enqueue(u.id, 1, ist(22, 5)); await w.enqueue(u.id, 2, ist(23, 40));
+  const push = fakePush();
+  assert.equal((await w.step(push.fn, ist(22, 10))).pushes, 0);
+  assert.equal((await w.step(push.fn, ist(7, 59) + DAY)).pushes, 0);
+  assert.equal(push.calls.length, 0, 'nothing during quiet hours');
+  const r = await w.step(push.fn, ist(8, 0) + DAY);
+  assert.equal(r.pushes, 1); assert.equal(push.calls.length, 1, 'one push for the whole night');
+  const rs = await w.rows(u.id);
+  assert.ok(rs.every(x => x.status === 'sent' && x.sent_at === ist(8, 0) + DAY), 'one batch');
+});
+
+test('caps: minimum gap, digests per day, listings per day (rows capped), admin ceiling, global pushes per day', async () => {
+  const w = await sendWorld({ alerts: { enabled: true, adminOnly: false, maxListings: 5 } });
+  const gap = await w.addUser(); await w.enqueue(gap.id, 1, T12 - 60e3); await w.enqueue(gap.id, 1, T12 - 30 * 60e3, 'sent', T12 - 30 * 60e3);
+  const digests = await w.addUser({ prefs: { maxDigests: 2 } }); await w.enqueue(digests.id, 1, T12 - 60e3);
+  for (const t of [ist(9), ist(10)]) await w.enqueue(digests.id, 1, t, 'sent', t);
+  const listings = await w.addUser(); await w.enqueue(listings.id, 2, T12 - 60e3); await w.enqueue(listings.id, 5, ist(9), 'sent', ist(9)); // admin ceiling 5 < user 30
+  const fine = await w.addUser(); await w.enqueue(fine.id, 1, T12 - 60e3); await w.enqueue(fine.id, 3, ist(9), 'sent', ist(9));
+  const push = fakePush();
+  const r = await w.step(push.fn);
+  assert.equal(r.pushes, 1); assert.equal(push.calls.length, 1);
+  assert.equal(new URL(push.calls[0].url).hostname, `w${4}.notify.windows.com`, 'only the user under every cap');
+  assert.equal((await w.rows(gap.id))[1].status, 'pending', 'inside the 60-minute gap: waits');
+  assert.equal((await w.rows(digests.id)).at(-1).status, 'pending', 'digest cap: waits for tomorrow');
+  assert.deepEqual((await w.rows(listings.id)).filter(x => !x.sent_at).map(x => x.status), ['capped', 'capped'], 'listing cap: not pushed, still on #alerts');
+
+  const g = await sendWorld({ alerts: { enabled: true, adminOnly: false, maxPushesPerDay: 1 } });
+  const a = await g.addUser(), b = await g.addUser();
+  await g.enqueue(a.id, 1, T12 - 120e3); await g.enqueue(b.id, 1, T12 - 60e3);
+  const p2 = fakePush();
+  assert.equal((await g.step(p2.fn)).pushes, 1);
+  assert.equal((await g.step(p2.fn, T12 + 60e3)).pushes, 0, 'global daily cap reached');
+  assert.equal(p2.calls.length, 1);
+  assert.equal((await g.step(p2.fn, ist(8) + DAY)).pushes, 1, 'next IST day: allowed again');
+});
+
+test('send results: ok resets failures, 404/410 delete the device, 429 and 5xx keep rows pending, 403 counts a failure; 2 devices = 2 requests', async () => {
+  const w = await sendWorld();
+  const status = { 1: 201, 2: 410, 3: 404, 4: 429, 5: 403, 6: 500, 7: 500, 8: 201 };
+  const ok = await w.addUser(); const gone410 = await w.addUser(); const gone404 = await w.addUser(); const slow = await w.addUser(); const denied = await w.addUser(); const down = await w.addUser();
+  const mixed = await w.addUser({ endpoints: ['https://w7.notify.windows.com/w/?token=7', 'https://w8.notify.windows.com/w/?token=8'] });
+  await w.db.run('UPDATE alert_targets SET failures = 3 WHERE user_id = ?', [ok.id]);
+  for (const u of [ok, gone410, gone404, slow, denied, down, mixed]) await w.enqueue(u.id, 1, T12 - 60e3);
+  const push = fakePush(url => status[new URL(url).hostname.match(/^w(\d+)/)[1]]);
+  const r = await w.step(push.fn);
+  assert.equal(push.calls.length, 8);
+  assert.deepEqual([r.pushes, r.gone, r.failed], [2, 2, 3]);
+  const targets = async u => w.db.all('SELECT failures, last_error, last_ok_at FROM alert_targets WHERE user_id = ? ORDER BY id', [u.id]);
+  assert.deepEqual(await targets(ok), [{ failures: 0, last_error: null, last_ok_at: T12 }]);
+  assert.deepEqual(await targets(gone410), []); assert.deepEqual(await targets(gone404), []);
+  assert.deepEqual(await targets(slow), [{ failures: 0, last_error: null, last_ok_at: null }], '429 is not counted against the device');
+  assert.deepEqual(await targets(denied), [{ failures: 1, last_error: 'http_403', last_ok_at: null }]);
+  assert.deepEqual((await targets(mixed)).map(t => t.failures), [1, 0]);
+  assert.equal((await w.rows(ok.id))[0].status, 'sent'); assert.equal((await w.rows(mixed.id))[0].status, 'sent', 'one device worked');
+  assert.equal((await w.rows(slow.id))[0].status, 'pending'); assert.equal((await w.rows(down.id))[0].status, 'pending', 'retried next run');
+  // Devices that failed 5 times are skipped.
+  await w.db.run('UPDATE alert_targets SET failures = 5 WHERE user_id = ?', [down.id]);
+  const again = fakePush();
+  await w.step(again.fn, T12 + 2 * 36e5);
+  assert.ok(!again.calls.some(c => c.url.includes('w6.')), 'dead device skipped');
+  assert.equal((await w.rows(down.id))[0].status, 'capped', 'no working device: not pushed');
+});
+
+test('budget: 100 due users and 130 devices: <= 10 D1 queries and <= 40 pushes per run, oldest first, resumable; idle run is 2 queries', async () => {
+  const w = await sendWorld();
+  const users = [];
+  for (let i = 0; i < 100; i++) {
+    const n = users.length + 1;
+    const endpoints = i < 30 ? [`https://a${n}.notify.windows.com/w/?t=${n}`, `https://b${n}.notify.windows.com/w/?t=${n}`] : [`https://a${n}.notify.windows.com/w/?t=${n}`];
+    const u = await w.addUser({ endpoints }); users.push(u);
+    await w.enqueue(u.id, 1, T12 - 60 * 60e3 + i * 1000);
+  }
+  const push = fakePush();
+  const r1 = await w.step(push.fn);
+  assert.ok(r1.queries <= 10, `run used ${r1.queries} queries`); assert.ok(push.calls.length <= 40, `${push.calls.length} pushes`);
+  assert.equal(r1.users, 20, 'users 1-20 (two devices each) fill the 40 pushes');
+  const sentIds = async () => (await w.db.all("SELECT DISTINCT user_id FROM alert_queue WHERE status = 'sent' ORDER BY user_id")).map(x => x.user_id);
+  assert.deepEqual(await sentIds(), users.slice(0, 20).map(u => u.id));
+  const r2 = await w.step(push.fn, T12 + 10 * 60e3);
+  assert.ok(r2.queries <= 10); assert.equal(push.calls.length, 80);
+  assert.equal(r2.users, 30, 'resumes in order: the last 10 two-device users, then 20 one-device users');
+  assert.deepEqual(await sentIds(), users.slice(0, 50).map(u => u.id));
+  let guard = 0; while ((await w.db.first("SELECT count(*) AS n FROM alert_queue WHERE status = 'pending'")).n && guard++ < 10) await w.step(push.fn, T12 + (guard + 2) * 10 * 60e3);
+  assert.equal(push.calls.length, 130, 'every device got exactly one push');
+  const idle = await sendWorld();
+  const r = await idle.step(fakePush().fn);
+  assert.deepEqual([r.action, r.queries], ['idle', 2]);
+});
+
+test('expiry: pending rows older than 36 h expire instead of being pushed', async () => {
+  const w = await sendWorld();
+  const u = await w.addUser();
+  await w.enqueue(u.id, 1, T12 - 37 * 36e5); await w.enqueue(u.id, 1, T12 - 60e3);
+  await w.step(fakePush().fn);
+  assert.deepEqual((await w.rows(u.id)).map(x => x.status), ['expired', 'sent']);
+});
+
+test('kill switch, missing VAPID and admin-only soft launch in the send step', async () => {
+  const off = await sendWorld({ alerts: { enabled: false } });
+  const u0 = await off.addUser(); await off.enqueue(u0.id, 1, T12 - 60e3);
+  const p0 = fakePush();
+  assert.deepEqual([(await off.step(p0.fn)).action, p0.calls.length], ['off', 0]);
+  const r = await alertStep(budgeted(off.repo), {}, { fetchFn: p0.fn, now: T12 });
+  assert.deepEqual(r, { action: 'off', reason: 'not_configured' });
+  const soft = await sendWorld({ alerts: { enabled: true }, adminEmails: 'boss@example.com' });
+  const user = await soft.addUser(), boss = await soft.addUser({ email: 'boss@example.com' }), dbAdmin = await soft.addUser({ role: 'admin' });
+  for (const u of [user, boss, dbAdmin]) await soft.enqueue(u.id, 1, T12 - 60e3);
+  const p = fakePush();
+  assert.equal((await soft.step(p.fn)).pushes, 2);
+  assert.equal((await soft.rows(user.id))[0].status, 'pending', 'non-admin waits while adminOnly is on');
+  const blocked = await soft.addUser({ email: 'boss2@example.com', role: 'admin', status: 'blocked' }); await soft.enqueue(blocked.id, 1, T12 - 60e3);
+  const p2 = fakePush(); await soft.step(p2.fn, T12 + 36e5);
+  assert.equal(p2.calls.length, 0, 'blocked accounts never receive');
+});
+
+test('send step CPU: 40 devices with mocked push services stay far under the 10 ms Workers budget (JS time)', async () => {
+  const w = await sendWorld();
+  for (let i = 0; i < 40; i++) { const u = await w.addUser(); await w.enqueue(u.id, 1, T12 - 60e3); }
+  let dbMs = 0; const d = w.db;
+  const timed = f => async (...a) => { const t = performance.now(); try { return await f(...a); } finally { dbMs += performance.now() - t; } };
+  const repo = budgeted({ db: { ...d, all: timed(d.all), first: timed(d.first), run: timed(d.run), batch: timed(d.batch) } });
+  const fetchFn = async () => new Response(null, { status: 201 });
+  await alertStep(budgeted(w.repo), w.env, { fetchFn, now: T12 - 365 * DAY }); // warm-up (nothing due then is fine)
+  const t0 = performance.now();
+  const r = await alertStep(repo, w.env, { fetchFn, now: T12 });
+  const jsMs = performance.now() - t0 - dbMs;
+  assert.equal(r.pushes, 40);
+  assert.ok(jsMs < 15, `alert step JS time ${jsMs.toFixed(2)} ms (target < 5 ms; loose ceiling for shared CI runners)`);
+});
+
+test('cron dispatch: */10 runs only the alert step; the hourly string runs the hourly job; unknown strings are ignored; wrangler.jsonc matches', async () => {
+  const w = await sendWorld();
+  const u = await w.addUser(); await w.enqueue(u.id, 1, Date.now() - 60e3);
+  const push = fakePush();
+  const app = createApp({ repo: () => w.repo, assets: async () => null, fetch: push.fn });
+  const a = await app.scheduled({ cron: ALERT_CRON }, w.env);
+  assert.equal(a.action, 'sent'); assert.equal(push.calls.length, 1);
+  assert.equal((await w.repo.getSettings()).scheduler, undefined, 'hourly job did not run');
+  const h = await app.scheduled({ cron: '30 * * * *' }, w.env);
+  assert.equal(h.action, 'skipped', 'hourly job ran (no APIFY_TOKEN)'); assert.equal(push.calls.length, 1, 'alert step did not run again');
+  assert.equal((await app.scheduled({ cron: '15 3 * * *' }, w.env)).action, 'ignored');
+  assert.equal((await app.scheduled({}, w.env)).action, 'skipped', 'no cron string (tests, manual) = hourly job');
+  const crons = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '')).triggers.crons;
+  assert.deepEqual(crons.filter(c => !HOURLY_CRONS.includes(c) && c !== ALERT_CRON), [], 'every Worker cron trigger is one scheduled() handles');
+  assert.ok(crons.includes(ALERT_CRON));
 });

@@ -15,13 +15,15 @@ import { startBackfill, backfillState } from './backfill.js';
 import { generateKeywords, cleanKeywords } from './core/keywords.js';
 import { esc } from './core/logic.js';
 import { STAGES, STATUSES } from './db/repo.js';
-import { alertsApi } from './alerts.js';
+import { alertsApi, alertStep, ALERT_CRON } from './alerts.js';
 
 const KB = 1024;
 export const LIMITS = { importBytes: 2 * KB * KB, webhookBytes: 16 * KB, smallBytes: 64 * KB, importItems: 3000 };
 const IMPORT_SOURCES = ['scraper', 'phone', 'manual', 'sample'];
 // Paths reachable without a session. Static files here hold no data: the login page needs the
 // stylesheet and icon, and browsers fetch the web manifest without cookies.
+// Cron strings that run the hourly scheduledJob(): the Worker trigger and the Node in-process timer.
+export const HOURLY_CRONS = ['30 * * * *', 'node-interval'];
 const PUBLIC_ASSETS = new Set(['/ui.js', '/finance.js', '/app.css', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.webmanifest', '/favicon.ico']);
 
 /**
@@ -41,6 +43,16 @@ export function createApp(deps) {
     },
     async scheduled(event, env) {
       const repo = deps.repo(env);
+      // Two Cron Triggers (wrangler.jsonc): the hourly job, and the 10-minute alert step, which runs alone
+      // so it has the whole per-invocation budget. Unknown cron strings are ignored, so a trigger list
+      // that runs ahead of (or behind) the code never runs the hourly job every 10 minutes.
+      const cron = event?.cron;
+      if (cron === ALERT_CRON) {
+        const a = await alertStep(budgeted(repo), env, { fetchFn });
+        console.log('alerts', JSON.stringify(a));
+        return a;
+      }
+      if (cron && !HOURLY_CRONS.includes(cron)) { console.log('scheduled: ignoring unknown cron', String(cron).slice(0, 40)); return { action: 'ignored' }; }
       const r = await scheduledJob(repo, env, { fetchFn });
       console.log('scheduled', JSON.stringify({ action: r.action, swept: r.swept?.length, detail: r.detail }));
       return r;
