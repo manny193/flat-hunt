@@ -1,6 +1,6 @@
 # Work tracking: recommendation and setup
 
-Status: **proposal, waiting for founder approval.** Nothing has been created yet. Written by the architect, 8 Nov 2026.
+Status: **live** since 8 Nov 2026: https://github.com/users/manny193/projects/1 (project number 1). Written by the architect.
 
 ## Recommendation: GitHub Issues + one GitHub Project
 
@@ -51,7 +51,7 @@ Markdown alone is the simplest, but it has no board and no "who is waiting on wh
 - Type: `type:bug`, `type:feature`, `type:chore`, `type:research`, `type:decision`, `type:idea`
 - Area: `area:scraper`, `area:ingest`, `area:ai`, `area:ui`, `area:auth`, `area:infra`, `area:docs`, `area:costs`, `area:privacy`
 - Owner: `owner:founder` (a human must act), `owner:agent`
-- Role (which agent): `role:engineer`, `role:qa`, `role:designer`, `role:architect`, `role:chief-of-staff`
+- Role (which agent): `role:engineer`, `role:senior-engineer` (code review, production pushes), `role:qa`, `role:designer`, `role:architect`, `role:chief-of-staff`
 
 **How "pending on founder" shows:**
 - The item gets the label `owner:founder` and Status "Waiting on founder".

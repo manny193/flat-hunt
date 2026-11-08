@@ -34,7 +34,7 @@ npm run migrate     # apply migrations to the local SQLite file
 
 1. **Zero npm dependencies.** No `dependencies`/`devDependencies` in package.json. Use Node 22 / Web platform built-ins.
 2. **Workers Free limits:** 10 ms CPU per invocation (network/D1 waits do not count), 50 D1 queries per invocation (we budget 48 via `budgeted()`), 50 subrequests, 100k requests/day, D1 100k rows written and 5M rows read per day. Any new work in the cron or webhook must fit the remaining `repo.left()` budget and be resumable.
-3. **Push to `main` = production deploy** (GitHub Actions: tests, migrations, deploy, smoke test, auto-rollback). Never push without the chief of staff's go-ahead after QA sign-off. Work on a branch.
+3. **Push to `main` = production deploy** (GitHub Actions: tests, migrations, deploy, smoke test, auto-rollback). Only the senior engineer pushes (the architect if the senior engineer is busy), after reviewing the exact commits and QA sign-off; if the review finds issues, the engineer redoes the work first. Work on a branch.
 4. **Migrations are add-only**: new tables/columns only, no `BEGIN/COMMIT`, no FTS5/virtual tables (breaks `d1 export`). Old code must still run on the new schema (rollback safety).
 5. **Apify costs money per row.** Never widen the cutoff, raise `resultsPerGroup` above 50, or add group-info rows per run without updating `docs/ai/COSTS.md` and getting founder approval.
 6. **CSP is strict**: no inline scripts/styles, no `style=""`. New external hosts need a CSP change in `src/http.js`.
@@ -52,6 +52,15 @@ npm run migrate     # apply migrations to the local SQLite file
 - Mock all network (`fetchFn` is injected everywhere). Tests never call Apify, Reddit, Google, Groq or Cloudflare.
 - Privacy and limits have tests (public serializer, D1 budget, CPU-sized pages). Do not weaken them to make a change pass.
 - QA owns `docs/QA.md`; fixes found by QA go through the engineer with a note there.
+
+## Team (AI agents, coordinated by the chief of staff)
+
+- **Chief of staff:** talks to the founder, plans, assigns work, keeps the board current. Spawns agents deliberately and uses cheaper models for simple jobs.
+- **Engineer:** builds features and fixes.
+- **Senior engineer:** code review and production pushes; helps the architect with hard research.
+- **Architect:** research (tools, costs, designs); backup reviewer and pusher.
+- **QA:** testing and quality checks; signs off before a push.
+- **Designer:** UI specs and mockups.
 
 ## Docs and ownership
 
