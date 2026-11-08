@@ -2,6 +2,8 @@
 
 Researched 8 Nov 2026. Status: **proposal, nothing built**. Prices are public figures from vendor and aggregator pages; items marked **[unverified]** come from secondary sources or are our estimates. Re-check every rate on Meta's rate card before it drives a money decision. ₹ figures use ₹89 per US$ (as in `docs/ai/COSTS.md`).
 
+**Web Push design (founder chose Web Push first, issue #30): see `docs/ai/ALERTS-WEBPUSH.md`; it supersedes §6.1 and §6.3 below for Web Push.**
+
 Feature asked: a signed-in user or admin (never the public) picks areas, e.g. "Green Glen Layout". When ingest adds new posts for that area (scrapes run up to 8 times a day), the user gets them on WhatsApp. Area only, to avoid spam.
 
 ## 1. Answer

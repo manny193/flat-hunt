@@ -9,6 +9,7 @@ Two audiences, two folders. Everything else in `docs/` is a topic document that 
 | `/CLAUDE.md` (repo root) | AI agents (loaded automatically) | Commands, code map, hard limits, privacy and testing rules, how to update tracking. Keep it short. |
 | `docs/ai/ARCHITECTURE.md` | AI agents, engineers | Exact modules, routes, data flow, tables, invariants, extension points |
 | `docs/ai/COSTS.md` | Engineer (Finance page), founder, chief of staff | Free limits, prices, how to measure usage, cost formulas, scenarios |
+| `docs/ai/ALERTS-WEBPUSH.md` | Engineer, architect, QA | Area alerts over Web Push: HLD, data model, API, cron budget, task breakdown (channel research: `docs/ai/ALERTS.md`) |
 | `docs/human/ARCHITECTURE.md` | Founder, stakeholders, new team members | What each part does and why it is free, in plain words |
 | `docs/human/APP-FLOWS.md` | Founder, stakeholders, designer, QA | What visitors, users and admins do, step by step; how a post becomes a listing |
 | `docs/TRACKING.md` | Everyone | How work is tracked (GitHub Issues + Project), labels, columns, agent rules |
