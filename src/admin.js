@@ -1,7 +1,8 @@
 // Admin API (/api/admin/*). The router has already checked that the caller is an admin.
 import { HttpError, json, errorJson, readJson } from './http.js';
 import { ingestItems } from './ingest.js';
-import { scheduledJob, startRun, sweep, getUsage, scheduleOf, nextRunAt, actorId, DEFAULT_RESULTS_PER_GROUP, MAX_RESULTS_PER_GROUP, budgeted, rowPrice, groupInfoStale } from './apify.js';
+import { scheduledJob, startRun, sweep, getUsage, scheduleOf, nextRunAt, actorId, DEFAULT_RESULTS_PER_GROUP, MAX_RESULTS_PER_GROUP, budgeted, rowPrice, groupInfoStale, runGroupPlan, DEFAULT_ACTOR } from './apify.js';
+import { planOf, PLAN_LIMITS, PLAN_DEFAULTS, groupStats, dailyAllowance, budgetOf, manualAction, projectedDailyUsd, isReading } from './groupplan.js';
 import { redditStep, redditConfigured, subredditsOf, validateSubreddits, DEFAULT_SUBREDDITS } from './reddit.js';
 import { validateGroups, groupsView, groupId, classifyFacebookUrl, PAGE_WARNING } from './groups.js';
 import { editArea, areaName, LIMITS } from './app.js';
@@ -54,7 +55,7 @@ function validateSchedule(b, cur) {
   const num = (k, lo, hi) => { if (b[k] === undefined) return; const n = Number(b[k]); if (!Number.isInteger(n) || n < lo || n > hi) throw new HttpError(400, 'bad_' + k, `${k} must be a whole number from ${lo} to ${hi}.`); out[k] = n; };
   if (b.enabled !== undefined) { if (typeof b.enabled !== 'boolean') throw new HttpError(400, 'bad_enabled'); out.enabled = b.enabled; }
   if (b.redditEnabled !== undefined) { if (typeof b.redditEnabled !== 'boolean') throw new HttpError(400, 'bad_redditEnabled'); out.redditEnabled = b.redditEnabled; }
-  num('intervalHours', 1, 24); num('budgetWarnPct', 10, 99); num('budgetStopPct', 11, 100); num('retentionDays', 7, 365); num('backfillDays', 1, 5);
+  num('intervalHours', 1, 24); num('budgetWarnPct', 10, 99); num('budgetStopPct', 11, 100); num('retentionDays', 7, 365); num('backfillDays', 1, 5); num('overlapMin', 1, 60);
   if (b.mode !== undefined) { if (b.mode !== 'times' && b.mode !== 'interval') throw new HttpError(400, 'bad_mode', 'mode must be "times" or "interval".'); out.mode = b.mode; }
   if (b.runHoursIst !== undefined) {
     if (!Array.isArray(b.runHoursIst) || b.runHoursIst.length > 24 || !b.runHoursIst.every(h => Number.isInteger(h) && h >= 0 && h <= 23)) throw new HttpError(400, 'bad_runHoursIst', 'Run hours must be whole hours from 0 to 23 (IST).');
@@ -125,6 +126,70 @@ async function stats(repo, days, now) {
 }
 
 /** Generic sources view: Facebook via Apify, Reddit direct, phone scans. */
+/** groupPlan PUT body: enabled (boolean) and the tunables in PLAN_LIMITS (JSON numbers in range). */
+export function validatePlan(b, cur) {
+  if (!b || typeof b !== 'object' || Array.isArray(b)) throw new HttpError(400, 'bad_body');
+  const out = { ...PLAN_DEFAULTS, ...cur };
+  if (b.enabled !== undefined) { if (typeof b.enabled !== 'boolean') throw new HttpError(400, 'bad_enabled', 'enabled must be true or false.'); out.enabled = b.enabled; }
+  for (const [k, [lo, hi, whole]] of Object.entries(PLAN_LIMITS)) {
+    if (b[k] === undefined) continue;
+    const n = b[k];
+    if (typeof n !== 'number' || !Number.isFinite(n) || n < lo || n > hi || (whole && !Number.isInteger(n))) throw new HttpError(400, 'bad_' + k, `${k} must be ${whole ? 'a whole number' : 'a number'} from ${lo} to ${hi}.`);
+    out[k] = whole ? n : Math.round(n * 10000) / 10000;
+  }
+  if (out.normalPer6h >= out.hotPer6h) throw new HttpError(400, 'bad_tiers', 'The hot threshold must be above the normal threshold.');
+  if (out.earlyMinYield > out.minYield) throw new HttpError(400, 'bad_yield', 'The early-pause yield must not be above the minimum yield.');
+  return out;
+}
+
+/** Admin "Group performance" (#admin-groups-performance). D1: settings 1 + runs 1. */
+export async function groupPlanView(repo, env, now) {
+  const s = await repo.getSettings();
+  const plan = planOf(s); const state = s.groupState && typeof s.groupState === 'object' ? s.groupState : {};
+  let actor = DEFAULT_ACTOR; try { actor = actorId(env); } catch { /* default price */ }
+  const price = rowPrice(actor);
+  const usage = s.apifyUsage || null;
+  const cycleStart = Date.parse(usage?.cycleStart || '') || now - 30 * DAY;
+  const rows = await repo.groupRuns(Math.min(now - 7 * DAY, cycleStart), 2000);
+  const since = {}; for (const [id, x] of Object.entries(state)) if (x?.status === 'trial' && x.since) since[id] = x.since;
+  const stats = groupStats(rows, s, { now, cycleStart, price, since });
+  const pace = dailyAllowance({ budgetUsd: budgetOf(s), usage, now });
+  const watched = groupsView(s.groups).filter(g => g.supported);
+  const nameOf = id => { const w = watched.find(g => g.id === id); return w ? (w.name || w.url) : null; };
+  const pct = x => x == null ? null : Math.round(x * 1000) / 10;
+  const groups = watched.map(g => {
+    const st = stats[g.id] || {}; const x = state[g.id] || {};
+    const hist = Array.isArray(x.history) ? x.history : [];
+    return {
+      id: g.id, name: g.name || '', url: g.url, enabled: g.active,
+      status: g.active ? (x.status || null) : 'off', why: g.active ? (x.why || null) : 'turned off in Groups', at: x.at || null, manual: !!x.manual,
+      tier: x.tier || null, mode: x.mode || null, coverage: x.coverage ?? null, lookbackH: x.lookbackH ?? null,
+      posts7d: st.rows7 || 0, usable7d: st.usable7 || 0, postsCycle: st.rowsCycle || 0, usableCycle: st.usableCycle || 0,
+      yieldPct: pct(st.rawYield), smoothedYieldPct: st.rows7 != null ? pct(st.yield) : null, usablePer6h: st.per6h == null ? null : Math.round(st.per6h * 10) / 10,
+      crossSharePct: pct(st.crossShare || 0), echoOf: st.echoOf ? nameOf(st.echoOf) : null, echo: !!x.echo,
+      spend7dUsd: st.usd7 || 0, spendCycleUsd: st.usdCycle || 0, listingsPerUsd: st.usdCycle > 0 ? Math.round(st.usableCycle / st.usdCycle) : null,
+      failures: st.fails || 0, lastSeenAt: st.lastSeenAt || null, lastRead: x.lastRead || null,
+      trialEndsAt: x.status === 'trial' && x.since ? x.since + plan.trialDays * DAY : null, trialSpendUsd: x.status === 'trial' ? st.trial?.usd || 0 : null,
+      lastEvent: hist.at(-1) || null, history: hist,
+    };
+  });
+  const log = groups.flatMap(g => g.history.map(e => ({ ...e, id: g.id, name: g.name || g.url }))).sort((a, b) => b.at - a.at).slice(0, 30);
+  const ids = watched.filter(g => g.active).map(g => g.id);
+  const daily = projectedDailyUsd(state, stats, plan, price, ids);
+  const used = usage?.usedUsd ?? 0;
+  return {
+    plan, limits: PLAN_LIMITS,
+    summary: {
+      enabled: plan.enabled, reading: ids.filter(id => isReading(state[id])).length, minActive: plan.minActive,
+      pool: ids.filter(id => state[id]?.status === 'paused' && !state[id]?.manual && state[id]?.why !== 'budget').length,
+      budgetUsd: budgetOf(s), allowanceUsd: pace.allowanceUsd, capUsd: pace.capUsd, daysLeft: pace.daysLeft, spentUsd: used,
+      projectedDailyUsd: daily, projectedCycleUsd: Math.round((used + daily * pace.daysLeft) * 100) / 100,
+      lastAllocationAt: s.groupPlanRun?.at || null, apifyConfigured: !!env.APIFY_TOKEN,
+    },
+    groups, log,
+  };
+}
+
 async function sourcesView(repo, env, now) {
   const s = await repo.getSettings();
   const st = await stats(repo, 7, now);
@@ -183,8 +248,15 @@ export async function adminApi(request, env, method, path, url, repo, fetchFn, w
   // ---------- watched groups ----------
   if (res === 'groups') {
     const s = await repo.getSettings(); const list = Array.isArray(s.groups) ? s.groups : [];
-    const save = async next => { const v = validateGroups(next); await repo.putSettings({ groups: v.groups }); return json({ groups: groupsView(v.groups), warnings: v.warnings }); };
-    if (!id && method === 'GET') return json({ groups: groupsView(list) });
+    const save = async next => {
+      const v = validateGroups(next); await repo.putSettings({ groups: v.groups });
+      // Group plan on: a new, removed or switched group is placed (or dropped) right away, not at the next daily run.
+      if (planOf(s).enabled) await runGroupPlan(repo, await repo.getSettings(), { now, env });
+      return json({ groups: groupsView(v.groups), warnings: v.warnings });
+    };
+    const st = s.groupState && typeof s.groupState === 'object' ? s.groupState : {};
+    const withPlan = gs => gs.map(g => st[g.id]?.status ? { ...g, plan: { status: st[g.id].status, why: st[g.id].why || null, tier: st[g.id].tier || null } } : g);
+    if (!id && method === 'GET') return json({ groups: withPlan(groupsView(list)), planEnabled: planOf(s).enabled });
     if (!id && method === 'PUT') return save((await body())?.groups);
     if (!id && method === 'POST') {
       const b = await body(); const c = classifyFacebookUrl(b?.url);
@@ -196,6 +268,29 @@ export async function adminApi(request, env, method, path, url, repo, fetchFn, w
       const i = list.findIndex(g => groupId(g.url) === id); if (i < 0) return errorJson(404, 'not_found');
       if (method === 'DELETE') return save(list.filter((_, j) => j !== i));
       if (method === 'PATCH') { const b = await body(); const g = { ...list[i] }; if (typeof b?.name === 'string') g.name = b.name; if (typeof b?.active === 'boolean') g.active = b.active; if (typeof b?.url === 'string') g.url = b.url; return save(list.map((x, j) => j === i ? g : x)); }
+    }
+  }
+
+  // ---------- group plan (#admin-groups-performance) ----------
+  if (res === 'group-plan') {
+    if (!id && method === 'GET') return json(await groupPlanView(repo, env, now));
+    if (!id && method === 'PUT') {
+      const s = await repo.getSettings();
+      const plan = validatePlan(await body(), planOf(s));
+      await repo.putSettings({ groupPlan: plan });
+      if (plan.enabled) await runGroupPlan(repo, await repo.getSettings(), { now, env });
+      return json(await groupPlanView(repo, env, now));
+    }
+    if (id && !sub && method === 'POST') {
+      if (!/^g[0-9a-z]{1,16}$/.test(id)) throw new HttpError(400, 'bad_id');
+      const s = await repo.getSettings();
+      if (!groupsView(s.groups).some(g => g.id === id && g.supported)) return errorJson(404, 'not_found');
+      const cur = (s.groupState && typeof s.groupState === 'object' ? s.groupState : {})[id];
+      const next = manualAction(cur, (await body())?.action, now);
+      if (!next) throw new HttpError(400, 'bad_action', 'action must be pause, promote or resume.');
+      const { lastRead, recoverNext, ...rest } = next;
+      await repo.patchSettings('groupState', { [id]: rest });
+      return json(await groupPlanView(repo, env, now));
     }
   }
 

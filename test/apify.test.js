@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
-import { buildInput, webhookParam, runCost, OFFICIAL_ACTOR, DEFAULT_ACTOR, DATASET_OMIT } from '../src/apify.js';
+import { buildInput, webhookParam, runCost, OFFICIAL_ACTOR, DEFAULT_ACTOR, DATASET_OMIT, scheduledJob, apifyTime } from '../src/apify.js';
+import { groupId } from '../src/groups.js';
 import { memoryDb, GREEN_GLEN } from './helpers.js';
 
 const BASE = 'https://hunt.test';
@@ -300,4 +301,145 @@ test('a run cut short by its limits is re-read once with the largest posts-per-g
   const body = JSON.parse(api.calls.filter(c => c.init.method === 'POST').at(-1).init.body);
   assert.equal(body.resultsPerGroup, 50); assert.equal(body.postsPublishedAfter, '2026-11-07T01:00:00Z');
   assert.equal((await repo.getRunByDataset('dsNEW000001')).report.caps.recover, true, 'a second cut-short run is accepted, not re-read again');
+});
+
+// ---------- group plan (docs/ai/GROUP-SCHEDULING.md), behind groupPlan.enabled ----------
+const U = n => `https://www.facebook.com/groups/${n}`;
+const PNOW = Date.UTC(2026, 10, 10, 8, 30); // 14:00 IST
+/** fakeApify, but every POST starts a new run with its own ids, started at `startedAt`. */
+function planApify(opts = {}, startedAt = PNOW) {
+  const base = fakeApify(opts); let k = 0;
+  const fn = async (url, init = {}) => {
+    const u = new URL(url);
+    if (u.pathname.match(/^\/v2\/acts\/[\w.~-]+\/runs$/) && init.method === 'POST') { k++; base.calls.push({ url: u, init }); return Response.json({ data: { id: 'runPLAN000' + k, defaultDatasetId: 'dsPLAN0000' + k, startedAt: new Date(startedAt).toISOString() } }); }
+    return base.fn(url, init);
+  };
+  return { fn, calls: base.calls };
+}
+const planGroupsSettings = () => ({ groups: [1, 2, 3, 4, 5].map(n => ({ name: 'G' + n, url: U(100 + n), active: true })), groupInfo: { at: PNOW, urls: [1, 2, 3, 4, 5].map(n => U(100 + n)), groups: [] } });
+const planState = () => ({
+  [groupId(U(101))]: { status: 'active', mode: 'full', tier: 'hot', lastRead: PNOW - 2 * 36e5, rate: 2 },
+  [groupId(U(102))]: { status: 'active', mode: 'full', tier: 'hot', lastRead: PNOW - 2 * 36e5, rate: 1 },
+  [groupId(U(103))]: { status: 'active', mode: 'full', tier: 'normal', lastRead: PNOW - 10 * 36e5, rate: 1 },
+  [groupId(U(104))]: { status: 'trial', mode: 'sample', lookbackH: 6, since: PNOW - 36e5 },
+  [groupId(U(105))]: { status: 'paused', why: 'manual', manual: true },
+});
+const hookTo = (app, env, ds) => app.fetch(new Request(BASE + '/api/ingest/apify', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ingest-secret': SECRET }, body: JSON.stringify({ datasetId: ds }) }), env, {});
+
+test('group plan off: the actor request is byte-for-byte today\'s, even with plan state stored', async () => {
+  const once = async extra => {
+    const api = fakeApify({ usage: 1.2 }); const { repo, env } = await harness(api);
+    await repo.putSettings({ groups: [{ name: 'A', url: U(111), active: true }], ...extra });
+    await repo.recordStartedRun({ runId: 'runOLD00001', datasetId: 'dsOLD000001', startedAt: Date.UTC(2026, 10, 7, 2) });
+    await repo.claimRun({ datasetId: 'dsOLD000001', now: PNOW });
+    await repo.saveIngest({ listings: [], keys: [], run: { source: 'apify', datasetId: 'dsOLD000001', report: {} }, now: PNOW });
+    const st = await scheduledJob(repo, env, { fetchFn: api.fn, now: PNOW, force: true });
+    const c = api.calls.find(x => x.init.method === 'POST');
+    return { st, body: c.init.body, qs: c.url.search };
+  };
+  const base = await once({});
+  const off = await once({ groupPlan: { enabled: false, minActive: 6 }, groupState: { [groupId(U(111))]: { status: 'paused', why: 'manual', manual: true, lastRead: 1 } } });
+  assert.equal(off.body, base.body); assert.equal(off.qs, base.qs);
+  assert.equal(off.st.action, 'started');
+});
+
+test('group plan on: one run per cohort (3 here) with its own cutoff, row cap and charge cap; paused groups are not read', async () => {
+  const api = planApify({ usage: 1 }); const { repo, env } = await harness(api);
+  await repo.putSettings({ ...planGroupsSettings(), groupPlan: { enabled: true }, groupState: planState(), schedule: { overlapMin: 5 } });
+  const st = await scheduledJob(repo, env, { fetchFn: api.fn, now: PNOW, force: true });
+  assert.equal(st.action, 'started', st.detail);
+  const posts = api.calls.filter(c => c.init.method === 'POST');
+  assert.equal(posts.length, 3);
+  const bodies = posts.map(c => JSON.parse(c.init.body));
+  const by = n => bodies.find(b => b.groups.includes(U(n)));
+  assert.deepEqual(by(101).groups.sort(), [U(101), U(102)], 'hot groups read at the same time share a run');
+  assert.equal(by(101).postsPublishedAfter, apifyTime(PNOW - 2 * 36e5 - 5 * 60e3), 'last read minus the 5 min overlap');
+  assert.equal(by(103).postsPublishedAfter, apifyTime(PNOW - 10 * 36e5 - 5 * 60e3));
+  assert.equal(by(104).postsPublishedAfter, apifyTime(PNOW - 6 * 36e5), 'trial: 6 h lookback');
+  assert.ok(!bodies.some(b => b.groups.includes(U(105))), 'a manually paused group is never read');
+  assert.ok(bodies.every(b => b.resultsPerGroup === 30 && b.includeGroupInfo === false));
+  const charges = posts.map(c => Number(c.url.searchParams.get('maxTotalChargeUsd')));
+  const items = posts.map(c => Number(c.url.searchParams.get('maxItems')));
+  assert.ok(items.every(n => n >= 5 && n <= 60), JSON.stringify(items));
+  assert.ok(charges.every((c, i) => c > 0 && c <= 0.5 && c >= items[i] * 0.0012), JSON.stringify(charges));
+  const runs = await repo.listRuns(10, { source: 'apify' });
+  assert.equal(runs.length, 3);
+  assert.deepEqual(runs.flatMap(r => r.report.caps.groupIds).sort(), [101, 102, 103, 104].map(n => groupId(U(n))).sort());
+  const spent = await repo.apifySpentSince(PNOW - 36e5);
+  assert.ok(Math.abs(spent - charges.reduce((a, c) => a + c + 0.0005, 0)) < 1e-6, 'runs still running count at their charge cap');
+});
+
+test('group plan on: today\'s allowance used means no run; one cohort when only one group is due', async () => {
+  const api = planApify({ usage: 4.8 }); const { repo, env } = await harness(api);
+  await repo.putSettings({ ...planGroupsSettings(), groupPlan: { enabled: true }, groupState: planState() });
+  const st = await scheduledJob(repo, env, { fetchFn: api.fn, now: PNOW, force: true });
+  assert.equal(st.action, 'skipped'); assert.match(st.detail, /allowance is used/);
+  assert.equal(api.calls.filter(c => c.init.method === 'POST').length, 0);
+
+  const one = planApify({ usage: 1 }); const h = await harness(one);
+  const s1 = planState(); for (const id of Object.keys(s1)) if (id !== groupId(U(101))) s1[id] = { status: 'paused', why: 'budget' };
+  await h.repo.putSettings({ ...planGroupsSettings(), groupPlan: { enabled: true }, groupState: s1 });
+  await scheduledJob(h.repo, h.env, { fetchFn: one.fn, now: PNOW, force: true });
+  const posts = one.calls.filter(c => c.init.method === 'POST');
+  assert.equal(posts.length, 1); assert.deepEqual(JSON.parse(posts[0].init.body).groups, [U(101)]);
+});
+
+test('group plan: lastRead moves only after a complete ingest; a failed run keeps the cutoff; a cut-short cohort is re-read once', async () => {
+  const good = planApify({ usage: 1 });
+  const { repo, env } = await harness(good, { INGEST_PAGE_SIZE: '50' });
+  const g1 = groupId(U(111)); const L0 = PNOW - 5 * 36e5;
+  await repo.putSettings({ groups: [{ name: 'A', url: U(111), active: true }], groupInfo: { at: PNOW, urls: [U(111)], groups: [] }, groupPlan: { enabled: true }, groupState: { [g1]: { status: 'active', mode: 'full', tier: 'hot', lastRead: L0, rate: 3 } } });
+  const S1 = PNOW - 2 * 36e5;
+  await repo.recordStartedRun({ runId: 'runCOH00001', datasetId: 'dsCOH000001', startedAt: S1, caps: { perGroup: 30, maxItems: 100, maxCharge: 0.5, after: L0 - 15 * 60e3, recover: false, groupIds: [g1] } });
+  const bad = fakeApify({ failOn: u => u.pathname.includes('/datasets/') });
+  const badApp = createApp({ repo: () => repo, assets: async () => null, fetch: bad.fn });
+  await hookTo(badApp, env, 'dsCOH000001');
+  assert.equal((await repo.getSettings()).groupState[g1].lastRead, L0, 'failed ingest: cutoff unchanged, no post skipped');
+  const goodApp = createApp({ repo: () => repo, assets: async () => null, fetch: good.fn });
+  assert.equal((await hookTo(goodApp, env, 'dsCOH000001')).status, 200);
+  let gs = (await repo.getSettings()).groupState[g1];
+  assert.equal(gs.lastRead, S1, 'done: lastRead = the run start'); assert.equal(gs.recoverNext, undefined);
+  assert.equal(gs.status, 'active', 'other fields untouched by the patch');
+  assert.deepEqual((await repo.getRunByDataset('dsCOH000001')).report.caps.groupIds, [g1], 'caps kept in the final report for the stats');
+  // An older cohort finishing late never moves lastRead backwards
+  await repo.markGroupsRead([{ g: g1, t: S1 - 36e5, r: false }]);
+  assert.equal((await repo.getSettings()).groupState[g1].lastRead, S1);
+  // Cut short (25 rows >= maxItems 10): keep the cutoff, re-read next slot with 50 posts per group
+  await repo.recordStartedRun({ runId: 'runCOH00002', datasetId: 'dsCOH000002', startedAt: S1 + 36e5, caps: { perGroup: 30, maxItems: 10, maxCharge: 0.5, after: S1 - 15 * 60e3, recover: false, groupIds: [g1] } });
+  await hookTo(goodApp, env, 'dsCOH000002');
+  gs = (await repo.getSettings()).groupState[g1];
+  assert.equal(gs.lastRead, S1); assert.equal(gs.recoverNext, true);
+  const stR = await scheduledJob(repo, env, { fetchFn: good.fn, now: PNOW, force: true });
+  assert.equal(stR.action, "started", JSON.stringify(stR));
+  const post = good.calls.filter(c => c.init.method === 'POST').at(-1);
+  assert.equal(JSON.parse(post.init.body).resultsPerGroup, 50);
+  assert.equal(JSON.parse(post.init.body).postsPublishedAfter, apifyTime(S1 - 15 * 60e3));
+  assert.equal((await repo.getRunByDataset('dsPLAN00001')).report.caps.recover, true);
+  await hookTo(goodApp, env, 'dsPLAN00001');
+  gs = (await repo.getSettings()).groupState[g1];
+  assert.equal(gs.lastRead, PNOW, 'the re-read is accepted even if cut short'); assert.equal(gs.recoverNext, undefined);
+});
+
+test('group plan: cron with 3 cohorts and a sweep backlog stays under the 48-statement budget; so does the allocator tick', async () => {
+  const { createRepo } = await import('../src/db/repo.js');
+  const t = await memoryDb(); let n = 0;
+  const counting = { ...t.db, all: (...a) => (n++, t.db.all(...a)), first: (...a) => (n++, t.db.first(...a)), run: (...a) => (n++, t.db.run(...a)), batch: l => (n += l.length, t.db.batch(l)) };
+  const repo = createRepo(counting);
+  await repo.createArea(GREEN_GLEN, PNOW);
+  await repo.putSettings({ ...planGroupsSettings(), groupPlan: { enabled: true }, groupState: planState() });
+  // 44 rows: three full pages of 15, then done (so the lastRead patch runs too)
+  const ds = [DATASET[0], ...Array.from({ length: 43 }, (_, i) => post(i))];
+  await repo.recordStartedRun({ runId: 'runSWEEP001', datasetId: 'dsSWEEP0001', startedAt: PNOW - 36e5, caps: { perGroup: 30, maxItems: 60, maxCharge: 0.08, after: PNOW - 3 * 36e5, recover: false, groupIds: [groupId(U(101))] } });
+  const api = planApify({ usage: 1, dataset: ds, runs: [{ id: 'runSWEEP001', defaultDatasetId: 'dsSWEEP0001', startedAt: new Date(PNOW - 36e5).toISOString() }] });
+  n = 0;
+  const st = await scheduledJob(repo, ENV, { fetchFn: api.fn, now: PNOW });
+  assert.equal(st.action, 'started'); assert.equal(st.swept[0]?.status, 'done', JSON.stringify(st.swept));
+  assert.equal(api.calls.filter(c => c.init.method === 'POST').length, 3);
+  assert.ok(n <= 48, `cron used ${n} D1 statements`); console.log(`# group plan cron with 3 cohorts + 3-page sweep: ${n} D1 statements`);
+  assert.equal(st.groupPlan, undefined, 'the allocator waits for a tick without an ingest (CPU)');
+  const quiet = planApify({ usage: 1 });
+  n = 0;
+  const st2 = await scheduledJob(repo, ENV, { fetchFn: quiet.fn, now: PNOW + 36e5 });
+  assert.ok(st2.groupPlan, 'allocator ran: ' + JSON.stringify(st2).slice(0, 300));
+  assert.ok(n <= 48, `allocator tick used ${n} D1 statements`); console.log(`# group plan allocator tick: ${n} D1 statements`);
 });

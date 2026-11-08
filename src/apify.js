@@ -4,10 +4,11 @@
 
 import { ingestItems } from './ingest.js';
 import { createRepo } from './db/repo.js';
-import { isPage } from './groups.js';
+import { isPage, groupId } from './groups.js';
 import { runBackfill } from './backfill.js';
 import { redditStep, redditConfigured } from './reddit.js';
 import { runEnrich, aiConfigured } from './ai.js';
+import { planOf, planGroups, budgetOf, dailyAllowance, planCohorts, allocate, groupStats, isReading } from './groupplan.js';
 
 export const API = 'https://api.apify.com/v2';
 export const DEFAULT_ACTOR = 'automly~facebook-public-group-posts-scraper';
@@ -20,7 +21,9 @@ const DAY = 24 * HOUR;
 const IST = 5.5 * HOUR;
 // Overlap between runs: the cutoff is the last good start minus this, so posts a group admin approves a
 // little late are not missed. Every post inside the overlap is paid for twice, so keep it short.
+// Admins can lower it with schedule.overlapMin (1-60, default 15; 5 saves about 5 % of rows).
 export const OVERLAP_MS = 15 * 60e3;
+export const overlapMs = sch => (Number.isInteger(sch?.overlapMin) && sch.overlapMin >= 1 && sch.overlapMin <= 60 ? sch.overlapMin * 60e3 : OVERLAP_MS);
 // Price per dataset row (USD) when the run does not say. automly: $1.20 / 1,000 rows (posts AND group
 // rows); official actor on the free tier: $5 / 1,000 posts. Used for the per-run charge cap and group value.
 export const ROW_PRICE = { 'automly~facebook-public-group-posts-scraper': 0.0012, 'apify~facebook-groups-scraper': 0.005 };
@@ -33,7 +36,7 @@ export const GROUP_INFO_MAX_AGE = 7 * DAY;
 //                 plus 6 AM to pick up the night's posts; the exact cutoff means no post is skipped).
 //   mode 'interval': run every intervalHours.
 export const DEFAULT_RUN_HOURS = [6, 9, 11, 13, 15, 17, 19, 21];
-export const SCHEDULE_DEFAULTS = { enabled: true, mode: 'times', runHoursIst: DEFAULT_RUN_HOURS, intervalHours: 4, maxRunUsd: 0.5, budgetWarnPct: 80, budgetStopPct: 95, retentionDays: 30, backfillDays: 3, redditEnabled: true };
+export const SCHEDULE_DEFAULTS = { enabled: true, mode: 'times', runHoursIst: DEFAULT_RUN_HOURS, intervalHours: 4, maxRunUsd: 0.5, budgetWarnPct: 80, budgetStopPct: 95, retentionDays: 30, backfillDays: 3, redditEnabled: true, overlapMin: 15 };
 export const scheduleOf = settings => ({ ...SCHEDULE_DEFAULTS, ...(settings?.schedule && typeof settings.schedule === 'object' ? settings.schedule : {}) });
 const runHours = sch => [...new Set((Array.isArray(sch.runHoursIst) ? sch.runHoursIst : []).filter(h => Number.isInteger(h) && h >= 0 && h <= 23))].sort((a, b) => a - b);
 const useTimes = sch => sch.mode !== 'interval' && runHours(sch).length > 0;
@@ -61,10 +64,11 @@ export function nextRunAt(settings, now = Date.now()) {
   }
   return last ? last + sch.intervalHours * HOUR : now;
 }
-/** Never ask a source for more than the last backfillDays: cutoff = max(last good start - 15 min, now - backfillDays). */
+/** Never ask a source for more than the last backfillDays: cutoff = max(last good start - overlap (15 min), now - backfillDays). */
+export const cutoffFloor = (sch, now) => now - Math.min(5, Math.max(1, sch.backfillDays || 3)) * DAY;
 export function cutoffFor(lastGoodStart, sch, now) {
-  const floor = now - Math.min(5, Math.max(1, sch.backfillDays || 3)) * DAY;
-  return Math.max(lastGoodStart ? lastGoodStart - OVERLAP_MS : floor, floor);
+  const floor = cutoffFloor(sch, now);
+  return Math.max(lastGoodStart ? lastGoodStart - overlapMs(sch) : floor, floor);
 }
 /** Cutoff as the actors accept it: "YYYY-MM-DDTHH:MM:SSZ". automly rejects milliseconds (HTTP 400). */
 export const apifyTime = t => new Date(t).toISOString().slice(0, 19) + 'Z';
@@ -231,16 +235,27 @@ export async function ingestDataset(repo, env, { datasetId, runId, startedAt, co
   if (runId) { try { cost = runCost((await apify(env, `/actor-runs/${encodeURIComponent(runId)}`, {}, fetchFn))?.data, actorId(env), offset); } catch { /* cost stays unknown */ } }
   if (!cost && typeof costUsd === 'number' && isFinite(costUsd)) cost = { totalUsd: Math.round(costUsd * 10000) / 10000 };
   const truncated = truncation(report, caps, offset, cost);
-  if (cost || truncated) await repo.annotateRun(datasetId, { costUsd: cost?.totalUsd ?? null, cost, truncated });
+  if (cost || truncated || caps) await repo.annotateRun(datasetId, { costUsd: cost?.totalUsd ?? null, cost, truncated, caps });
   if (cost) report.cost = cost;
   if (truncated) report.truncated = truncated;
   const patch = { unscrapableGroups: { at: now, datasetId, groups: (report.unscrapable || []).slice(0, 50) } };
+  // A planned cohort (groupPlan on) names its groups: only they refresh their details.
+  const cohort = Array.isArray(caps?.groupIds) ? caps.groupIds : null;
   // A group-details run refreshes the stored details even when nothing changed, so they stop being stale.
   if (groupRows.length) {
-    const watched = (Array.isArray(settings.groups) ? settings.groups : []).filter(g => g.url && !isPage(g)).map(g => g.url);
-    patch.groupInfo = { at: now, urls: watched, groups: [...new Map(groupRows.map(g => [g.id, g])).values()].slice(0, 200) };
+    const fresh = [...new Map(groupRows.map(g => [g.id, g])).values()];
+    const all = (Array.isArray(settings.groups) ? settings.groups : []).filter(g => g.url && !isPage(g));
+    const old = settings.groupInfo;
+    if (cohort && old?.at && now - old.at <= GROUP_INFO_MAX_AGE) {
+      const urls = all.filter(g => cohort.includes(groupId(g.url))).map(g => g.url);
+      patch.groupInfo = { at: old.at, urls: [...new Set([...(old.urls || []), ...urls])], groups: [...new Map([...(old.groups || []), ...fresh].map(g => [g.id, g])).values()].slice(0, 200) };
+    } else patch.groupInfo = { at: now, urls: cohort ? all.filter(g => cohort.includes(groupId(g.url))).map(g => g.url) : all.map(g => g.url), groups: fresh.slice(0, 200) };
   }
   await repo.putSettings(patch);
+  // The planner's per-group cutoff moves only now, after a complete ingest, so a failed run never skips posts.
+  // A run cut short by its limits keeps the old cutoff and is re-read once (unless it was itself the re-read,
+  // or was cut down on purpose to fit the day's allowance).
+  if (cohort) await repo.markGroupsRead(cohort.map(g => ({ g, t: prev?.startedAt ?? startedAt ?? now, r: !!truncated && !caps.recover && !caps.scaled })));
   return { status: 'done', report };
 }
 
@@ -264,6 +279,76 @@ export async function sweep(repo, env, { fetchFn = fetch, now = Date.now() } = {
   return out;
 }
 
+const istDayStart = t => Math.floor((t + IST) / DAY) * DAY - IST;
+
+/**
+ * The daily group allocator (docs/ai/GROUP-SCHEDULING.md 4.4-4.6): 7 days and this cycle of per-group run
+ * numbers -> status, tier, coverage for every watched group. D1: one read (runs) and two writes (a json_patch
+ * of groupState that leaves lastRead alone, and the groupPlanRun summary).
+ */
+export async function runGroupPlan(repo, settings, { now = Date.now(), env = {} } = {}) {
+  const plan = planOf(settings); const groups = planGroups(settings);
+  let actor = DEFAULT_ACTOR; try { actor = actorId(env); } catch { /* price the default actor */ }
+  const price = rowPrice(actor);
+  const usage = settings.apifyUsage || null;
+  const cycleStart = Date.parse(usage?.cycleStart || '') || now - 30 * DAY;
+  const rows = await repo.groupRuns(Math.min(now - 7 * DAY, cycleStart), 2000);
+  const state = settings.groupState && typeof settings.groupState === 'object' ? settings.groupState : {};
+  const since = {}; for (const [id, s] of Object.entries(state)) if (s?.status === 'trial' && s.since) since[id] = s.since;
+  const stats = groupStats(rows, settings, { now, cycleStart, price, since });
+  const pace = dailyAllowance({ budgetUsd: budgetOf(settings), usage, now });
+  const res = allocate({ groups, state, stats, plan, allowanceUsd: pace.allowanceUsd, price, now });
+  const patch = {};
+  for (const [id, s] of Object.entries(res.state)) { const { lastRead, recoverNext, ...rest } = s; patch[id] = rest; }
+  const known = new Set((Array.isArray(settings.groups) ? settings.groups : []).filter(g => g?.url).map(g => groupId(g.url)));
+  for (const id of Object.keys(state)) if (!known.has(id)) patch[id] = null; // group removed from the watched list
+  await repo.patchSettings('groupState', patch);
+  const summary = { at: now, ...res.summary, changes: res.events.length };
+  await repo.putSettings({ groupPlanRun: summary });
+  return { ...summary, events: res.events };
+}
+
+/**
+ * groupPlan on: start one run per cohort (at most 3) for the groups due this slot, each with its own cutoff,
+ * row cap and charge cap. The day's allowance replaces the 80 %/95 % guard: what starts now never takes the
+ * day's spend above it. D1: usage write 1, today's spend 1, one recordStartedRun per cohort.
+ */
+async function startPlannedRuns(repo, env, { fetchFn, now, settings, groups, pageNote }) {
+  const sch = scheduleOf(settings);
+  const state = settings.groupState && typeof settings.groupState === 'object' ? settings.groupState : {};
+  const known = new Set(groups.map(g => groupId(g.url)));
+  const reading = planGroups(settings).filter(g => known.has(g.id) && isReading(state[g.id]));
+  let detail = pageNote;
+  if (!reading.length) return { action: 'skipped', detail: (detail + 'Group plan is on but no group is being read yet. Save the plan in Group performance to run the allocator.').trim() };
+  let usage = null;
+  try { usage = await getUsage(env, fetchFn); await repo.putSettings({ apifyUsage: { ...usage, checkedAt: now } }); }
+  catch (e) { usage = settings.apifyUsage || null; detail += 'Could not read Apify usage (' + e.message + '); used the last reading. '; }
+  const actor = actorId(env); const price = rowPrice(actor);
+  const pace = dailyAllowance({ budgetUsd: budgetOf(settings), usage, spentTodayUsd: await repo.apifySpentSince(istDayStart(now)), now });
+  if (pace.tickUsd < price * 5) return { action: 'skipped', detail: (detail + `Today's allowance is used ($${pace.spentTodayUsd.toFixed(2)} of $${pace.allowanceUsd.toFixed(2)}). Runs resume tomorrow.`).trim(), allowance: pace };
+  const perGroup = Math.min(MAX_RESULTS_PER_GROUP, Number(settings.resultsPerGroup) || DEFAULT_RESULTS_PER_GROUP);
+  const plan = planCohorts({ groups: reading, state, now, overlapMs: overlapMs(sch), floor: cutoffFloor(sch, now), perGroup, price, tickUsd: pace.tickUsd, maxRunUsd: Number(sch.maxRunUsd) || SCHEDULE_DEFAULTS.maxRunUsd, infoFor: gs => groupInfoStale(settings, gs, now) });
+  if (!plan.cohorts.length) return { action: 'idle', detail: (detail + `No group is due this slot (${reading.length} being read).`).trim(), allowance: pace };
+  const hook = webhookParam(env); const runs = []; const errors = [];
+  for (const c of plan.cohorts) {
+    const input = buildInput(actor, { groups: c.urls.map(url => ({ url })), resultsPerGroup: c.perGroup, after: c.after, groupInfo: c.groupInfo });
+    const qs = new URLSearchParams({ maxItems: String(c.maxItems), maxTotalChargeUsd: String(c.maxCharge) });
+    if (hook) qs.set('webhooks', hook);
+    try {
+      const { data } = await apify(env, `/acts/${actor}/runs?${qs}`, { method: 'POST', body: JSON.stringify(input) }, fetchFn);
+      if (data?.id && isDatasetId(data.defaultDatasetId)) await repo.recordStartedRun({ runId: data.id, datasetId: data.defaultDatasetId, startedAt: Date.parse(data.startedAt) || now, actor, caps: { perGroup: c.perGroup, maxItems: c.maxItems, maxCharge: c.maxCharge, after: c.after, recover: c.recover, groupIds: c.groupIds, ...(c.scaled ? { scaled: true } : {}) } });
+      runs.push({ runId: data?.id, groups: c.groupIds.length, after: c.after, maxItems: c.maxItems, maxChargeUsd: c.maxCharge, recover: c.recover, groupInfo: c.groupInfo });
+    } catch (e) { errors.push(e.message); }
+  }
+  if (!runs.length) throw new Error(errors[0] || 'no run started');
+  if (errors.length) detail += `${errors.length} of ${plan.cohorts.length} runs failed to start (${errors[0]}). `;
+  if (plan.waiting) detail += `${plan.waiting} due group${plan.waiting > 1 ? 's' : ''} wait for the next slot (at most 3 runs a slot). `;
+  if (plan.cohorts.some(c => c.scaled)) detail += "Runs were capped to fit today's allowance. ";
+  if (!hook) detail += 'PUBLIC_BASE_URL or INGEST_SECRET is not set, so results arrive with the next sweep instead of a webhook. ';
+  const n = runs.reduce((a, r) => a + r.groups, 0);
+  return { action: 'started', runId: runs[0].runId, runs, groups: n, skippedPages: 0, allowance: pace, detail: (detail + `Group plan: ${runs.length} run${runs.length > 1 ? 's' : ''} for ${n} groups.`).trim() };
+}
+
 /** Budget check, then start a run for the active watched groups. Facebook Pages are skipped (the group actor can't read them). */
 export async function startRun(repo, env, { fetchFn = fetch, now = Date.now(), settings = null } = {}) {
   settings = settings || await repo.getSettings();
@@ -272,6 +357,7 @@ export async function startRun(repo, env, { fetchFn = fetch, now = Date.now(), s
   const pages = all.filter(isPage); const groups = all.filter(g => !isPage(g));
   const pageNote = pages.length ? `Skipped ${pages.length} Facebook Page${pages.length > 1 ? 's' : ''} (the group scraper can't read Pages). ` : '';
   if (!groups.length) return { action: 'skipped', detail: (pageNote + 'No active watched groups with a link. Add them in Settings.').trim() };
+  if (planOf(settings).enabled) return startPlannedRuns(repo, env, { fetchFn, now, settings, groups, pageNote });
   let perGroup = Math.min(MAX_RESULTS_PER_GROUP, Number(settings.resultsPerGroup) || DEFAULT_RESULTS_PER_GROUP);
   let usage = null, detail = pageNote;
   try {
@@ -325,7 +411,7 @@ export async function scheduledJob(baseRepo, env, { fetchFn = fetch, now = Date.
   else {
     const due = force || isDue(sch, prev.lastStartedAt, now);
     if (due) {
-      try { const r = await startRun(repo, env, { fetchFn, now, settings }); status.action = r.action; status.detail = r.detail ? r.detail + ' ' : ''; status.runId = r.runId; if (r.action === 'started') status.lastStartedAt = now; }
+      try { const r = await startRun(repo, env, { fetchFn, now, settings }); status.action = r.action; status.detail = r.detail ? r.detail + ' ' : ''; status.runId = r.runId; if (r.action === 'started' || r.action === 'idle') status.lastStartedAt = now; }
       catch (e) { status.action = 'error'; status.detail = 'Start failed: ' + e.message + '. '; }
       await repo.putSettings({ scheduler: { ...status, detail: status.detail.trim() } });
     } else status.action = sch.enabled ? 'not_due' : 'paused';
@@ -340,6 +426,13 @@ export async function scheduledJob(baseRepo, env, { fetchFn = fetch, now = Date.
 }
 
 async function extras(repo, env, settings, sch, status, { fetchFn, now }) {
+  // The daily group allocator gets a tick of its own (CPU): not while a dataset was ingested in this tick,
+  // and Reddit, AI, backfill and purge wait an hour when it runs.
+  if (planOf(settings).enabled && now - (settings.groupPlanRun?.at || 0) >= DAY - HOUR && !(status.swept || []).some(x => x.status !== 'skipped') && repo.left() >= 6) {
+    try { const r = await runGroupPlan(repo, settings, { now, env }); status.groupPlan = { reading: r.reading, minActive: r.minActive, pool: r.pool, changes: r.changes }; }
+    catch (e) { status.detail += ' Group plan failed: ' + e.message + '.'; }
+    return;
+  }
   if (redditConfigured(env) && sch.redditEnabled !== false && repo.left() >= 26) {
     try { status.reddit = await redditStep(repo, env, { fetchFn, now, settings, sch, budget: repo.left() - 6 }); }
     catch (e) { status.reddit = { error: String(e.message || e).slice(0, 200) }; }

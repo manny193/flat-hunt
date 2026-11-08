@@ -364,7 +364,8 @@ export function createRepo(db) {
      * patched meanwhile (the group planner and the ingest both write groupState).
      */
     async patchSettings(key, patch) {
-      await db.run(`INSERT INTO settings (key, value) VALUES (?, json_patch('{}', ?)) ON CONFLICT(key) DO UPDATE SET value = json_patch(CASE WHEN json_valid(settings.value) THEN settings.value ELSE '{}' END, excluded.value)`, [key, JSON.stringify(patch)]);
+      const p = JSON.stringify(patch); // the update branch gets the raw patch: excluded.value has its nulls (deletions) stripped
+      await db.run(`INSERT INTO settings (key, value) VALUES (?, json_patch('{}', ?)) ON CONFLICT(key) DO UPDATE SET value = json_patch(CASE WHEN json_valid(settings.value) THEN settings.value ELSE '{}' END, ?)`, [key, p, p]);
     },
     /**
      * After a planned cohort ingests: groupState[g].lastRead = max(stored, t) for each group (never backwards when
@@ -399,9 +400,9 @@ export function createRepo(db) {
         FROM runs WHERE source = 'apify' AND status = 'done' AND started_at >= ? ORDER BY started_at LIMIT ?`, [t, limit]);
       return rows.map(r => ({ startedAt: r.started_at, costUsd: r.cost_usd ?? null, actor: r.actor ?? null, report: { fetchedByGroup: J(r.f) || {}, newByGroup: J(r.n) || {}, crossFrom: J(r.x) || {}, unscrapable: J(r.u) || [], caps: J(r.c) || null } }));
     },
-    /** What Apify runs started since t cost: the measured cost when known, else the run's charge cap plus a run fee. */
+    /** What Apify runs started since t cost: measured cost; else, for an ingested run, rows x $0.0012; else (still running) its charge cap plus a run fee. */
     async apifySpentSince(t) {
-      const r = await db.first(`SELECT coalesce(sum(coalesce(cost_usd, json_extract(report, '$.caps.maxCharge') + 0.0005, json_extract(report, '$.total') * 0.0012, 0)), 0) AS usd FROM runs WHERE source = 'apify' AND started_at >= ? AND status != 'failed'`, [t]);
+      const r = await db.first(`SELECT coalesce(sum(coalesce(cost_usd, CASE WHEN status = 'done' THEN json_extract(report, '$.total') * 0.0012 END, json_extract(report, '$.caps.maxCharge') + 0.0005, 0)), 0) AS usd FROM runs WHERE source = 'apify' AND started_at >= ? AND status != 'failed'`, [t]);
       return Number(r?.usd) || 0;
     },
     async runsSince(t, limit = 1000) { return (await db.all('SELECT * FROM runs WHERE at >= ? ORDER BY at LIMIT ?', [t, limit])).map(rowToRun); },

@@ -61,6 +61,18 @@ test('data window: cutoff = max(last good start - 15 min, now - backfillDays), s
   assert.equal(apifyTime(Date.UTC(2026, 10, 8, 5, 4, 3, 999)), '2026-11-08T05:04:03Z');
   assert.equal(cutoffFor(now - 10 * 24 * H, { backfillDays: 2 }, now), now - 2 * 24 * H, 'after an outage');
   assert.equal(cutoffFor(null, { backfillDays: 99 }, now), now - 5 * 24 * H, 'capped at 5 days');
+  assert.equal(cutoffFor(now - 2 * H, { backfillDays: 3, overlapMin: 5 }, now), now - 2 * H - 5 * 60e3, 'overlapMin lowers the overlap (fewer rows bought twice)');
+  assert.equal(cutoffFor(now - 2 * H, { backfillDays: 3, overlapMin: 0 }, now), now - 2 * H - 15 * 60e3, 'out of range: the 15 min default');
+});
+
+test('admin schedule: overlapMin is validated (1-60) and stored', async () => {
+  const t = await memoryDb();
+  const app = createApp({ repo: () => t.repo, assets: async () => null });
+  const put = body => app.fetch(new Request('https://hunt.test/api/admin/scraper', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), { RUNTIME: 'node', AUTH_DISABLED: '1' }, {});
+  assert.equal((await put({ overlapMin: 0 })).status, 400);
+  assert.equal((await put({ overlapMin: 61 })).status, 400);
+  const ok = await put({ overlapMin: 5 });
+  assert.equal(ok.status, 200); assert.equal((await ok.json()).schedule.overlapMin, 5);
 });
 
 test('IST run hours: due once per listed hour, next run is the next listed hour; interval mode still works', () => {
