@@ -25,7 +25,7 @@ const IMPORT_SOURCES = ['scraper', 'phone', 'manual', 'sample'];
 // Cron strings that run the hourly scheduledJob(): the Worker trigger and the Node in-process timer.
 export const HOURLY_CRONS = ['30 * * * *', 'node-interval'];
 // /sw.js (alerts service worker) must be public too: the browser's update check carries no guarantee of a session.
-const PUBLIC_ASSETS = new Set(['/ui.js', '/finance.js', '/alerts.js', '/sw.js', '/app.css', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.webmanifest', '/favicon.ico']);
+export const PUBLIC_ASSETS = new Set(['/ui.js', '/finance.js', '/alerts.js', '/sw.js', '/app.css', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/manifest.webmanifest', '/favicon.ico']);
 
 /**
  * @param deps {repo(env) -> repository, assets(request, env) -> Response|null, fetch?}

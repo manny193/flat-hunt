@@ -6,7 +6,7 @@ import { ingestItems } from './ingest.js';
 import { createRepo } from './db/repo.js';
 import { isPage, groupId } from './groups.js';
 import { runBackfill } from './backfill.js';
-import { redditStep, redditConfigured } from './reddit.js';
+import { redditStep, redditPublicStep, redditMode } from './reddit.js';
 import { runEnrich, aiConfigured } from './ai.js';
 import { planOf, planGroups, budgetOf, dailyAllowance, planCohorts, allocate, groupStats, isReading } from './groupplan.js';
 
@@ -434,8 +434,9 @@ async function extras(repo, env, settings, sch, status, { fetchFn, now }) {
     catch (e) { status.detail += ' Group plan failed: ' + e.message + '.'; }
     return;
   }
-  if (redditConfigured(env) && sch.redditEnabled !== false && repo.left() >= 26) {
-    try { status.reddit = await redditStep(repo, env, { fetchFn, now, settings, sch, budget: repo.left() - 6 }); }
+  const rmode = redditMode(env, settings);
+  if (rmode && sch.redditEnabled !== false && repo.left() >= 26) {
+    try { status.reddit = await (rmode === 'api' ? redditStep : redditPublicStep)(repo, env, { fetchFn, now, settings, sch, budget: repo.left() - 6 }); }
     catch (e) { status.reddit = { error: String(e.message || e).slice(0, 200) }; }
   }
   if (aiConfigured(env) && repo.left() >= 20) {

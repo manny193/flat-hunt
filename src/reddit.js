@@ -142,3 +142,93 @@ export async function redditStep(repo, env, { fetchFn = fetch, now = Date.now(),
   await repo.putSettings({ reddit: state });
   return { action: done ? 'done' : 'continuing', fetched: cycle.fetched, queue: cycle.queue.length, errors: (cycle.errors || []).length };
 }
+
+// ---------- Public JSON mode (no API key) ----------
+// Used when the OAuth secrets are absent and the admin turned on schedule.redditPublic (off by default; redditEnabled stays the master switch).
+// One GET per watched subreddit per run to old.reddit.com/r/<name>/new.json, honest User-Agent, no cookies,
+// no proxies. Any block (403/429/5xx/HTML) stops Reddit for the run and is never retried around.
+export const PUBLIC_UA = 'FlatHunt/1.0 (+https://flat-hunt.19mnsh.workers.dev)';
+const PUBLIC_MAX_SUBS = 3;        // requests per cron invocation (each ingest page costs ~10 D1 statements)
+const PUBLIC_GAP_MS = 2000;       // pause between requests (waiting is not CPU)
+const BACKOFF_FAILS = 3, BACKOFF_MS = 6 * HOUR;
+export const publicListingUrl = name => `https://old.reddit.com/r/${name}/new.json?limit=50&raw_json=1`;
+/** Which mode would run now: 'api' (OAuth secrets set), 'public' (switched on explicitly) or null. */
+export const redditMode = (env, settings) => redditConfigured(env) ? 'api' : (settings?.schedule?.redditPublic === true && settings.schedule.redditEnabled !== false ? 'public' : null);
+
+const sleepMs = ms => new Promise(r => setTimeout(r, ms));
+const queryTest = q => { const words = String(q || '').split(/\s+/).filter(w => w && !/^or$/i.test(w)).map(w => w.toLowerCase()); return words.length ? d => { const t = ((d.title || '') + ' ' + (d.selftext || '')).toLowerCase(); return words.some(w => t.includes(w)); } : () => true; };
+
+export async function redditPublicStep(repo, env, { fetchFn = fetch, now = Date.now(), settings, sch, budget = 30, force = false, sleep = sleepMs }) {
+  const status = { ...(settings.redditStatus || {}), mode: 'public' };
+  if (status.backoffUntil && now < status.backoffUntil) return { action: 'backoff', until: status.backoffUntil };
+  const state = { ...(settings.reddit || {}) };
+  const subs = subredditsOf(settings);
+  let cycle = state.cycle;
+  if (!cycle) {
+    const due = force || !state.lastStartedAt || now - state.lastStartedAt >= sch.intervalHours * HOUR - 5 * 60e3;
+    if (!due || !subs.length) return { action: subs.length ? 'not_due' : 'no_subreddits' };
+    const floor = now - Math.min(5, Math.max(1, sch.backfillDays || 3)) * DAY;
+    const cutoff = Math.max(state.lastGoodStart ? state.lastGoodStart - HOUR : floor, floor);
+    cycle = { key: 'reddit-' + now, startedAt: now, cutoff, queue: subs.map(s => s.name), fetched: 0, errors: [] };
+    await repo.createRun({ source: 'reddit', datasetId: cycle.key, startedAt: now, actor: 'reddit-public-json' });
+    state.lastStartedAt = now;
+  }
+  const marks = { ...(state.watermarks || {}) };
+  const watched = [...(Array.isArray(settings.groups) ? settings.groups : []), ...subs.map(s => ({ name: 'r/' + s.name, url: 'https://www.reddit.com/r/' + s.name, active: true }))];
+  const ingestSettings = { ...settings, groups: watched };
+  const areas = await repo.listAreas();
+  let report = (await repo.getRunByDataset(cycle.key))?.report || null;
+  let left = budget - 3, requests = 0, blocked = null;
+  while (cycle.queue.length && left >= QUERIES_PER_PAGE * 2 + 2 && requests < PUBLIC_MAX_SUBS) {
+    const name = cycle.queue[0];
+    const sub = subs.find(s => s.name === name) || { name };
+    if (requests) await sleep(PUBLIC_GAP_MS);
+    requests++;
+    let posts, code = 0;
+    try {
+      const r = await fetchFn(publicListingUrl(name), { headers: { 'user-agent': PUBLIC_UA, accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
+      code = r.status;
+      if (!r.ok) throw new Error(`r/${name}: HTTP ${r.status}`);
+      let j; try { j = await r.json(); } catch { throw new Error(`r/${name}: response was not JSON`); }
+      if (!Array.isArray(j?.data?.children)) throw new Error(`r/${name}: unexpected response`);
+      posts = j.data.children.map(c => c?.data).filter(d => d && d.id && !d.stickied);
+    } catch (e) {
+      blocked = { code, error: String(e.message || e).slice(0, 160) };
+      break; // never retry around a block
+    }
+    if (sub.query) posts = posts.filter(queryTest(sub.query));
+    const since = Math.max(cycle.cutoff, marks[name] || 0);
+    const fresh = posts.map(d => ({ d, t: (Number(d.created_utc) || 0) * 1000 })).filter(x => x.t > since).sort((a, b) => a.t - b.t);
+    cycle.fetched += fresh.length;
+    while (fresh.length) { // at most 50 posts = 2 pages
+      const page = fresh.splice(0, PAGE);
+      const res = await ingestItems(repo, page.map(x => toItem(x.d)), { source: 'reddit', now, datasetId: cycle.key, areas, settings: ingestSettings, storeAll: true, env, run: { status: 'ingesting', report } });
+      report = res.runReport;
+      marks[name] = page[page.length - 1].t; // cursor moves only after the page was ingested
+      left -= QUERIES_PER_PAGE;
+    }
+    cycle.queue.shift();
+  }
+  state.watermarks = marks;
+  let done = false;
+  if (blocked) {
+    cycle.errors = [...(cycle.errors || []), blocked.error];
+    const fails = (status.consecutiveFails || 0) + 1;
+    await repo.finishRun(cycle.key, { status: 'failed', report: { ...(report || {}), source: 'reddit', fetched: cycle.fetched, errors: cycle.errors }, now });
+    state.lastRun = { at: now, startedAt: cycle.startedAt, fetched: cycle.fetched, newListings: report?.newListings || 0, errors: cycle.errors };
+    delete state.cycle;
+    Object.assign(status, { ok: false, code: blocked.code, error: blocked.error, at: now, consecutiveFails: fails, postsRead: cycle.fetched, ...(fails >= BACKOFF_FAILS ? { backoffUntil: now + BACKOFF_MS } : {}) });
+  } else if (!cycle.queue.length) {
+    done = true;
+    await repo.finishRun(cycle.key, { status: 'done', report: { ...(report || {}), source: 'reddit', fetched: cycle.fetched, errors: [] }, now });
+    state.lastRun = { at: now, startedAt: cycle.startedAt, fetched: cycle.fetched, newListings: report?.newListings || 0, errors: [] };
+    state.lastGoodStart = cycle.startedAt;
+    delete state.cycle;
+    Object.assign(status, { ok: true, code: 200, error: null, at: now, lastSuccessAt: now, consecutiveFails: 0, backoffUntil: 0, postsRead: cycle.fetched });
+  } else {
+    state.cycle = cycle;
+    Object.assign(status, { ok: true, code: 200, error: null, at: now, lastSuccessAt: now, consecutiveFails: 0, backoffUntil: 0 });
+  }
+  await repo.putSettings({ reddit: state, redditStatus: status });
+  return { action: blocked ? 'blocked' : done ? 'done' : 'continuing', fetched: cycle.fetched, queue: blocked ? 0 : cycle.queue.length, errors: blocked ? 1 : 0, ...(blocked ? { code: blocked.code } : {}) };
+}

@@ -3,7 +3,7 @@ import { HttpError, json, errorJson, readJson } from './http.js';
 import { ingestItems } from './ingest.js';
 import { scheduledJob, startRun, sweep, getUsage, scheduleOf, nextRunAt, actorId, DEFAULT_RESULTS_PER_GROUP, MAX_RESULTS_PER_GROUP, budgeted, rowPrice, groupInfoStale, runGroupPlan, DEFAULT_ACTOR } from './apify.js';
 import { planOf, PLAN_LIMITS, PLAN_DEFAULTS, groupStats, dailyAllowance, budgetOf, manualAction, projectedDailyUsd, isReading } from './groupplan.js';
-import { redditStep, redditConfigured, subredditsOf, validateSubreddits, DEFAULT_SUBREDDITS } from './reddit.js';
+import { redditStep, redditPublicStep, redditMode, redditConfigured, subredditsOf, validateSubreddits, DEFAULT_SUBREDDITS } from './reddit.js';
 import { validateGroups, groupsView, groupId, classifyFacebookUrl, PAGE_WARNING } from './groups.js';
 import { editArea, areaName, LIMITS } from './app.js';
 import { cleanKeywords } from './core/keywords.js';
@@ -45,16 +45,19 @@ async function scraperView(repo, env, fetchFn, { live = true } = {}) {
     groupInfo: s.groupInfo ? { at: s.groupInfo.at, groups: (s.groupInfo.groups || []).length } : null,
     apifyUsage: usage, nextRunAt: env.APIFY_TOKEN ? nextRunAt(s) : null, scheduler: s.scheduler || null, purge: s.purge || null,
     apify: { configured: !!env.APIFY_TOKEN, actor, webhook: !!(env.PUBLIC_BASE_URL && env.INGEST_SECRET) },
-    reddit: { configured: redditConfigured(env), state: redditState(s) },
+    reddit: { configured: redditConfigured(env), mode: redditMode(env, s) || 'off', state: redditState(s), status: redditStatusView(s) },
     unscrapableGroups: s.unscrapableGroups || null,
   };
 }
+const scheduleRaw = s => (s?.schedule && typeof s.schedule === 'object' ? s.schedule : {});
+const redditStatusView = s => { const x = s.redditStatus || {}; return { mode: x.mode || null, ok: x.ok ?? null, code: x.code ?? null, error: x.error || null, at: x.at || null, lastSuccessAt: x.lastSuccessAt || null, consecutiveFails: x.consecutiveFails || 0, backoffUntil: x.backoffUntil || null, postsRead: x.postsRead ?? null }; };
 const redditState = s => { const r = s.reddit || {}; return { lastRun: r.lastRun || null, inProgress: !!r.cycle, lastStartedAt: r.lastStartedAt || null }; };
 
 function validateSchedule(b, cur) {
   const out = { ...cur };
   const num = (k, lo, hi) => { if (b[k] === undefined) return; const n = Number(b[k]); if (!Number.isInteger(n) || n < lo || n > hi) throw new HttpError(400, 'bad_' + k, `${k} must be a whole number from ${lo} to ${hi}.`); out[k] = n; };
   if (b.enabled !== undefined) { if (typeof b.enabled !== 'boolean') throw new HttpError(400, 'bad_enabled'); out.enabled = b.enabled; }
+  if (b.redditPublic !== undefined) { if (typeof b.redditPublic !== 'boolean') throw new HttpError(400, 'bad_redditPublic'); out.redditPublic = b.redditPublic; }
   if (b.redditEnabled !== undefined) { if (typeof b.redditEnabled !== 'boolean') throw new HttpError(400, 'bad_redditEnabled'); out.redditEnabled = b.redditEnabled; }
   num('intervalHours', 1, 24); num('budgetWarnPct', 10, 99); num('budgetStopPct', 11, 100); num('retentionDays', 7, 365); num('backfillDays', 1, 5); num('overlapMin', 1, 60);
   if (b.mode !== undefined) { if (b.mode !== 'times' && b.mode !== 'interval') throw new HttpError(400, 'bad_mode', 'mode must be "times" or "interval".'); out.mode = b.mode; }
@@ -199,7 +202,7 @@ async function sourcesView(repo, env, now) {
   const groups = groupsView(s.groups);
   return { sources: [
     { id: 'apify', name: 'Facebook groups (Apify)', connected: !!env.APIFY_TOKEN, enabled: scheduleOf(s).enabled, watched: groups.filter(g => g.active && g.supported).length, unsupported: groups.filter(g => !g.supported).length, lastStatus: s.scheduler?.action || null, lastError: /failed/i.test(s.scheduler?.detail || '') ? s.scheduler.detail : null, nextRunAt: env.APIFY_TOKEN ? nextRunAt(s) : null, last7d: sv('apify') },
-    { id: 'reddit', name: 'Reddit (direct API)', connected: redditConfigured(env), enabled: scheduleOf(s).redditEnabled !== false, watched: subredditsOf(s).length, ...redditState(s), lastError: (s.reddit?.lastRun?.errors || [])[0] || null, last7d: sv('reddit') },
+    { id: 'reddit', name: redditConfigured(env) ? 'Reddit (API)' : 'Reddit (public JSON)', mode: redditConfigured(env) ? 'api' : 'public', connected: redditConfigured(env) || scheduleRaw(s).redditPublic === true, status: redditStatusView(s), enabled: scheduleOf(s).redditEnabled !== false, watched: subredditsOf(s).length, ...redditState(s), lastError: (s.reddit?.lastRun?.errors || [])[0] || null, last7d: sv('reddit') },
     { id: 'phone', name: 'Phone scans', connected: true, enabled: true, last7d: sv('phone') },
   ] };
 }
@@ -228,8 +231,10 @@ export async function adminApi(request, env, method, path, url, repo, fetchFn, w
   if (res === 'scraper' && id === 'run' && method === 'POST') {
     let b = {}; if ((request.headers.get('content-type') || '').includes('json')) { try { b = await body(); } catch { b = {}; } }
     if (b?.source === 'reddit') {
-      if (!redditConfigured(env)) throw new HttpError(503, 'reddit_not_configured', 'Reddit is not connected: set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET.');
       const r = budgeted(repo); const s = await r.getSettings();
+      const mode = redditMode(env, s);
+      if (!mode) throw new HttpError(503, 'reddit_not_configured', 'Reddit is off: turn on "Reddit public JSON" in the schedule, or set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET.');
+      if (mode === 'public') return json({ reddit: await redditPublicStep(r, env, { fetchFn, now, settings: s, sch: scheduleOf(s), budget: r.left() - 4, force: true }) });
       return json({ reddit: await redditStep(r, env, { fetchFn, now, settings: s, sch: scheduleOf(s), budget: r.left() - 4, force: true }) });
     }
     if (!env.APIFY_TOKEN) throw new HttpError(503, 'apify_not_configured', 'APIFY_TOKEN is not set on the server.');
@@ -241,7 +246,7 @@ export async function adminApi(request, env, method, path, url, repo, fetchFn, w
   }
   if (res === 'sources' && !id && method === 'GET') return json(await sourcesView(repo, env, now));
   if (res === 'subreddits' && !id) {
-    if (method === 'GET') { const s = await repo.getSettings(); return json({ subreddits: Array.isArray(s.subreddits) ? s.subreddits : DEFAULT_SUBREDDITS, connected: redditConfigured(env) }); }
+    if (method === 'GET') { const s = await repo.getSettings(); return json({ subreddits: Array.isArray(s.subreddits) ? s.subreddits : DEFAULT_SUBREDDITS, connected: redditConfigured(env) || scheduleRaw(s).redditPublic === true, mode: redditConfigured(env) ? 'api' : 'public', status: redditStatusView(s) }); }
     if (method === 'PUT') { const list = validateSubreddits((await body())?.subreddits); if (!list) throw new HttpError(400, 'bad_subreddits', 'Use subreddit names like bangalorerentals (at most 30).'); await repo.putSettings({ subreddits: list }); return json({ subreddits: list, connected: redditConfigured(env) }); }
   }
   if (res === 'runs' && !id && method === 'GET') {
