@@ -542,3 +542,10 @@ details.how summary{cursor:pointer;font-weight:700;font-size:var(--fs-14);color:
 @media (max-width:720px){.tbl tfoot{display:block}.fin .tbl td:empty{display:none}}
 @media (max-width:520px){.fin .ahead .btn{min-height:36px;padding:0 var(--s3);order:3}.fin .ahead .status-line{flex-basis:100%;order:2}.fin .ahead .sp{display:none}}
 @media (max-width:520px) and (pointer:coarse){.fin .ahead .btn{min-height:44px}}
+/* Area alerts (web/alerts.js, docs/ai/ALERTS-WEBPUSH.md) */
+.achip .bellb[aria-pressed="true"]{background:var(--keep);color:var(--on-keep)}
+.install-steps{margin:var(--s2) 0;padding-left:var(--s6);line-height:1.6}
+.al-row{margin-top:var(--s1)}
+.al-row select.input,.field-row .al-num{width:auto;min-width:96px;flex:none}
+.al-grid{padding:var(--s2) 0}
+.alert-note{border-left:3px solid var(--amber);padding-left:var(--s3)}

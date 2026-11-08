@@ -3,7 +3,7 @@
 // Contact details for the public are removed by the server; post text arrives with [[phone]] tokens.
 
 import { usd2, cents, fdate, ftime, niceMoney, moneyTick, costDelta, whatIfCost, whatIfDefaults, statusPill as finPill, verdict, suggestions } from './finance.js';
-import { registerServiceWorker } from './alerts.js';
+import { registerServiceWorker, createAlertsUI, iosSigninNote } from './alerts.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -336,7 +336,7 @@ function openSignin(context) {
     <h2 class="signin-title">Sign in to Flat Hunt</h2>${context ? `<p>${esc(context)}</p>` : ''}
     <ul class="small"><li>Owner's phone, WhatsApp and map pin</li><li>Your own swipe deck and shortlist</li><li>Pick the areas we scan for you</li></ul>
     ${state.me.login?.google ? `<a class="btn google block" href="/auth/google?next=${encodeURIComponent(next)}">${GOOGLE}Continue with Google</a>` : '<p class="help">Google sign-in is not set up on this server yet.</p>'}
-    <p class="small">We only use your name and email. Posters' numbers stay private to signed-in members.</p>
+    <p class="small">We only use your name and email. Posters' numbers stay private to signed-in members.</p>${iosSigninNote(esc)}
     ${state.me.login?.password ? `<a class="small" href="/login?next=${encodeURIComponent(next)}">Admin password login</a>` : ''}`, { label: 'Sign in', center: true, route: 'signin' }).onclick = e => { if (e.target.closest('[data-close]')) closeSheet(); };
 }
 
@@ -476,6 +476,7 @@ async function renderAreas() {
     <div class="area-chips">${state.myAreas.map(a => `<span class="achip">${esc(a.name)} <span class="st${a.matching || !(all.find(x => x.id === a.id)?.listings) ? ' wait' : ''}">${a.matching ? 'Matching existing posts…' : all.find(x => x.id === a.id)?.listings ? 'Scanning' : 'Waiting for first scrape'}</span><button type="button" data-rm="${a.id}" aria-label="Remove ${esc(a.name)}">${I.x}</button></span>`).join('') || '<p class="help">No areas yet.</p>'}</div>
     <label class="lbl" for="area-q">Add an area</label><input class="input" id="area-q" placeholder="Type an area, e.g. HSR Layout" autocomplete="off"><div class="pick-list" id="area-list"></div>
     <p class="help">New areas are scanned from the next scrape (about every 4 h). Posts we already have are matched right away.</p></div>`;
+  alertsUI.decorateAreas($('#main'), state.myAreas, () => renderAreas()); // bell per area (web/alerts.js)
   const draw = () => {
     const q = $('#area-q').value.trim(); const ql = q.toLowerCase();
     const hits = all.filter(a => !mineIds.has(a.id) && (!ql || a.name.toLowerCase().includes(ql))).slice(0, 12);
@@ -505,12 +506,14 @@ function renderAccount() {
   $('#main').innerHTML = `<div class="wrap"><div class="screen-h">${avatar()}<h1>${esc(u.name || 'Account')}</h1><span class="sub">${esc(u.email || '')}</span></div>
     <div class="panel"><h2>Theme</h2><div class="seg section-gap" role="group" aria-label="Theme">${['system', 'light', 'dark'].map(t => `<button type="button" data-theme="${t}" aria-pressed="${t === theme}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div></div>
     <div class="panel"><h2>Areas</h2><p class="help">${esc(state.myAreas.map(a => a.name).join(', ') || 'None yet')}</p><a class="btn sm" href="#areas">Edit my areas</a></div>
+    <div id="alerts-panel"></div>
     ${isAdmin() ? `<div class="panel"><h2>Admin</h2><div class="field-row section-gap">${ADMIN_PAGES.map(([id, l, ic]) => `<a class="btn sm" href="#${id}">${ic}${l}</a>`).join('')}</div></div>` : ''}
     <div class="panel"><button class="btn danger" type="button" id="logout">Sign out</button></div></div>`;
   $('#main').onclick = async e => {
     const t = e.target.closest('[data-theme]'); if (t) { store.set('theme', t.dataset.theme); applyTheme(); renderAccount(); }
-    if (e.target.closest('#logout')) { try { await api('POST', '/auth/logout'); } catch { /* ignore */ } location.href = '/'; }
+    if (e.target.closest('#logout')) { await alertsUI.beforeSignOut(); try { await api('POST', '/auth/logout'); } catch { /* ignore */ } location.href = '/'; }
   };
+  alertsUI.mountAccount($('#alerts-panel'));
 }
 function applyTheme() { const t = store.get('theme', 'system'); if (t === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t; }
 
@@ -1040,15 +1043,20 @@ async function renderUsers() {
   };
 }
 
+// ---------- area alerts (web/alerts.js) ----------
+const alertsUI = createAlertsUI({ api, esc, toast, fail, openSheet, closeSheet, cardHtml });
+
 // ---------- router ----------
-const SCREENS = { browse: renderBrowse, review: renderReview, shortlist: renderShortlist, passed: renderPassed, areas: renderAreas, account: renderAccount,
+const SCREENS = { browse: renderBrowse, review: renderReview, shortlist: renderShortlist, passed: renderPassed, areas: renderAreas, account: renderAccount, alerts: () => alertsUI.renderScreen($('#main')),
   'admin-scraper': renderScraper, 'admin-finance': renderFinance, 'admin-groups': renderGroups, 'admin-phone': renderPhone, 'admin-ai': renderAi, 'admin-data': renderData, 'admin-users': renderUsers };
-const LOCKED = { review: 'Sign in to get your own swipe deck.', shortlist: 'Sign in to keep a shortlist.', passed: 'Sign in to keep a shortlist.', areas: 'Sign in to pick your areas.', account: '' };
+const LOCKED = { alerts: 'Sign in to get alerts for new flats in your areas.', review: 'Sign in to get your own swipe deck.', shortlist: 'Sign in to keep a shortlist.', passed: 'Sign in to keep a shortlist.', areas: 'Sign in to pick your areas.', account: '' };
 async function render() {
   chartObservers.splice(0).forEach(o => o.disconnect());
   let r = route();
   if (r.startsWith('listing-')) { if (!state.base) { state.base = 'browse'; await renderScreen('browse'); } renderChrome(); if (!$('#scrim') || sheetRoute !== r) openListing(decodeURIComponent(r.slice(8))); return; }
   if (r === 'signin') { if (signedIn()) { location.hash = '#browse'; return; } if (!state.base) { state.base = 'browse'; await renderScreen('browse'); } renderChrome(); openSignin(''); return; }
+  // #area-<id> (alert notifications): the homepage filtered to that area.
+  if (/^area-\d+$/.test(r)) { const id = Number(r.slice(5)); state.area = state.areas.some(a => a.id === id) ? id : null; store.set('area', state.area); state.browse.key = ''; history.replaceState(null, '', '#browse'); r = 'browse'; }
   if (r.startsWith('admin-') && !isAdmin()) { history.replaceState(null, '', '#browse'); r = 'browse'; toast('That page is for admins.'); }
   if (!signedIn() && r in LOCKED) { history.replaceState(null, '', '#browse'); state.base = 'browse'; await renderScreen('browse'); renderChrome(); openSignin(LOCKED[r]); return; }
   if (!SCREENS[r]) { history.replaceState(null, '', '#browse'); r = 'browse'; }
