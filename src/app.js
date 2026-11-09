@@ -16,6 +16,7 @@ import { generateKeywords, cleanKeywords } from './core/keywords.js';
 import { esc } from './core/logic.js';
 import { STAGES, STATUSES } from './db/repo.js';
 import { alertsApi, alertStep, ALERT_CRON } from './alerts.js';
+import { reparseStep, CRON_QUERIES } from './reparse.js';
 
 const KB = 1024;
 export const LIMITS = { importBytes: 2 * KB * KB, webhookBytes: 16 * KB, smallBytes: 64 * KB, importItems: 3000 };
@@ -49,8 +50,14 @@ export function createApp(deps) {
       // that runs ahead of (or behind) the code never runs the hourly job every 10 minutes.
       const cron = event?.cron;
       if (cron === ALERT_CRON) {
-        const a = await alertStep(budgeted(repo), env, { fetchFn });
+        const br = budgeted(repo);
+        const a = await alertStep(br, env, { fetchFn });
         console.log('alerts', JSON.stringify(a));
+        // After a rule change, re-check stored listings a page at a time in the leftover budget (src/reparse.js).
+        if (br.left() >= CRON_QUERIES) {
+          try { const r = await reparseStep(br); if (r) console.log('reparse', JSON.stringify({ next: r.next, checked: r.checked, changed: r.changed, done: !!r.doneAt })); }
+          catch (e) { console.log('reparse failed', String(e?.message || e).slice(0, 200)); }
+        }
         return a;
       }
       if (cron && !HOURLY_CRONS.includes(cron)) { console.log('scheduled: ignoring unknown cron', String(cron).slice(0, 40)); return { action: 'ignored' }; }

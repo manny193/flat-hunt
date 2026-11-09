@@ -37,7 +37,7 @@ export function publicText(s, hide = []) {
 }
 
 const PUBLIC_SCALARS = ['id', 'kind', 'bhk', 'rent', 'totalRent', 'rentEstimated', 'type', 'deposit', 'depositMonths', 'maintenance', 'brokerage', 'brokerageAmount',
-  'furnishing', 'gender', 'availableFrom', 'firstPostedAt', 'lastPostedAt', 'seenCount'];
+  'furnishing', 'gender', 'availableFrom', 'bath', 'firstPostedAt', 'lastPostedAt', 'seenCount'];
 const img = u => typeof u === 'string' && /^https:\/\/(?:[a-z0-9.-]+\.fbcdn\.net|i\.redd\.it|preview\.redd\.it)\//i.test(u);
 
 /**

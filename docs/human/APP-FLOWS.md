@@ -119,7 +119,11 @@ Public JSON tested 9 Nov 2026; Reddit requires login (403 from Cloudflare, login
 
 ### 10b. Shared flat or whole home
 
-Every listing shows a **Shared flat**, **Whole home** or **PG** chip, and the homepage **Type** filter picks one. For a room in a shared flat, the rent shown is the room's share. If the post only gives the whole flat's rent, the card shows an estimate (≈ total ÷ BHK) and the whole-flat rent under it. Admin → Data → **Re-check all listings** applies these rules to posts already stored.
+Every listing shows a **Shared flat**, **Whole home** or **PG** chip, and the homepage **Type** filter picks one. For a room in a shared flat, the rent shown is the room's share. If the post only gives the whole flat's rent, the card shows an estimate (≈ total ÷ BHK) and the whole-flat rent under it. Admin → Data → **Re-check all listings** applies these rules to posts already stored. After a rules update the app also re-checks every stored listing by itself within a few hours.
+
+Rooms also show their **Bathroom** (attached to the room, or not attached) when the post says, and the homepage chip **Room with attached bath** keeps only those rooms.
+
+Posts selling a flat ("for sale", "investment", prices in crores) and posts from people looking for a place ("looking for a room") are not shown on the homepage. A post's area comes from what the post says: a post about HSR Layout in a "Bellandur Green Glen" group is not filed under Green Glen. The group's name only counts when the post names no place.
 
 ### 11. Users and data
 
