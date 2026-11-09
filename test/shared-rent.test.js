@@ -27,6 +27,9 @@ test('senior review / QA F3: bare "flat" is not a total; "sharing allowed" is no
   assert.deepEqual(pick('Rent 55000 for 3BHK, sharing allowed for bachelors'), ['flat', 3, 55000, null, null]);
   assert.deepEqual(pick('3BHK replacement needed, rent 66000, deposit 2L'), ['flatmate', 3, 66000, null, null], 'no room offered: no estimate');
   assert.deepEqual(pick('Room in 3BHK, total 18k, my share 6k'), ['flatmate', 3, 6000, null, null]);
+  // QA F8: the Green Glen breakdown without any 'flatmate' wording still reads as a room.
+  assert.deepEqual(pick('Total rent: 71k (66k + 5k maintenance) ... Available room rent: 22k + maintenance'), ['flatmate', null, 22000, 71000, null]);
+  assert.deepEqual(pick('3BHK flat, total rent 66k, maintenance 5k'), ['flat', 3, 66000, null, null], 'whole flat with a total stays whole');
   // 30,000 blanks took ~390 ms before the blank collapse (quadratic); now well under 100 ms even on a slow CI runner.
   const t0 = performance.now(); extract('room ' + ' '.repeat(30000) + 'mate ' + 'flat   -   '.repeat(3000)); assert.ok(performance.now() - t0 < 100, 'no slow backtracking on long whitespace');
 });

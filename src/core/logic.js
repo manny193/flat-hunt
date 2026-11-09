@@ -107,7 +107,7 @@ export const SOCIETY_RE = /\b([A-Z][A-Za-z0-9&']+(?:\s+[A-Z][A-Za-z0-9&']+){0,3}
 export const societyOf = text => (String(text || '').match(SOCIETY_RE) || [null])[0];
 // A room/bed in a shared flat (type 'flatmate'), as opposed to the whole home.
 export const SHARED_RE = new RegExp([
-  'flat\\s{0,3}-?\\s{0,3}mates?', 'room\\s{0,3}-?\\s{0,3}mates?', 'sharing(?!\\s{0,3}(?:is\\s{1,3})?(?:allowed|ok|okay|also|possible|fine|available\\s{1,3}for))', 'replacement', 'single occupancy', 'private room', 'room available', 'room for rent', '\\bbed\\b(?! ?room)',
+  'flat\\s{0,3}-?\\s{0,3}mates?', 'room\\s{0,3}-?\\s{0,3}mates?', 'sharing(?!\\s{0,3}(?:is\\s{1,3})?(?:allowed|ok|okay|also|possible|fine|available\\s{1,3}for))', 'replacement', 'single occupancy', 'private room', 'room available', 'available\\s{1,3}room', '\\broom\\s{0,3}rent\\b', 'room for rent', '\\bbed\\b(?! ?room)',
   '\\b(?:one|1|a|single|private|master|spare|extra)\\s{1,3}(?:private\\s{1,3}|master\\s{1,3}|furnished\\s{1,3}|big\\s{1,3}|spacious\\s{1,3})?(?:bed\\s{0,3})?rooms?\\s{1,3}(?:is\\s{1,3})?(?:available|vacant|for rent|up for rent|to let|free)',
   '\\b(?:bed\\s{0,3})?rooms?\\s{1,3}(?:is\\s{1,3})?(?:available\\s{1,3}|vacant\\s{1,3})?in\\s{1,3}(?:a|an|my|our|the)?\\s{0,3}(?:\\d(?:\\.5)?\\s{0,3}-?\\s{0,3}bhk|shared|furnished|gated)',
   'master\\s{0,3}bed\\s{0,3}room\\s{1,3}(?:available|vacant|for rent)', 'shared\\s{1,3}(?:flat|apartment|accommodation)', '\\bshare\\s{1,3}(?:the|a|my|our)\\s{1,3}(?:flat|apartment|house)',
