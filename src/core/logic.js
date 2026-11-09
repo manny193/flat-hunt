@@ -107,19 +107,23 @@ export const SOCIETY_RE = /\b([A-Z][A-Za-z0-9&']+(?:\s+[A-Z][A-Za-z0-9&']+){0,3}
 export const societyOf = text => (String(text || '').match(SOCIETY_RE) || [null])[0];
 // A room/bed in a shared flat (type 'flatmate'), as opposed to the whole home.
 export const SHARED_RE = new RegExp([
-  'flat\\s*-?\\s*mates?', 'room\\s*-?\\s*mates?', 'sharing', 'replacement', 'single occupancy', 'private room', 'room available', 'room for rent', '\\bbed\\b(?! ?room)',
-  '\\b(?:one|1|a|single|private|master|spare|extra)\\s+(?:private\\s+|master\\s+|furnished\\s+|big\\s+|spacious\\s+)?(?:bed\\s*)?rooms?\\s+(?:is\\s+)?(?:available|vacant|for rent|up for rent|to let|free)',
-  '\\b(?:bed\\s*)?rooms?\\s+(?:is\\s+)?(?:available\\s+|vacant\\s+)?in\\s+(?:a|an|my|our|the)?\\s*(?:\\d(?:\\.5)?\\s*-?\\s*bhk|shared|furnished|gated)',
-  'master\\s*bed\\s*room\\s+(?:available|vacant|for rent)', 'shared\\s+(?:flat|apartment|accommodation)', '\\bshare\\s+(?:the|a|my|our)\\s+(?:flat|apartment|house)',
-  'looking\\s+for\\s+(?:a\\s+|one\\s+|1\\s+)?(?:female\\s+|male\\s+)?(?:flat|room)\\s*-?\\s*mate',
+  'flat\\s{0,3}-?\\s{0,3}mates?', 'room\\s{0,3}-?\\s{0,3}mates?', 'sharing(?!\\s{0,3}(?:is\\s{1,3})?(?:allowed|ok|okay|also|possible|fine|available\\s{1,3}for))', 'replacement', 'single occupancy', 'private room', 'room available', 'available[ \\t]{1,3}room\\b(?!s)', '(?<!(?:living|drawing|dining)\\s{0,3})\\broom[ \\t]{0,3}rent\\b', 'room for rent', '\\bbed\\b(?! ?room)',
+  '\\b(?:one|1|a|single|private|master|spare|extra)\\s{1,3}(?:private\\s{1,3}|master\\s{1,3}|furnished\\s{1,3}|big\\s{1,3}|spacious\\s{1,3})?(?:bed\\s{0,3})?rooms?\\s{1,3}(?:is\\s{1,3})?(?:available|vacant|for rent|up for rent|to let|free)',
+  '\\b(?:bed\\s{0,3})?rooms?\\s{1,3}(?:is\\s{1,3})?(?:available\\s{1,3}|vacant\\s{1,3})?in\\s{1,3}(?:a|an|my|our|the)?\\s{0,3}(?:\\d(?:\\.5)?\\s{0,3}-?\\s{0,3}bhk|shared|furnished|gated)',
+  'master\\s{0,3}bed\\s{0,3}room\\s{1,3}(?:available|vacant|for rent)', 'shared\\s{1,3}(?:flat|apartment|accommodation)', '\\bshare\\s{1,3}(?:the|a|my|our)\\s{1,3}(?:flat|apartment|house)',
+  'looking\\s{1,3}for\\s{1,3}(?:a\\s{1,3}|one\\s{1,3}|1\\s{1,3})?(?:female\\s{1,3}|male\\s{1,3})?(?:flat|room)\\s{0,3}-?\\s{0,3}mate',
 ].join('|'));
+// An estimate (total / BHK) needs a room actually offered, not just "sharing" or "replacement".
+const ROOM_PHRASE = /\b(?:bed\s{0,3})?rooms?\b|\bbed\b(?! ?room)|(?:flat|room)\s{0,3}-?\s{0,3}mates?/;
 const ROOM_RENT_MAX = 35000; // a room in Bangalore above this, with a 2+ BHK named, is almost always the whole flat's rent
-const SHARE_BEFORE = /(per\s*(?:person|head|room|bed)|each|your\s*share|share|room\s*rent|rent\s*(?:for|of)\s*(?:the|one|1)?\s*room|individual)\s*(?:rent|is|of|:|-|=|@|₹|rs\.?|\s)*$/;
-const SHARE_AFTER = /^\s*(?:₹|rs\.?|inr)?\s*\d(?:[\d,.]*\d)?\s*(?:k\b|thousand)?\s*(?:rs\.?|inr|rupees)?\s*(?:\/-)?\s*(?:per\s*month|pm\b|\/\s*month|monthly|a\s*month)?\s*(?:per\s*(?:person|head|room|bed)|\/\s*(?:person|head)|each|for\s*(?:the|one|1)\s*room|(?:as\s*)?(?:your|my)\s*share|share)/;
-const TOTAL_BEFORE = /(total|whole|entire|full|overall|complete|flat|apartment|house)\s*(?:flat|house|apartment)?\s*(?:rent|rental)?\s*(?:is|of|:|-|=|@|₹|rs\.?|\s)*$/;
-const TOTAL_AFTER = /^\s*(?:₹|rs\.?|inr)?\s*\d(?:[\d,.]*\d)?\s*(?:k\b|thousand)?\s*(?:rs\.?|inr|rupees)?\s*(?:\/-)?\s*(?:per\s*month|pm\b|\/\s*month|monthly|a\s*month)?\s*(?:total|in total|for\s*(?:the\s*)?(?:whole|entire|full|complete)?\s*(?:flat|house|apartment|\d\s*bhk))/;
+const SHARE_BEFORE = /(per\s{0,3}(?:person|head|room|bed)|each|your\s{0,3}share|share|room\s{0,3}rent|rent\s{0,3}(?:for|of)\s{0,3}(?:the|one|1)?\s{0,3}room|individual)\s{0,3}(?:rent|is|of|:|-|=|@|₹|rs\.?|\s)*$/;
+const SHARE_AFTER = /^\s{0,3}(?:₹|rs\.?|inr)?\s{0,3}\d(?:[\d,.]*\d)?\s{0,3}(?:k\b|thousand)?\s{0,3}(?:rs\.?|inr|rupees)?\s{0,3}(?:\/-)?\s{0,3}(?:per\s{0,3}month|pm\b|\/\s{0,3}month|monthly|a\s{0,3}month)?\s{0,3}(?:per\s{0,3}(?:person|head|room|bed)|\/\s{0,3}(?:person|head)|each|for\s{0,3}(?:the|one|1)\s{0,3}room|(?:as\s{0,3})?(?:your|my)\s{0,3}share|share)/;
+const TOTAL_BEFORE = /(?:(?:total|whole|entire|full|overall|complete)\s{0,3}(?:flat|house|apartment)?\s{0,3}(?:rent|rental)?|(?:flat|apartment|house)\s{0,3}(?:rent|rental))\s{0,3}(?:is|of|:|-|=|@|₹|rs\.?|\s)*$/;
+const TOTAL_AFTER = /^\s{0,3}(?:₹|rs\.?|inr)?\s{0,3}\d(?:[\d,.]*\d)?\s{0,3}(?:k\b|thousand)?\s{0,3}(?:rs\.?|inr|rupees)?\s{0,3}(?:\/-)?\s{0,3}(?:per\s{0,3}month|pm\b|\/\s{0,3}month|monthly|a\s{0,3}month)?\s{0,3}(?:total|in total|for\s{0,3}(?:the\s{0,3})?(?:whole|entire|full|complete)?\s{0,3}(?:flat|house|apartment|\d\s{0,3}bhk))/;
 export function extract(text) {
-  const t = String(text || ''); const lo = t.toLowerCase(); const ex = {};
+  // Long runs of blanks (pasted layouts, spam) make several regexes backtrack quadratically; 3 blanks keep every
+  // pattern's meaning ("98765   43210" still reads as one phone).
+  const t = String(text || '').replace(/[^\S\n]{4,}/g, '   ').replace(/\n{4,}/g, '\n\n\n'); const lo = t.toLowerCase(); const ex = {};
   // Phone numbers written with spaces ("98765 43210") must not be read as money.
   const money = moneyMentions(blankPhones(t));
   const rent = money.find(x => x.label === 'rent' && x.n >= 2000 && x.n <= 400000) || money.find(x => !x.label && x.n >= 3000 && x.n <= 400000);
@@ -141,14 +145,15 @@ export function extract(text) {
   if (ex.type === 'flatmate' && rent) {
     const ctx = x => ({ pre: lo.slice(Math.max(0, x.idx - 40), x.idx), post: lo.slice(x.idx, x.idx + 40) });
     const isShare = x => { const c = ctx(x); return SHARE_BEFORE.test(c.pre) || SHARE_AFTER.test(c.post); };
-    const isTotal = x => { const c = ctx(x); return TOTAL_BEFORE.test(c.pre) || TOTAL_AFTER.test(c.post); };
+    const isTotal = x => { if (x.n < 20000) return false; const c = ctx(x); return TOTAL_BEFORE.test(c.pre) || TOTAL_AFTER.test(c.post); };
+    const roomOffered = ROOM_PHRASE.test(lo);
     const cands = money.filter(x => (x.label === 'rent' || !x.label) && x.n >= 2000 && x.n <= 400000);
     const share = cands.find(isShare);
     const total = cands.find(isTotal) || (!share && Number(ex.bhk) >= 2 && rent.n >= ROOM_RENT_MAX ? rent : null);
     if (share) ex.rent = share.n;
     if (total && total !== share) {
       ex.totalRent = total.n;
-      if (!share) { ex.rent = Number(ex.bhk) >= 2 ? Math.round(total.n / Number(ex.bhk) / 100) * 100 : null; ex.rentEstimated = ex.rent ? true : null; }
+      if (!share) { ex.rent = Number(ex.bhk) >= 2 && roomOffered ? Math.round(total.n / Number(ex.bhk) / 100) * 100 : total.n; ex.rentEstimated = ex.rent !== total.n ? true : null; if (!ex.rentEstimated) ex.totalRent = null; }
     }
   }
   const seeking = /\b(looking|searching|need|needed|require|required|want|wanted|in search)\b(\s+for)?(\s+an?)?(\s+\d\s*bhk)?(\s+(fully|semi)[\s-]*furnished)?\s+(flat|room|accommodation|pg|place|house|apartment|1\s*rk|\d\s*bhk|home)\b/.test(lo);
@@ -407,7 +412,9 @@ export function applyPost(l, p, ex, now) {
   for (const k of FIELDS) { if (ex[k] != null && ex[k] !== '' && (l[k] == null || l[k] === '' || (newer && k !== 'kind'))) l[k] = ex[k]; }
   if (ex.rent) {
     const before = l.rent;
-    if (!l.rent) l.rent = ex.rent; else if (newer && l.rent !== ex.rent) { l.rentHistory = [...(l.rentHistory || []), { rent: l.rent, at: now }].slice(-10); l.rent = ex.rent; }
+    const sharper = l.rentEstimated && !ex.rentEstimated && ex.totalRent && ex.totalRent === l.totalRent; // same flat, now with the real share
+    if (!l.rent) l.rent = ex.rent;
+    else if ((newer || sharper) && l.rent !== ex.rent) { if (!sharper && ex.totalRent !== before) l.rentHistory = [...(l.rentHistory || []), { rent: l.rent, at: now }].slice(-10); l.rent = ex.rent; }
     if (l.rent !== before || !before) { if (ex.rentEstimated) l.rentEstimated = true; else delete l.rentEstimated; if (ex.totalRent) l.totalRent = ex.totalRent; else delete l.totalRent; }
   }
   l.phones = [...new Set([...(l.phones || []), ...ex.phones])].slice(0, 6);
@@ -427,10 +434,17 @@ export function reparseListing(l) {
   const text = l.posts?.[0]?.text; if (!text || l.isSample) return false;
   const ex = extract(text); const src = l.fieldSource || {}; const before = JSON.stringify([l.type, l.rent, l.totalRent, l.rentEstimated]);
   if (src.type !== 'user' && src.type !== 'ai' && ex.type) l.type = ex.type;
-  if (src.rent !== 'user' && src.rent !== 'ai' && ex.rent && (ex.totalRent || ex.rentEstimated || l.totalRent || l.rentEstimated || l.rent === ex.totalRent)) {
-    l.rent = ex.rent;
-    if (ex.totalRent) l.totalRent = ex.totalRent; else delete l.totalRent;
-    if (ex.rentEstimated) l.rentEstimated = true; else delete l.rentEstimated;
+  // Rent: never over a user edit or a rent the AI set or agreed with (set() leaves agreed fields unmarked).
+  const rentLocked = src.rent === 'user' || src.rent === 'ai' || (l.ai?.fields?.rent != null && l.ai.fields.rent === l.rent);
+  if (!rentLocked && ex.rent) {
+    if (l.type === 'flatmate' && (ex.totalRent || ex.rentEstimated || l.totalRent || l.rentEstimated || l.rent === ex.totalRent)) {
+      l.rent = ex.rent;
+      if (ex.totalRent) l.totalRent = ex.totalRent; else delete l.totalRent;
+      if (ex.rentEstimated) l.rentEstimated = true; else delete l.rentEstimated;
+    } else if (l.type !== 'flatmate' && (l.rentEstimated || l.totalRent)) {
+      // An earlier rule split a whole flat's rent: put the stated rent back.
+      l.rent = ex.totalRent || ex.rent; delete l.totalRent; delete l.rentEstimated;
+    }
   }
   return JSON.stringify([l.type, l.rent, l.totalRent, l.rentEstimated]) !== before;
 }

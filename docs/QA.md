@@ -471,3 +471,50 @@ Passed:
 MUST-FIX (src/reddit.js:187, 193): "missing from the response" counts as gone (`isGone(undefined)` is true), and only `Array.isArray(children)` is checked. Probed with a mocked HTTP 200 `{"data":{"children":[]}}`: 2 of 2 stored posts and listings were deleted. A partial response deletes every id it omits. Needed: if the response is empty or returns fewer than some safe fraction of the ids asked, throw and leave the cursor alone. The best fix is to remove only on an explicit signal (author `[deleted]`, selftext `[removed]`/`[deleted]`, `removed_by_category`) and never on absence alone, or to require children.length > 0 and the id be missing in a response that otherwise looks complete. Add tests for an empty and a partial 200.
 
 Minor: the stray repo.putSettings of `done` at the end of a cycle is fine; no other issues.
+
+## QA round: alerts test, room rent, Browse actions (#36–#41)
+
+Run 8 Nov 2026 on main (c3680b0), after the six PRs were already deployed without a QA round. Verdict: **no data-safety or privacy problem found. Two Medium bugs in the new Browse buttons and one Medium rent-parsing false positive; none needs a rollback, all should be fixed before the next push.** `npm test`: 185 tests, 184 pass, 1 skipped, 0 fail. `npm run e2e` (scripts/e2e-smoke.js, phone and desktop): all passed.
+
+| Area | How tested | Result |
+|---|---|---|
+| Unit and API suites | `npm test` | Green |
+| e2e smoke (#37) | `node scripts/e2e-smoke.js`, Playwright preinstalled | Green; the phone-digit check no longer trips on listing ids |
+| Public serializer | Local dev server, 53 seeded posts incl. phones, emails, society names, FB URLs; `GET /api/public/listings` | No phone, email, society, URL or author in output; new `totalRent`/`rentEstimated` are the only added keys (numbers/boolean) |
+| Sample alert text and admin-only | Read `alertsBlocked`, `alertText`, `alertSampleItem` (allowlisted columns only), router gate (src/app.js:129); existing tests alerts.test.js:236-250 | Non-admin still gets `off`/`admin_only` while alerts are off; `/api/admin/alerts/test` is behind the admin gate; text holds only type, rent, area name; one user's devices only. Real push not run (no VAPID locally) |
+| Rent parsing | 21 realistic posts (Hinglish, "per head", "each", total vs share, master bedroom, PG range, seeking, studio), new vs d675fdd code | 19 as expected; whole-flat posts unchanged (see F3, F4) |
+| Reparse | `POST /api/admin/listings/reparse` on dev server: repeated run, bad `after`, bad JSON, cross-site; function tests on user/AI-set fields | Idempotent (second run changes 0); `fieldSource` user/ai kept; bad input rejected; 400 error on garbage body; cross-site refused. 50 listings of 2 KB text take about 4 ms JS (see F5) |
+| UI flows | Playwright 390x844 light, 390x844 dark, 1280x800 dark: Like, Reject, keyboard Enter on buttons, Undo, Shortlist and Passed Details, Like from Passed, `#review` redirect, counts, focus ring, console and CSP errors | Works; no console errors or CSP violations; focus ring visible; 56 px tap targets; layout intact in both themes. Bugs F1, F2 |
+| CSP | DOM scan for `style=""` | Only the 3 existing `animationDelay` from the card entrance (set through CSSOM, no violation) |
+
+### Findings, most severe first
+
+| # | Severity | Where | Finding | Fix before next push? |
+|---|---|---|---|---|
+| F1 | Medium | web/ui.js:331-339 (`cardAction`), 398 (`decide`) | Double tap on Reject or Like (the card stays clickable for the 200 ms fade) runs `decide` twice. Two undo entries are pushed, so the first "Undo" restores "rejected" to "rejected" and nothing happens. Repro: Browse, double-click Reject, click Undo, check the listing: still `rejected`, absent from Browse. Suggested fix: in `cardAction` return if `card.classList.contains('leaving')` or `card.hidden`; add `pointer-events:none` to `.lcard.leaving`. | Yes |
+| F2 | Medium | web/ui.js:300-310 `drawGrid` empty state | Once every visible card is liked or rejected, the grid is blank with "0 listings from 3 groups". After a reload it says "No listings in Bangalore yet", which is false (the listings are in Shortlist or Passed) and gives no hint. Because only 30 are fetched, a power user hits this quickly; "Show more" is hidden when `next` is null. Fix: when signed in and the unfiltered page was non-empty, show "You have gone through every listing. Check Shortlist or Passed", with Show more if `next` is set. | Yes |
+| F3 | Medium | src/core/logic.js `SHARED_RE` (`sharing`, pre-existing) amplified by the new estimate | "Rent 55000 for 3BHK, sharing allowed for bachelors" is typed Shared flat and now shows "Estimated ₹18,300 a room" (total 55000). Before, it was a wrong type but the right number. Same for any whole-flat post that merely says "sharing allowed". Fix: do not derive an estimate unless a room phrase matched (not only `sharing`/`replacement`), or require "room/bed/flatmate" for the estimate; add a test. | Yes, or accept and note |
+| F4 | Low | src/core/logic.js `ROOM_RENT_MAX` | "Room available in 3BHK, 40k per month incl maintenance" is treated as the whole flat's rent and shown as an estimate of ₹13,300. A real 40k master room is shown at a third of its price. The threshold is a guess. | No; watch real posts after Re-check |
+| F5 | Low | src/admin.js:18 `REPARSE_PAGE = 50` | 50 listings of normal size is about 4 ms of JS on Node plus row decode and the write batch; Workers Free has 10 ms CPU. Not measured in workerd. If the first Re-check returns 1102 errors, lower to 20-25. An adversarial 24 KB post took 14.6 ms in `extract` alone (pre-existing, but now run per row in one call). | No |
+| F6 | Low | src/alerts.js `alertText` | Estimated rents are shown as exact in the push ("Room · ₹20,000") because `rentEstimated` is not read. Add "about" or a tilde. | No |
+| F7 | Info | src/core/logic.js | "1RK studio ... 15000 deposit 45000" gets no rent (unlabelled number; unchanged from before #38). | No |
+
+### Real-device checklist (founder)
+
+1. Deploy is live: Admin -> Alerts -> Test notifications -> "Sample alert" on Android (already confirmed) and once on iPhone from the home-screen icon. Lock screen shows only type, rent, area; tap opens that listing.
+2. While Alerts are off globally, sign in as a normal (non-admin) user: bell says alerts are off, no way to add a device.
+3. Browse on your phone: tap Like and Reject once each, tap fast twice on one (F1), tap Undo, open Shortlist and Passed, tap Details on a row, tap Like on a Passed row.
+4. Turn dark mode on and check the four buttons are readable and the Like pill is clearly the main one.
+5. Admin -> Data -> "Re-check all listings": note the counts; open three room posts and confirm the rent label ("Estimated share" when only the total is in the post). Look for whole flats wrongly marked Shared (F3).
+6. Press Tab through a card: Reject, Like, Details, Post each get a visible ring.
+
+### Re-check after fixes
+
+Verdict: signed off after the F8 fix (0c315a5) and the senior follow-up (no whole-flat false positives). `npm test` 186 pass, 0 fail (1 skipped); e2e smoke all passed.
+
+- F1 double tap: fixed. `cardAction` sets `data-decided`, `browseClick` ignores decided cards, the leaving card keeps its space; e2e covers it.
+- F2 all-decided empty state: fixed. `drawGrid` shows "You've been through every listing" with Shortlist and Passed links.
+- F3 "sharing allowed": fixed. "Rent 55000 for 3BHK, sharing allowed for bachelors" gives rent 55000, no estimate.
+- Room cases: "Room for rent in my flat ₹15000" and "Room available in 2BHK flat 15000" give 15000; whole-flat posts (28k, 45k, 18k) unchanged.
+- F8: fixed in the next commit. "Available room rent" and "room rent" now mark a room in a shared flat, so the bare breakdown gives rent 22000, totalRent 71000 (test added). The real post already gave this because it says "female flatmate".
+- F4, F5, F6, F7: unchanged, low or info, not blockers.
