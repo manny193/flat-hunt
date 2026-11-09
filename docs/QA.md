@@ -507,3 +507,14 @@ Run 8 Nov 2026 on main (c3680b0), after the six PRs were already deployed withou
 4. Turn dark mode on and check the four buttons are readable and the Like pill is clearly the main one.
 5. Admin -> Data -> "Re-check all listings": note the counts; open three room posts and confirm the rent label ("Estimated share" when only the total is in the post). Look for whole flats wrongly marked Shared (F3).
 6. Press Tab through a card: Reject, Like, Details, Post each get a visible ring.
+
+### Re-check after fixes
+
+Verdict: not signed off for the Green Glen case only (F8 below); everything else passes. At 9e23215: `npm test` 186 pass, 0 fail (1 skipped); e2e smoke all passed.
+
+- F1 double tap: fixed. `cardAction` sets `data-decided`, `browseClick` ignores decided cards, the leaving card keeps its space; e2e covers it.
+- F2 all-decided empty state: fixed. `drawGrid` shows "You've been through every listing" with Shortlist and Passed links.
+- F3 "sharing allowed": fixed. "Rent 55000 for 3BHK, sharing allowed for bachelors" gives rent 55000, no estimate.
+- Room cases: "Room for rent in my flat ₹15000" and "Room available in 2BHK flat 15000" give 15000; whole-flat posts (28k, 45k, 18k) unchanged.
+- F8 (new, open): "Total rent: 71k (66k + 5k maintenance) ... Available room rent: 22k + maintenance" gives rent 71000, totalRent null. Expected rent 22000, totalRent 71000 (one-line and multi-line forms both fail).
+- F4, F5, F6, F7: unchanged, low or info, not blockers.
