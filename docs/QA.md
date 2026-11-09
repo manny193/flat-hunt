@@ -510,7 +510,7 @@ Run 8 Nov 2026 on main (c3680b0), after the six PRs were already deployed withou
 
 ### Re-check after fixes
 
-Verdict: not signed off for the Green Glen case only (F8 below); everything else passes. At 9e23215: `npm test` 186 pass, 0 fail (1 skipped); e2e smoke all passed.
+Verdict: signed off after the F8 fix (0c315a5) and the senior follow-up (no whole-flat false positives). `npm test` 186 pass, 0 fail (1 skipped); e2e smoke all passed.
 
 - F1 double tap: fixed. `cardAction` sets `data-decided`, `browseClick` ignores decided cards, the leaving card keeps its space; e2e covers it.
 - F2 all-decided empty state: fixed. `drawGrid` shows "You've been through every listing" with Shortlist and Passed links.
