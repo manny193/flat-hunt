@@ -121,7 +121,9 @@ const SHARE_AFTER = /^\s{0,3}(?:₹|rs\.?|inr)?\s{0,3}\d(?:[\d,.]*\d)?\s{0,3}(?:
 const TOTAL_BEFORE = /(?:(?:total|whole|entire|full|overall|complete)\s{0,3}(?:flat|house|apartment)?\s{0,3}(?:rent|rental)?|(?:flat|apartment|house)\s{0,3}(?:rent|rental))\s{0,3}(?:is|of|:|-|=|@|₹|rs\.?|\s)*$/;
 const TOTAL_AFTER = /^\s{0,3}(?:₹|rs\.?|inr)?\s{0,3}\d(?:[\d,.]*\d)?\s{0,3}(?:k\b|thousand)?\s{0,3}(?:rs\.?|inr|rupees)?\s{0,3}(?:\/-)?\s{0,3}(?:per\s{0,3}month|pm\b|\/\s{0,3}month|monthly|a\s{0,3}month)?\s{0,3}(?:total|in total|for\s{0,3}(?:the\s{0,3})?(?:whole|entire|full|complete)?\s{0,3}(?:flat|house|apartment|\d\s{0,3}bhk))/;
 export function extract(text) {
-  const t = String(text || ''); const lo = t.toLowerCase(); const ex = {};
+  // Long runs of blanks (pasted layouts, spam) make several regexes backtrack quadratically; 3 blanks keep every
+  // pattern's meaning ("98765   43210" still reads as one phone).
+  const t = String(text || '').replace(/[^\S\n]{4,}/g, '   ').replace(/\n{4,}/g, '\n\n\n'); const lo = t.toLowerCase(); const ex = {};
   // Phone numbers written with spaces ("98765 43210") must not be read as money.
   const money = moneyMentions(blankPhones(t));
   const rent = money.find(x => x.label === 'rent' && x.n >= 2000 && x.n <= 400000) || money.find(x => !x.label && x.n >= 3000 && x.n <= 400000);

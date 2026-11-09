@@ -27,7 +27,8 @@ test('senior review / QA F3: bare "flat" is not a total; "sharing allowed" is no
   assert.deepEqual(pick('Rent 55000 for 3BHK, sharing allowed for bachelors'), ['flat', 3, 55000, null, null]);
   assert.deepEqual(pick('3BHK replacement needed, rent 66000, deposit 2L'), ['flatmate', 3, 66000, null, null], 'no room offered: no estimate');
   assert.deepEqual(pick('Room in 3BHK, total 18k, my share 6k'), ['flatmate', 3, 6000, null, null]);
-  const t0 = Date.now(); extract('room ' + ' '.repeat(3000) + 'mate ' + 'flat   -   '.repeat(300)); assert.ok(Date.now() - t0 < 20, 'no slow backtracking on long whitespace');
+  // 30,000 blanks took ~390 ms before the blank collapse (quadratic); now well under 100 ms even on a slow CI runner.
+  const t0 = performance.now(); extract('room ' + ' '.repeat(30000) + 'mate ' + 'flat   -   '.repeat(3000)); assert.ok(performance.now() - t0 < 100, 'no slow backtracking on long whitespace');
 });
 
 test('AI rent clears our estimate; a whole flat reposted as a room is not a rent drop; a stated share replaces an estimate', () => {
