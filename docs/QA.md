@@ -600,3 +600,21 @@ Engineer note (2026-11-12, after the findings above; for QA to re-test):
 - F5 fixed: `runLocate` counts every request and starts no new listing once `MAX_FETCHES` (16) is reached; the rest stay queued.
 - F4 not fixed, by choice: the backfill runs as one SQL text scan and cannot apply the AI's "nearby" list. It is a documented limit (ARCHITECTURE §4.4); the listing is corrected at the next re-check.
 - Tests: `test/locate.test.js` "QA F1-F5". `npm test` 207 pass. The ingest timing test (`median < 10 ms`) fails intermittently on this sandbox today on `main` as well (10.8 to 15.1 ms in six runs on `origin/main`), so it is machine noise, not this PR.
+
+Re-test (2026-11-12, head 83187b2): signed off. No remaining Medium or High findings.
+
+What I ran:
+
+| Area | How | Result |
+|---|---|---|
+| Suite | `npm test` | 208 tests, 206 pass, 1 skipped, 1 fail: only the ingest timing test (`median < 10 ms`, known sandbox noise, not counted) |
+| F1 | `resolveMapLink` with `google.evil.com`, `google.com.evil.co`, `www.google.com@evil.com`, `google.com@evil.com`, `goo.gl@evil.com`, `goo.gl.evil.com`, `g.co.evil.com`, `google.co.evil.com`, a full `google.com:8080` Maps URL, `?u=g.co` | No fetch for any of them; the full Maps URL is parsed, not fetched. Only `http(s)://g.co`, `goo.gl`, `maps.app.goo.gl` are requested. A redirect to a non-Google host stops after 1 fetch; a goo.gl redirect loop stops at 4 fetches |
+| F2 | `redact()` with scheme-less `google.com/maps/...@lat,lon`, `maps.google.com/?q=`, `maps.google.co.in`, upper case `GOOGLE.CO.IN/maps`, `g.co/kgs`, `goo.gl/maps`, `maps.app.goo.gl`, bare `@lat,lon` | All become `[LINK]` |
+| F3 | `findSociety` with mocked Nominatim rows | "Prestige Apartments" vs "Prestige Falcon City" no match. "Sobha Dream Acres" matches itself and "... Phase 2" (generic word), not "Sobha Dream Gardens" or "... Road". "Brigade Meadows" does not match "Brigade Meadows Clubhouse". "Sai Nest" still skipped |
+| F5 | Read `runLocate`: `MAX_FETCHES` 16 checked before each new listing | Worst case is 16 plus one listing's own calls (2 links x 4 hops, a few geocoder calls), about 30, under 50. Rest stay queued |
+
+F4: accepted as a documented limit (Low). The listing self-corrects at the next re-check, and the cost of fixing it (per-listing JS in backfill) is not worth it.
+
+Observations, not blocking (Low): `redact()` leaves scheme-less Waze, Apple Maps and OpenStreetMap links with coordinates (`src/ai.js:106`); `coordinates alone` such as `12.93456, 77.72345` are not masked. Neither is a link to a person, and posters rarely write them; add to the pattern if cheap. A real society named with extra words that Nominatim shortens ("Puravankara Purva Atmosphere" vs "Purva Atmosphere") is skipped, which is the safe direction.
+
+Not run: live Nominatim, Google, the real model, real D1, e2e.
