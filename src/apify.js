@@ -8,6 +8,7 @@ import { isPage, groupId } from './groups.js';
 import { runBackfill } from './backfill.js';
 import { redditStep, redditCleanStep, redditConfigured } from './reddit.js';
 import { runEnrich, aiConfigured } from './ai.js';
+import { runLocate, LOC_QUERIES } from './locate.js';
 import { planOf, planGroups, budgetOf, dailyAllowance, planCohorts, allocate, groupStats, isReading } from './groupplan.js';
 
 export const API = 'https://api.apify.com/v2';
@@ -444,6 +445,10 @@ async function extras(repo, env, settings, sch, status, { fetchFn, now }) {
   }
   if (aiConfigured(env) && repo.left() >= 20) {
     try { status.ai = await runEnrich(repo, env, { maxCalls: 6, now, fetchFn }); } catch (e) { status.detail += ' AI failed: ' + e.message + '.'; }
+  }
+  // Societies and map links the post text could not place (src/locate.js): a few look-ups per tick.
+  if (repo.left() >= LOC_QUERIES + 12) { // leaves room for the daily purge and the final status write
+    try { const r = await runLocate(repo, env, { now, fetchFn }); if (r.action !== 'idle') status.locate = r; } catch (e) { status.detail += ' Place lookup failed: ' + e.message + '.'; }
   }
   if (settings.areaBackfill && Object.keys(settings.areaBackfill).length && repo.left() >= 12) {
     try { status.backfill = await runBackfill(repo, { maxQueries: repo.left() - 4, now }); } catch (e) { status.detail += ' Backfill failed: ' + e.message + '.'; }

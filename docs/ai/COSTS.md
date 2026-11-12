@@ -57,7 +57,7 @@ Running less often does **not** save money. It only makes posts arrive later.
 
 ## 3. Monthly scenarios: Facebook groups (Bangalore)
 
-Assumptions: 1.5 new posts per group per hour, 8 runs a day, automly actor, Workers Free, AI only on followed areas (≤ 300 posts/day, which fits the free neurons).
+Assumptions: 1.5 new posts per group per hour, 8 runs a day, automly actor, Workers Free, AI on every stored post since Nov 2026 (capped at 300 posts/day ≈ 3,200 neurons with the place fields, which fits the free 10,000; the first days after the change clear a backlog of up to 7 days at that cap). Place lookups (OpenStreetMap Nominatim, Google Maps link redirects) are free and keyless: ≤ 6 requests per 10-minute tick, cached per society.
 
 | Groups | New posts / day | Apify usage / month | Plan that covers it | **Total / month** | Notes |
 |---|---|---|---|---|---|

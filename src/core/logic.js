@@ -39,8 +39,8 @@ export function matchAreas(text, areas) {
   return out;
 }
 
-// Bangalore localities, used only to decide whether a post names a place (see postAreas). Written as
-// normalised text; matched at a word start, so hashtags like "#HSRLayout" count too. Not an area list.
+// Bangalore localities: tells whether a text names a place at all. Written as normalised text; matched at a
+// word start, so hashtags like "#HSRLayout" count too. Not an area list.
 export const LOCALITIES = ['hsr', 'koramangala', 'indiranagar', 'indira nagar', 'indranagar', 'jeevan bhima', 'jeevanbhima', 'jb nagar', 'domlur', 'ejipura', 'bellandur',
   'sarjapur', 'marathahalli', 'marthahalli', 'whitefield', 'kadubeesanahalli', 'panathur', 'varthur', 'brookefield', 'mahadevapura', 'kr puram', 'btm', 'jayanagar', 'jp nagar',
   'banashankari', 'basavanagudi', 'electronic city', 'electronics city', 'hebbal', 'yelahanka', 'malleshwaram', 'malleswaram', 'rajajinagar', 'mg road', 'ulsoor', 'halasuru',
@@ -52,15 +52,42 @@ const LOCALITY_RE = new RegExp('\\b(?:' + LOCALITIES.map(k => k.trim().replace(/
 /** True when the text names a Bangalore locality. */
 export const namesPlace = text => LOCALITY_RE.test(String(text || '').toLowerCase());
 /**
- * Areas of one post. The post text decides: a post is in an area when its text names it. The group name
- * ("Flat And Flatmate Bellandur Green Glen") is only a fallback for posts that name no place at all, so a
- * post in that group about HSR Layout or Indiranagar is not filed under Green Glen.
+ * Areas of one post. Only the post's own text decides: the name of the group it was posted in never tags
+ * a post, so a post about HSR Layout in a "Bellandur Green Glen" group is not filed under Green Glen.
  */
-export function postAreas(text, group, areas) {
-  const hits = matchAreas(text, areas);
-  if (hits.length || !group) return hits;
-  const fromGroup = matchAreas(group, areas); // cheap (short string); the locality scan runs only when it would matter
-  return fromGroup.length && !namesPlace(text) ? fromGroup : hits;
+export const postAreas = (text, areas) => matchAreas(text, areas);
+
+const hitsOf = (texts, areas) => { const s = new Set(); for (const t of texts) if (t) for (const id of matchAreas(t, areas)) s.add(id); return s; };
+/**
+ * Areas of a listing, most direct evidence first (docs/AI-EXTRACTION.md, "Where is the flat"):
+ *   1. areas named in the text of its posts, minus places the AI read as only nearby ("10 min from HSR"),
+ *      unless that would leave nothing;
+ *   2. the area the AI read from the post, spelled normally (place.area: "kormangla" -> "Koramangala");
+ *   3. the address found for the post's map link or society name (place.text, src/locate.js);
+ *   4. the AI's own knowledge of where the society is (place.guess), only until a lookup answers.
+ * l.place = {area, nearby[], guess, text, src, lat, lon, at}. areas: [{id, kws}].
+ */
+export function listingAreas(l, areas) {
+  if (!areas.length) return [];
+  const pl = l.place || {};
+  let text = hitsOf((l.posts || []).map(q => q.text), areas);
+  if (text.size && Array.isArray(pl.nearby) && pl.nearby.length) {
+    const own = hitsOf([pl.area, l.locality], areas);
+    const near = hitsOf(pl.nearby, areas);
+    const kept = [...text].filter(id => !near.has(id) || own.has(id));
+    if (kept.length) text = new Set(kept);
+  }
+  for (const s of [text, hitsOf([pl.area], areas), hitsOf([pl.text], areas), hitsOf([pl.guess], areas)]) if (s.size) return [...s].sort((a, b) => a - b);
+  return [];
+}
+/** Recompute l.areas from its posts and place; tags of paused areas are kept. Returns true when they changed. */
+export function retagAreas(l, ctx) {
+  const active = new Set(ctx.areas.map(a => a.id));
+  const next = new Set((l.areas || []).filter(id => !active.has(id)));
+  for (const id of listingAreas(l, ctx.areas)) next.add(id);
+  const out = [...next].sort((a, b) => a - b); const same = JSON.stringify(out) === JSON.stringify([...(l.areas || [])].sort((a, b) => a - b));
+  l.areas = out;
+  return !same;
 }
 
 const LABELS = [['deposit', /deposit|advance|security/g], ['maintenance', /maint\w*/g], ['brokerage', /brokerage|broker|commission/g], ['rent', /rent|rental|price|cost|budget/g]];
@@ -513,7 +540,7 @@ export function applyPost(l, p, ex, now) {
   return l;
 }
 // Bump when extraction rules change: the 10-minute cron then re-checks every stored listing once (src/reparse.js).
-export const RULES_VERSION = 2;
+export const RULES_VERSION = 3;
 /**
  * Re-run the extraction rules on a stored listing's latest post (after a rule change): type, kind (offer /
  * seeking / not a rental), room bathroom, rent split and, when ctx (makeContext) is given, areas.
@@ -541,13 +568,7 @@ export function reparseListing(l, ctx = null) {
       l.rent = ex.totalRent || ex.rent; delete l.totalRent; delete l.rentEstimated;
     }
   }
-  if (ctx) {
-    // Areas from every post (a merged listing keeps each post's areas); tags of paused areas are kept.
-    const active = new Set(ctx.areas.map(a => a.id));
-    const next = new Set((l.areas || []).filter(id => !active.has(id)));
-    for (const q of l.posts || []) for (const id of postAreas(q.text || '', q.group || '', ctx.areas)) next.add(id);
-    l.areas = [...next].sort((a, b) => a - b);
-  }
+  if (ctx) retagAreas(l, ctx); // areas: post text first, then what the AI and the place lookup found
   return snap() !== before;
 }
 export const newId = () => 'l_' + crypto.randomUUID().replace(/-/g, '').slice(0, 16);
@@ -577,7 +598,7 @@ export function screenItem(raw, source, ctx, report, now) {
   const obj = typeof raw === 'string' ? { text: raw } : (raw && typeof raw === 'object' ? raw : {});
   const text = String(pick(obj, TEXT_KEYS) || '').trim();
   if (text.length < 15) { report.noText++; return null; }
-  const areas = postAreas(text, asName(pick(obj, GROUP_KEYS)), ctx.areas);
+  const areas = postAreas(text, ctx.areas); // the post's own text only, never the group's name
   // Filter whenever the user has any area: pausing every area must not let every post through.
   if (ctx.storeAll) {
     // Store every housing post; posts in none of our areas are kept (area 0) for future areas.
