@@ -299,8 +299,9 @@ export function createRepo(db) {
      */
     async backfillChunk(areaId, patterns, from, to, now) {
       if (!patterns.length) return 0;
-      const like = patterns.map(() => "data LIKE ? ESCAPE '\\'").join(' OR ');
-      const sel = `SELECT id FROM listings WHERE rowid > ? AND rowid <= ? AND (${like})`;
+      // Post text only: group names ("Flat And Flatmate Bellandur Green Glen") and authors in data must not tag a post.
+      const like = patterns.map(() => "json_extract(p.value, '$.text') LIKE ? ESCAPE '\\'").join(' OR ');
+      const sel = `SELECT DISTINCT l.id FROM listings l, json_each(l.data, '$.posts') p WHERE l.rowid > ? AND l.rowid <= ? AND (${like})`;
       const res = await db.batch([
         { sql: `INSERT OR IGNORE INTO listing_match (listing_id, area_id, kind, bhk, rent, last_posted_at) SELECT id, ?, kind, bhk, rent, last_posted_at FROM listings WHERE id IN (${sel})`, params: [areaId, from, to, ...patterns] },
         { sql: `UPDATE listings SET areas = json_insert(areas, '$[#]', ?), updated_at = ? WHERE id IN (${sel}) AND NOT EXISTS (SELECT 1 FROM json_each(listings.areas) WHERE value = ?)`, params: [areaId, now, from, to, ...patterns, areaId] },

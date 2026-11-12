@@ -518,3 +518,25 @@ Verdict: signed off after the F8 fix (0c315a5) and the senior follow-up (no whol
 - Room cases: "Room for rent in my flat ₹15000" and "Room available in 2BHK flat 15000" give 15000; whole-flat posts (28k, 45k, 18k) unchanged.
 - F8: fixed in the next commit. "Available room rent" and "room rent" now mark a room in a shared flat, so the bare breakdown gives rent 22000, totalRent 71000 (test added). The real post already gave this because it says "female flatmate".
 - F4, F5, F6, F7: unchanged, low or info, not blockers.
+
+## PR #43 listing quality (2026-11-12)
+
+Verdict: signed off. Branch `claude/flat-hunt-listing-quality-qtlfcp`, head bd1fcec on main 6264422.
+
+What I tested:
+
+| Area | How | Result |
+|---|---|---|
+| Suites | `npm test`; `npm run e2e -- --trace off` (preinstalled Playwright) | 196 pass, 0 fail, 1 skipped; e2e all passed |
+| Homepage kinds | Dev server, Green Glen area, 14 realistic posts (sale with crore and EOI, two "looking for" posts, flatmate and "rent out" offers, HSR, Jeevan Bhima Nagar, rooms with attached and common bath, whole 2BHK, PG, "spacious hall", "rent negotiable, ready to occupy") at 390x844 | Sale and both seeking posts hidden; the 11 offers all visible, including the hall and negotiable posts |
+| Attached-bath chip | Playwright | Cards show "Attached bath"; chip shows 2 rooms, toggles off to 11, Clear filters resets it (and No brokerage); Details show "Bathroom: Attached to the room"; chip stays on after navigating |
+| Area from text | Area filter Green Glen | 9 offers; HSR and Jeevan Bhima Nagar posts absent although the group is "Bellandur Green Glen" |
+| Public API | `/api/public/listings` | `bath` present; no phone, URL, map or author text anywhere in the JSON |
+| Console and CSP | All Playwright runs | No errors or violations |
+| Re-check | New memoryDb script with old-style rows | Room 71000 became 23700 with total 71000 and bath attached (see F2); sale became not_rental, seeking became seeking, HSR area dropped; second run returned null |
+
+Findings:
+
+- F1 (Low) The area picker count ("Green Glen, 10 listings") includes hidden sale and seeking posts, while the list shows 9.
+- F2 (Info) "1 room in 3BHK, Rent 71000" with no breakdown shows an estimate of about 23,700 per room, as designed (test 6b). The 22,000 case needs the post to state it.
+- Not run: logged-out browser view (dev server has auth off, so I checked the public API only), a real D1 or workerd run.

@@ -7,7 +7,8 @@ import { redditStep, redditConfigured, subredditsOf, validateSubreddits, DEFAULT
 import { validateGroups, groupsView, groupId, classifyFacebookUrl, PAGE_WARNING } from './groups.js';
 import { editArea, areaName, LIMITS } from './app.js';
 import { cleanKeywords } from './core/keywords.js';
-import { watchedGroups, isKnownGroup, reparseListing } from './core/logic.js';
+import { watchedGroups, isKnownGroup } from './core/logic.js';
+import { reparsePage } from './reparse.js';
 import { backfillState } from './backfill.js';
 import { adminEmails } from './auth.js';
 import { aiStatus, acceptSuggestion, aiConfigOf, runEnrich } from './ai.js';
@@ -17,8 +18,6 @@ import { alertsAdminApi } from './alerts.js';
 const DAY = 864e5;
 // Re-check page: 1 read + one write batch. Sized for the 10 ms Workers CPU limit (senior review: 50 listings
 // with 5 long posts each measured ~15 ms): at most 20 listings and about 60 KB of post text per call.
-const REPARSE_PAGE = 20;
-const REPARSE_TEXT_BYTES = 60000;
 const int = v => (v != null && /^\d{1,15}$/.test(String(v)) ? Number(v) : null);
 const clampInt = (v, lo, hi, def) => { const n = int(v); return n == null ? def : Math.min(hi, Math.max(lo, n)); };
 const dayKey = t => new Date(t + 5.5 * 36e5).toISOString().slice(0, 10); // IST calendar day
@@ -357,12 +356,7 @@ export async function adminApi(request, env, method, path, url, repo, fetchFn, w
     // Re-check type (shared/whole) and rent on stored posts after a rule change. Paged by rowid: the UI calls again with `next` until done.
     if (id === 'reparse' && method === 'POST') {
       const b = await body(); const after = Number.isInteger(b?.after) && b.after >= 0 ? b.after : 0;
-      const rows = await repo.listingsAfterRowid(after, REPARSE_PAGE);
-      const take = []; let bytes = 0;
-      for (const r of rows) { take.push(r); bytes += (r.listing.posts || []).reduce((n, p) => n + (p.text || '').length, 0); if (bytes >= REPARSE_TEXT_BYTES) break; }
-      const changed = take.map(r => r.listing).filter(reparseListing);
-      if (changed.length) await repo.saveIngest({ listings: changed, keys: [], run: null, now });
-      return json({ checked: take.length, changed: changed.length, next: take.at(-1)?.rid ?? after, done: take.length === rows.length && rows.length < REPARSE_PAGE });
+      return json(await reparsePage(repo, { after, now }));
     }
     if (!id && method === 'GET') {
       const qq = (q.get('q') || '').trim().slice(0, 100); const area = q.get('area');

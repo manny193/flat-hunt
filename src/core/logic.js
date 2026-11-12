@@ -39,6 +39,30 @@ export function matchAreas(text, areas) {
   return out;
 }
 
+// Bangalore localities, used only to decide whether a post names a place (see postAreas). Written as
+// normalised text; matched at a word start, so hashtags like "#HSRLayout" count too. Not an area list.
+export const LOCALITIES = ['hsr', 'koramangala', 'indiranagar', 'indira nagar', 'indranagar', 'jeevan bhima', 'jeevanbhima', 'jb nagar', 'domlur', 'ejipura', 'bellandur',
+  'sarjapur', 'marathahalli', 'marthahalli', 'whitefield', 'kadubeesanahalli', 'panathur', 'varthur', 'brookefield', 'mahadevapura', 'kr puram', 'btm', 'jayanagar', 'jp nagar',
+  'banashankari', 'basavanagudi', 'electronic city', 'electronics city', 'hebbal', 'yelahanka', 'malleshwaram', 'malleswaram', 'rajajinagar', 'mg road', 'ulsoor', 'halasuru',
+  'cv raman nagar', 'kundalahalli', 'munnekollal', 'kaikondrahalli', 'harlur', 'haralur', 'hosa road', 'bommanahalli', 'iblur', 'kasavanahalli', 'carmelaram', 'doddanekundi',
+  'aecs layout', 'itpl', 'frazer town', 'cox town', 'banaswadi', 'kalyan nagar', 'hennur', 'rt nagar', 'hbr layout', 'sahakar nagar', 'thanisandra', 'nagawara', 'manyata',
+  'bilekahalli', 'arekere', 'hulimavu', 'begur', 'kudlu', 'singasandra', 'madiwala', 'wilson garden', 'shanti nagar', 'richmond town', 'vasanth nagar', 'sadashivanagar',
+  'yeshwanthpur', 'yeshwantpur', 'vijayanagar', 'kengeri', 'rr nagar', 'nagarbhavi', 'hoskote', 'bannerghatta', 'jakkur', 'kammanahalli', 'old airport road', 'hal airport', 'hal 2nd stage', 'hal 3rd stage'];
+const LOCALITY_RE = new RegExp('\\b(?:' + LOCALITIES.map(k => k.trim().replace(/ /g, '[\\s._-]?')).join('|') + ')');
+/** True when the text names a Bangalore locality. */
+export const namesPlace = text => LOCALITY_RE.test(String(text || '').toLowerCase());
+/**
+ * Areas of one post. The post text decides: a post is in an area when its text names it. The group name
+ * ("Flat And Flatmate Bellandur Green Glen") is only a fallback for posts that name no place at all, so a
+ * post in that group about HSR Layout or Indiranagar is not filed under Green Glen.
+ */
+export function postAreas(text, group, areas) {
+  const hits = matchAreas(text, areas);
+  if (hits.length || !group) return hits;
+  const fromGroup = matchAreas(group, areas); // cheap (short string); the locality scan runs only when it would matter
+  return fromGroup.length && !namesPlace(text) ? fromGroup : hits;
+}
+
 const LABELS = [['deposit', /deposit|advance|security/g], ['maintenance', /maint\w*/g], ['brokerage', /brokerage|broker|commission/g], ['rent', /rent|rental|price|cost|budget/g]];
 const CLOSE_LABEL = /(deposit|advance|security|maint\w*|brokerage|broker|commission|rent|rental|price|cost|budget)\s*(?:is|of|amount)?\s*[:=\-–@]?\s*$/;
 const TRAILS_NUMBER = /\d\s*(?:k|l|lakhs?|lacs?|thousand|rupees|rs\.?|inr|\/-|\s)*$/i;
@@ -107,7 +131,7 @@ export const SOCIETY_RE = /\b([A-Z][A-Za-z0-9&']+(?:\s+[A-Z][A-Za-z0-9&']+){0,3}
 export const societyOf = text => (String(text || '').match(SOCIETY_RE) || [null])[0];
 // A room/bed in a shared flat (type 'flatmate'), as opposed to the whole home.
 export const SHARED_RE = new RegExp([
-  'flat\\s{0,3}-?\\s{0,3}mates?', 'room\\s{0,3}-?\\s{0,3}mates?', 'sharing(?!\\s{0,3}(?:is\\s{1,3})?(?:allowed|ok|okay|also|possible|fine|available\\s{1,3}for))', 'replacement', 'single occupancy', 'private room', 'room available', 'available[ \\t]{1,3}room\\b(?!s)', '(?<!(?:living|drawing|dining)\\s{0,3})\\broom[ \\t]{0,3}rent\\b', 'room for rent', '\\bbed\\b(?! ?room)',
+  'flat\\s{0,3}-?\\s{0,3}mates?', 'room\\s{0,3}-?\\s{0,3}mates?', 'sharing(?!\\s{0,3}(?:is\\s{1,3})?(?:allowed|ok|okay|also|possible|fine|available\\s{1,3}for))', 'replacement', 'single occupancy', 'private room', 'room available', 'available[ \\t]{1,3}room\\b(?!s)', '(?<!(?:living|drawing|dining)\\s{0,3})\\broom[ \\t]{0,3}rent\\b', 'room for rent', '(?<!\\bst\\.?\\s{0,2})\\bbed\\b(?! ?room)(?!\\s{0,2}main\\b)',
   '\\b(?:one|1|a|single|private|master|spare|extra)\\s{1,3}(?:private\\s{1,3}|master\\s{1,3}|furnished\\s{1,3}|big\\s{1,3}|spacious\\s{1,3})?(?:bed\\s{0,3})?rooms?\\s{1,3}(?:is\\s{1,3})?(?:available|vacant|for rent|up for rent|to let|free)',
   '\\b(?:bed\\s{0,3})?rooms?\\s{1,3}(?:is\\s{1,3})?(?:available\\s{1,3}|vacant\\s{1,3})?in\\s{1,3}(?:a|an|my|our|the)?\\s{0,3}(?:\\d(?:\\.5)?\\s{0,3}-?\\s{0,3}bhk|shared|furnished|gated)',
   'master\\s{0,3}bed\\s{0,3}room\\s{1,3}(?:available|vacant|for rent)', 'shared\\s{1,3}(?:flat|apartment|accommodation)', '\\bshare\\s{1,3}(?:the|a|my|our)\\s{1,3}(?:flat|apartment|house)',
@@ -116,14 +140,20 @@ export const SHARED_RE = new RegExp([
 // An estimate (total / BHK) needs a room actually offered, not just "sharing" or "replacement".
 const ROOM_PHRASE = /\b(?:bed\s{0,3})?rooms?\b|\bbed\b(?! ?room)|(?:flat|room)\s{0,3}-?\s{0,3}mates?/;
 const ROOM_RENT_MAX = 35000; // a room in Bangalore above this, with a 2+ BHK named, is almost always the whole flat's rent
-const SHARE_BEFORE = /(per\s{0,3}(?:person|head|room|bed)|each|your\s{0,3}share|share|room\s{0,3}rent|rent\s{0,3}(?:for|of)\s{0,3}(?:the|one|1)?\s{0,3}room|individual)\s{0,3}(?:rent|is|of|:|-|=|@|₹|rs\.?|\s)*$/;
+const SHARE_BEFORE = /(per\s{0,3}(?:person|head|room|bed)|each|your\s{0,3}share|share|room\s{0,3}rent|room\s{0,3}\d\b|rent\s{0,3}(?:for|of)\s{0,3}(?:the|one|1)?\s{0,3}room|individual)\s{0,3}(?:rent|is|of|:|-|=|@|₹|rs\.?|\s)*$/;
 const SHARE_AFTER = /^\s{0,3}(?:₹|rs\.?|inr)?\s{0,3}\d(?:[\d,.]*\d)?\s{0,3}(?:k\b|thousand)?\s{0,3}(?:rs\.?|inr|rupees)?\s{0,3}(?:\/-)?\s{0,3}(?:per\s{0,3}month|pm\b|\/\s{0,3}month|monthly|a\s{0,3}month)?\s{0,3}(?:per\s{0,3}(?:person|head|room|bed)|\/\s{0,3}(?:person|head)|each|for\s{0,3}(?:the|one|1)\s{0,3}room|(?:as\s{0,3})?(?:your|my)\s{0,3}share|share)/;
-const TOTAL_BEFORE = /(?:(?:total|whole|entire|full|overall|complete)\s{0,3}(?:flat|house|apartment)?\s{0,3}(?:rent|rental)?|(?:flat|apartment|house)\s{0,3}(?:rent|rental))\s{0,3}(?:is|of|:|-|=|@|₹|rs\.?|\s)*$/;
+const TOTAL_BEFORE = /(?:(?:total|whole|entire|full|overall|complete)\s{0,3}(?:flat|house|apartment)?\s{0,3}(?:rent|rental)?|(?:flat|apartment|house)[ \t]{0,3}(?:rent|rental))\s{0,3}(?:is|of|:|-|=|@|₹|rs\.?|\s)*$/;
 const TOTAL_AFTER = /^\s{0,3}(?:₹|rs\.?|inr)?\s{0,3}\d(?:[\d,.]*\d)?\s{0,3}(?:k\b|thousand)?\s{0,3}(?:rs\.?|inr|rupees)?\s{0,3}(?:\/-)?\s{0,3}(?:per\s{0,3}month|pm\b|\/\s{0,3}month|monthly|a\s{0,3}month)?\s{0,3}(?:total|in total|for\s{0,3}(?:the\s{0,3})?(?:whole|entire|full|complete)?\s{0,3}(?:flat|house|apartment|\d\s{0,3}bhk))/;
+const noTags = s => s.replace(/#[\p{L}\p{N}_]+/gu, ' ');
+// Text the type/kind rules read: no hashtags, no group names pasted in ("join our flat and flatmates group"),
+// straight apostrophes ("I’m looking").
+const typeText = lo => noTags(lo).replace(/[’‘]/g, "'").replace(/\bflats?\s{0,2}(?:and|&|n)\s{0,2}flat\s{0,2}-?\s{0,2}mates?\b/g, ' ');
 export function extract(text) {
   // Long runs of blanks (pasted layouts, spam) make several regexes backtrack quadratically; 3 blanks keep every
   // pattern's meaning ("98765   43210" still reads as one phone).
   const t = String(text || '').replace(/[^\S\n]{4,}/g, '   ').replace(/\n{4,}/g, '\n\n\n'); const lo = t.toLowerCase(); const ex = {};
+  // Hashtag spam ("#flatmates #1rkflat #pg") says nothing about this post: type and kind read the text without it.
+  const body = typeText(lo);
   // Phone numbers written with spaces ("98765 43210") must not be read as money.
   const money = moneyMentions(blankPhones(t));
   const rent = money.find(x => x.label === 'rent' && x.n >= 2000 && x.n <= 400000) || money.find(x => !x.label && x.n >= 3000 && x.n <= 400000);
@@ -135,8 +165,8 @@ export function extract(text) {
   ex.depositMonths = dm ? +dm[1] : null;
   const b = lo.match(/\b(\d(?:\.5)?)\s*-?\s*b\s?h\s?k\b/) || lo.match(/\b(\d)\s*bed\s*rooms?\b/);
   ex.bhk = b ? +b[1] : (/\b1\s*rk\b/.test(lo) ? '1RK' : null);
-  if (/\bpg\b|paying guest|co-?living/.test(lo)) ex.type = 'pg';
-  else if (SHARED_RE.test(lo)) ex.type = 'flatmate';
+  if (/\bpg\b|paying guest|co-?living/.test(body)) ex.type = 'pg';
+  else if (SHARED_RE.test(body)) ex.type = 'flatmate';
   else if (ex.bhk != null) ex.type = 'flat';
   else ex.type = null;
   // A room in a shared flat: the post often gives the whole flat's rent ("1 room in a 3BHK, rent 71k").
@@ -149,16 +179,16 @@ export function extract(text) {
     const roomOffered = ROOM_PHRASE.test(lo);
     const cands = money.filter(x => (x.label === 'rent' || !x.label) && x.n >= 2000 && x.n <= 400000);
     const share = cands.find(isShare);
-    const total = cands.find(isTotal) || (!share && Number(ex.bhk) >= 2 && rent.n >= ROOM_RENT_MAX ? rent : null);
+    let total = cands.find(isTotal) || (!share && Number(ex.bhk) >= 2 && rent.n >= ROOM_RENT_MAX ? rent : null);
+    // "Rent 22,000 + maintenance 2,000, total 24,000" is the room's monthly cost, not the whole flat's rent.
+    if (total && total !== rent && total.n < rent.n * 1.5 && !share) total = null;
     if (share) ex.rent = share.n;
     if (total && total !== share) {
       ex.totalRent = total.n;
       if (!share) { ex.rent = Number(ex.bhk) >= 2 && roomOffered ? Math.round(total.n / Number(ex.bhk) / 100) * 100 : total.n; ex.rentEstimated = ex.rent !== total.n ? true : null; if (!ex.rentEstimated) ex.totalRent = null; }
     }
   }
-  const seeking = /\b(looking|searching|need|needed|require|required|want|wanted|in search)\b(\s+for)?(\s+an?)?(\s+\d\s*bhk)?(\s+(fully|semi)[\s-]*furnished)?\s+(flat|room|accommodation|pg|place|house|apartment|1\s*rk|\d\s*bhk|home)\b/.test(lo);
-  const offering = /available|vacant|vacating|for rent|to[\s-]let|rent is|rent:|move[\s-]?in|flat\s*-?\s*mates?\b|room\s*-?\s*mates?\b|replacement/.test(lo);
-  ex.kind = (seeking && !offering) ? 'seeking' : 'offer';
+  ex.kind = kindOf(body);
   if (/fully[\s-]*furnished/.test(lo)) ex.furnishing = 'fully'; else if (/semi[\s-]*furnished/.test(lo)) ex.furnishing = 'semi'; else if (/un[\s-]?furnished|bare\s*shell/.test(lo)) ex.furnishing = 'unfurnished'; else ex.furnishing = null;
   if (/\b(no|zero|0|nil|without)\s*(brokerage|broker)|brokerage\s*(free|nil|none|[:-]?\s*no\b|[:-]?\s*0\b)|no\s*brokers?\b|direct(ly)?\s*(from\s*)?(the\s*)?owner|owner\s*(post|directly|here)|not\s*a\s*broker/.test(lo)) ex.brokerage = 'no';
   else if (/brokerage|\bbroker\b|commission|\bagent\b/.test(lo)) ex.brokerage = 'yes'; else ex.brokerage = null;
@@ -170,7 +200,63 @@ export function extract(text) {
   ex.mapLinks = [...new Set([...t.matchAll(/https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|(?:www\.)?google\.[a-z.]+\/maps|maps\.google\.[a-z.]+)[^\s)\]]*/gi)].map(x => x[0]))];
   const soc = t.match(SOCIETY_RE);
   ex.society = soc ? soc[0] : null;
+  // Bathroom of a room in a shared flat or PG (a whole flat's bathrooms are not a deciding detail).
+  ex.bath = ex.type === 'flatmate' || ex.type === 'pg' ? bathOf(body) : null;
   return ex;
+}
+
+// ---------- kind: offer | seeking | not_rental ----------
+// Someone looking for a place. The words between the verb and the place may be adjectives ("a spacious room"),
+// never the person wanted ("looking for a female flatmate", "need a tenant for my 2bhk" are offers).
+const SEEK_RE = /\b(?:looking|searching|need|needed|require|required|want|wanted|in search)\b(?:\s+for)?((?:\s+[a-z0-9.,'-]+){0,4}?)\s+(?:flat|room|accommodation|pg|place|house|apartment|1\s*rk|\d(?:\.5)?\s*bhk|home|studio|stay)s?\b/g;
+const SEEK_FIRST = /\b(?:i am|i'm|im|we are|we're|me and my \w+ (?:are|am))\s+(?:currently\s+|urgently\s+)?(?:looking|searching)\b/;
+const NOT_SEEKER = /mate|tenant|someone|somebody|person|people|candidate|occupant|replacement|girl|guy|boy|lady|ladies|female|male|bachelor|family|couple/;
+// "...for anyone looking for a comfortable home" is an offer's closing line, not the poster seeking.
+const OTHERS_BEFORE = /\b(?:anyone|anybody|someone|somebody|those|who|whoever|you|people|friends?|colleagues?|candidates?)\s*(?:who\s+)?(?:is|are|'re|re)?\s*$/;
+const RENT_OUT = 'rent(?:ing)?\\s+(?:it\\s+)?out|let(?:ting)?\\s+(?:it\\s+)?out|give\\s+(?:it\\s+)?on\\s+rent|giving\\s+(?:it\\s+)?on\\s+rent';
+const PERSON_BEFORE = /\b(?:tenants?|flat\s*-?\s*mates?|room\s*-?\s*mates?|famil(?:y|ies)|bachelors?|occupants?|girls?|boys?|ladies|gents)\s*(?:is|are)?\s*$/;
+const OFFERING = /available|vacant|vacating|for rent|to[\s-]let|rent(?:ing)?\s+(?:it\s+)?out|let(?:ting)?\s+(?:it\s+)?out|on\s+rent\b|rent is|rent:|move[\s-]?in|flat\s*-?\s*mates?\b|room\s*-?\s*mates?\b|replacement/;
+const OFFER_STRONG = new RegExp('for rent|to[\\s-]let|replacement|vacating|flat\\s*-?\\s*mates?\\s+(?:wanted|needed|required)|' + RENT_OUT);
+// "We are looking for a flatmate" offers a room; "...or are also looking for a flatmate to team up" addresses the reader.
+const SEEK_MATE = /(?:looking|searching)\s+for\s+(?:an?\s+)?(?:\w+\s+){0,2}?(?:flat|room)\s*-?\s*mates?/g;
+const TO_READER = /\b(?:you|you're|are\s+also|also)\s*$/;
+const offersStrongly = lo => OFFER_STRONG.test(lo) || [...lo.matchAll(SEEK_MATE)].some(m => !TO_READER.test(lo.slice(Math.max(0, m.index - 20), m.index)));
+// Property for sale or investment (builders, channel partners): not a rental. Strong words alone are enough;
+// weaker ones need two. Any clear rental wording keeps the post an offer.
+const SALE_STRONG = /\bfor sale\b|\bresale\b|\bon sale\b|\bselling (?:my |our |a |an |the )?(?:\d(?:\.5)?\s*bhk|flat|apartment|house|villa|plot)|(?:₹|rs\.?|inr)?\s*\d+(?:\.\d+)?\s*(?:cr|crores?)\b|\bper\s*sq\.?\s*f(?:ee)?t\b|\bchannel partner\b|\bexpressions? of interest\b|\bpre[\s-]?launch\b|\bnew launch\b/;
+const SALE_WEAK = [/\binvest(?:ment|ors?)?\b/, /\bpossession\b/, /\brera\b/, /\beoi\b/, /\bbooking (?:amount|open)/, /\bstarting (?:at|from|price)\b/, /\bprice starts?\b/, /\bemi\b/, /\bappreciation\b/, /\broi\b/, /\bready to (?:occupy|register)\b/, /\bregistration\b/, /\bkhata\b/, /\bsuper\s*built[\s-]?up\b/, /\b(?:heirloom|legacy)\b/, /\bluxury (?:villas?|apartments?|homes?|residences?)\b/];
+const RENTAL_WORDS = /\bfor rent\b|\bto[\s-]?let\b|\brent(?:al)?\s*(?:is|of|:|-|=|₹|rs\b|\d)|\bper month\b|\/\s*month|\bmonthly rent\b|\bdeposit\b|\bflat\s*-?\s*mates?\b|\broom\s*-?\s*mates?\b|\btenants?\b|\bpg\b|\blease\b|\breplacement\b/;
+// Weaker rental hints ("rent negotiable", "available", "28k"): weak sale words alone cannot outvote them.
+const RENTAL_HINTS = /\brent(?:al|ed|ing)?\b|\bavailable\b|\b\d{1,3}(?:\.\d)?\s?k\b/;
+export function isSalePost(lo) {
+  if (RENTAL_WORDS.test(lo)) return false;
+  if (SALE_STRONG.test(lo)) return true;
+  return !RENTAL_HINTS.test(lo) && SALE_WEAK.filter(r => r.test(lo)).length >= 2;
+}
+export function isSeekingPost(lo) {
+  let seek = false;
+  for (const m of lo.matchAll(SEEK_RE)) {
+    if (NOT_SEEKER.test(m[1])) continue;
+    const pre = lo.slice(Math.max(0, m.index - 30), m.index);
+    if (OTHERS_BEFORE.test(pre) || PERSON_BEFORE.test(pre)) continue;
+    seek = true; break;
+  }
+  if (!seek) return false;
+  // A first-person ask ("I am looking for a room ... available from Dec") stays a seeker unless it clearly offers.
+  return SEEK_FIRST.test(lo) ? !offersStrongly(lo) : !OFFERING.test(lo);
+}
+/** kind of a post from its text (lowercase, hashtags removed). */
+export function kindOf(lo) { return isSalePost(lo) ? 'not_rental' : isSeekingPost(lo) ? 'seeking' : 'offer'; }
+
+// ---------- bathroom of a room ----------
+const BATH = '(?:bath\\s?rooms?|wash\\s?rooms?|toilets?|baths?|rest\\s?rooms?|loo)';
+const BATH_ATTACHED = new RegExp(`\\b(?:attached|attatched|attach|en[\\s-]?suite|ensuite|in[\\s-]?suite|private,?\\s+attached)\\s+(?:private\\s+|personal\\s+|own\\s+)?${BATH}|\\b${BATH}\\s+(?:is\\s+)?attached\\b|\\ben[\\s-]?suite\\b|\\bwith\\s+(?:an?\\s+)?attached\\b|\\battached\\s+(?:with\\s+)?(?:bath|wash|toilet)`);
+const BATH_SEPARATE = new RegExp(`\\bnot\\s+attached\\b|\\bnon[\\s-]?attached\\b|\\bunattached\\b|\\b(?:common|shared|separate|outside|external)\\s+(?:\\w+\\s+)?${BATH}|\\b${BATH}\\s+(?:is\\s+)?(?:common|shared|outside)\\b`);
+/** 'attached' (bathroom inside the room), 'separate' (common or outside the room) or null. The first one written wins. */
+export function bathOf(lo) {
+  const a = BATH_ATTACHED.exec(lo), s = BATH_SEPARATE.exec(lo);
+  if (a && s) return a.index <= s.index ? 'attached' : 'separate';
+  return a ? 'attached' : s ? 'separate' : null;
 }
 
 export function pick(o, keys) { for (const k of keys) { const v = k.split('.').reduce((a, p) => a == null ? a : a[p], o); if (v != null && v !== '') return v; } return null; }
@@ -403,7 +489,7 @@ export function findMatch(p, ex, work) {
 }
 export function sameAreas(a, b) { const A = a.length ? a : [0], B = b.length ? b : [0]; return A.some(x => B.includes(x)); }
 
-export const FIELDS = ['bhk', 'type', 'deposit', 'depositMonths', 'maintenance', 'brokerage', 'brokerageAmount', 'furnishing', 'gender', 'availableFrom', 'society', 'kind'];
+export const FIELDS = ['bhk', 'type', 'deposit', 'depositMonths', 'maintenance', 'brokerage', 'brokerageAmount', 'furnishing', 'gender', 'availableFrom', 'society', 'kind', 'bath'];
 export function applyPost(l, p, ex, now) {
   const post = { id: fnv((p.urlKey || '') + '|' + p.th), url: p.url || '', urlKey: p.urlKey || '', th: p.th, group: p.group || '', groupKnown: p.groupKnown, author: p.author || '', text: p.text.slice(0, 3000), postedAt: p.postedAt || null, timeText: p.timeText || '', source: p.source, importedAt: now, images: (p.images || []).slice(0, 10) };
   const when = post.postedAt || now; const newer = !l.lastPostedAt || when >= l.lastPostedAt;
@@ -426,14 +512,23 @@ export function applyPost(l, p, ex, now) {
   l.updatedAt = now; if (l.status === 'approved') l.hasUpdate = true;
   return l;
 }
+// Bump when extraction rules change: the 10-minute cron then re-checks every stored listing once (src/reparse.js).
+export const RULES_VERSION = 2;
 /**
- * Re-run the type and rent rules on a stored listing's latest post (admin "re-check", after a rule change).
+ * Re-run the extraction rules on a stored listing's latest post (after a rule change): type, kind (offer /
+ * seeking / not a rental), room bathroom, rent split and, when ctx (makeContext) is given, areas.
  * Fields a user or the AI set (data.fieldSource) are left alone. Mutates l; returns true when something changed.
  */
-export function reparseListing(l) {
+export function reparseListing(l, ctx = null) {
   const text = l.posts?.[0]?.text; if (!text || l.isSample) return false;
-  const ex = extract(text); const src = l.fieldSource || {}; const before = JSON.stringify([l.type, l.rent, l.totalRent, l.rentEstimated]);
+  const ex = extract(text); const src = l.fieldSource || {};
+  const snap = () => JSON.stringify([l.type, l.rent, l.totalRent, l.rentEstimated, l.kind || 'offer', l.bath ?? null, [...(l.areas || [])].sort((a, b) => a - b)]);
+  const before = snap();
   if (src.type !== 'user' && src.type !== 'ai' && ex.type) l.type = ex.type;
+  // Kind: never over a user or AI decision; the AI's "not a rental" is never undone here (the rules' own can be).
+  const aiNotRental = l.kind === 'not_rental' && l.ai?.fields?.isRental === false;
+  if (src.kind !== 'user' && src.kind !== 'ai' && !aiNotRental && ex.kind && (l.kind || 'offer') !== ex.kind) l.kind = ex.kind;
+  if (src.bath !== 'user' && src.bath !== 'ai') { const b = l.type === 'flatmate' || l.type === 'pg' ? bathOf(typeText(text.toLowerCase())) : null; if (b) l.bath = b; else delete l.bath; }
   // Rent: never over a user edit or a rent the AI set or agreed with (set() leaves agreed fields unmarked).
   const rentLocked = src.rent === 'user' || src.rent === 'ai' || (l.ai?.fields?.rent != null && l.ai.fields.rent === l.rent);
   if (!rentLocked && ex.rent) {
@@ -446,7 +541,14 @@ export function reparseListing(l) {
       l.rent = ex.totalRent || ex.rent; delete l.totalRent; delete l.rentEstimated;
     }
   }
-  return JSON.stringify([l.type, l.rent, l.totalRent, l.rentEstimated]) !== before;
+  if (ctx) {
+    // Areas from every post (a merged listing keeps each post's areas); tags of paused areas are kept.
+    const active = new Set(ctx.areas.map(a => a.id));
+    const next = new Set((l.areas || []).filter(id => !active.has(id)));
+    for (const q of l.posts || []) for (const id of postAreas(q.text || '', q.group || '', ctx.areas)) next.add(id);
+    l.areas = [...next].sort((a, b) => a - b);
+  }
+  return snap() !== before;
 }
 export const newId = () => 'l_' + crypto.randomUUID().replace(/-/g, '').slice(0, 16);
 export function newListing(p, ex, now, id = newId()) { return applyPost({ id, status: 'new', stage: '', createdAt: now, posts: [], groups: [], phones: [], mapLinks: [], rentHistory: [], areas: [], notes: '', kind: ex.kind }, p, ex, now); }
@@ -457,7 +559,7 @@ export function emptyReport(source, now, total) {
 /** Add page report b into the running report a (dataset ingest happens in pages). */
 export function mergeReports(a, b) {
   if (!a) return structuredClone(b);
-  for (const k of ['total', 'noText', 'offTopic', 'seeking', 'dupes', 'newListings', 'merged', 'known', 'outside', 'notHousing', 'offArea']) a[k] = (a[k] || 0) + (b[k] || 0);
+  for (const k of ['total', 'noText', 'offTopic', 'seeking', 'dupes', 'newListings', 'merged', 'known', 'outside', 'notHousing', 'offArea', 'notRental']) a[k] = (a[k] || 0) + (b[k] || 0);
   for (const k of ['outsideGroups', 'knownGroups', 'byArea', 'fetchedByGroup', 'matchedByGroup', 'newByGroup', 'mergedByGroup']) { if (!a[k] && !b[k]) continue; a[k] = a[k] || {}; for (const [g, n] of Object.entries(b[k] || {})) a[k][g] = (a[k][g] || 0) + n; }
   // crossFrom[group][firstGroup]: posts from `group` merged into a listing first seen in another group.
   if (b.crossFrom) { a.crossFrom = a.crossFrom || {}; for (const [g, by] of Object.entries(b.crossFrom)) { const t = a.crossFrom[g] ||= {}; for (const [g2, n] of Object.entries(by)) t[g2] = (t[g2] || 0) + n; } }
@@ -475,7 +577,7 @@ export function screenItem(raw, source, ctx, report, now) {
   const obj = typeof raw === 'string' ? { text: raw } : (raw && typeof raw === 'object' ? raw : {});
   const text = String(pick(obj, TEXT_KEYS) || '').trim();
   if (text.length < 15) { report.noText++; return null; }
-  const areas = matchAreas(text + ' ' + asName(pick(obj, GROUP_KEYS)), ctx.areas);
+  const areas = postAreas(text, asName(pick(obj, GROUP_KEYS)), ctx.areas);
   // Filter whenever the user has any area: pausing every area must not let every post through.
   if (ctx.storeAll) {
     // Store every housing post; posts in none of our areas are kept (area 0) for future areas.
@@ -489,7 +591,7 @@ export function screenItem(raw, source, ctx, report, now) {
   const g = p.group || 'Group not detected';
   if (known === false) { report.outside++; report.outsideGroups[g] = (report.outsideGroups[g] || 0) + 1; } else if (known === true) { report.known++; report.knownGroups[g] = (report.knownGroups[g] || 0) + 1; }
   for (const id of p.areas) { const name = ctx.areaNames.get(id) || String(id); report.byArea[name] = (report.byArea[name] || 0) + 1; }
-  const ex = extract(p.text); if (ex.kind === 'seeking') report.seeking++;
+  const ex = extract(p.text); if (ex.kind === 'seeking') report.seeking++; else if (ex.kind === 'not_rental') report.notRental = (report.notRental || 0) + 1;
   return { p, ex };
 }
 /** ctx from DB rows: areas [{id,name,keywords,active}], settings {groups, keywordFilter}. */

@@ -23,7 +23,7 @@ npm run migrate     # apply migrations to the local SQLite file
 - `src/admin.js` `/api/admin/*` (scraper, groups, sources, subreddits, runs, stats, users, settings, listings, phone-scan, ai).
 - `src/apify.js` schedule, cutoff, budget guard, start run, sweep, paged dataset ingest, `budgeted()` D1 counter, `scheduledJob()`.
 - `src/ingest.js` housing filter, exact dedupe (`post_keys`), fuzzy match on SQL candidates, one batch write.
-- `src/reddit.js` Reddit OAuth source. `src/backfill.js` tag stored posts when an area is added. `src/ai.js` AI enrich queue.
+- `src/reddit.js` Reddit OAuth source. `src/backfill.js` tag stored posts when an area is added. `src/reparse.js` re-check stored listings after a rule change (`RULES_VERSION`). `src/ai.js` AI enrich queue.
 - `src/auth.js`, `src/google.js` sessions, password break-glass, Google OIDC. `src/groups.js` Facebook URL checks. `src/http.js` headers/CSP, JSON helpers.
 - `src/core/logic.js` regex extraction, dedupe scoring. `src/core/keywords.js` area keyword variants.
 - `src/db/repo.js` all SQL. `src/db/drivers.js` D1 and node:sqlite drivers. `migrations/*.sql` schema.

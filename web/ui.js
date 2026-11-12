@@ -57,7 +57,7 @@ async function api(method, path, body) {
 const state = {
   me: { role: 'public', user: null, login: {} },
   areas: [], myAreas: [], area: store.get('area', null),
-  f: store.get('filters', { bhk: '', maxRent: '', type: '', nobroker: false, furnishing: '', sort: 'new' }),
+  f: store.get('filters', { bhk: '', maxRent: '', type: '', nobroker: false, attached: false, furnishing: '', sort: 'new' }),
   browse: { items: [], next: null, loading: false, key: '' },
   listings: new Map(), lastSync: 0, undo: [], lastIngestMin: null, admin: {}, swung: false, statsDays: 14,
 };
@@ -94,7 +94,7 @@ const when = t => t ? new Date(t).toLocaleString('en-IN', { day: 'numeric', mont
 const dur = ms => ms == null ? '–' : ms < 60e3 ? Math.round(ms / 1000) + ' s' : Math.round(ms / 60e3) + ' min';
 const phoneFmt = p => p && p.length === 10 ? p.slice(0, 5) + ' ' + p.slice(5) : p || '';
 const typeName = l => l.type === 'flatmate' ? 'Room in a shared flat' : l.type === 'pg' ? 'PG / co-living' : l.bhk === '1RK' ? '1 RK' : l.bhk != null ? `${l.bhk} BHK` : 'Flat';
-const kindLine = l => [l.bhk != null && l.type !== 'flat' && l.type ? `${l.bhk === '1RK' ? '1 RK' : l.bhk + ' BHK'}` : '', typeName(l), l.furnishing ? { fully: 'Furnished', semi: 'Semi-furnished', unfurnished: 'Unfurnished' }[l.furnishing] : ''].filter(Boolean);
+const kindLine = l => [l.bhk != null && l.type !== 'flat' && l.type ? `${l.bhk === '1RK' ? '1 RK' : l.bhk + ' BHK'}` : '', typeName(l), l.furnishing ? { fully: 'Furnished', semi: 'Semi-furnished', unfurnished: 'Unfurnished' }[l.furnishing] : '', l.bath === 'attached' && (l.type === 'flatmate' || l.type === 'pg') ? 'Attached bath' : ''].filter(Boolean);
 // The city every scraped group covers. Areas are optional filters inside it.
 const CITY = 'Bangalore';
 const areaName = id => state.areas.find(a => a.id === id)?.name || state.myAreas.find(a => a.id === id)?.name || '';
@@ -274,6 +274,7 @@ async function loadBrowse(more = false) {
 function filtered() {
   let L = state.browse.items.filter(l => l.kind !== 'not_rental');
   if (state.f.nobroker) L = L.filter(l => l.brokerage === 'no');
+  if (state.f.attached) L = L.filter(l => l.bath === 'attached');
   if (state.f.furnishing) L = L.filter(l => l.furnishing === state.f.furnishing);
   if (state.f.sort === 'rent') L = [...L].sort((a, b) => (a.rent || 1e9) - (b.rent || 1e9));
   return L;
@@ -290,7 +291,8 @@ async function renderBrowse() {
   const area = areaName(state.area);
   main.innerHTML = `<div class="bhead"><h1>Flats to let in <button class="area-pick" type="button" data-act="pick-area">${esc(area ? `${area}, ${CITY}` : CITY)}</button></h1><p id="bline">Loading listings…</p></div>
     <div class="filters" role="toolbar" aria-label="Filters"><button class="fchip${area ? ' set' : ''}" type="button" data-act="pick-area" aria-haspopup="dialog">${I.pin}${esc(area || 'All areas')} ${I.chev}</button>${FILTERS.map(([key, label, , fmt]) => { const v = state.f[key]; const set = key === 'sort' ? v === 'rent' : !!v; return `<button class="fchip${set ? ' set' : ''}" type="button" data-filter="${key}" aria-haspopup="dialog">${esc(set ? fmt(v) : label)} ${I.chev}</button>`; }).join('')}
-    <button class="fchip${state.f.nobroker ? ' set' : ''}" type="button" data-filter="nobroker" aria-pressed="${state.f.nobroker}">No brokerage</button></div>
+    <button class="fchip${state.f.nobroker ? ' set' : ''}" type="button" data-filter="nobroker" aria-pressed="${state.f.nobroker}">No brokerage</button>
+    <button class="fchip${state.f.attached ? ' set' : ''}" type="button" data-filter="attached" aria-pressed="${!!state.f.attached}">Room with attached bath</button></div>
     <div class="grid" id="grid">${state.browse.loading || !state.browse.key ? Array.from({ length: 3 }, () => '<div class="skel"><i class="b"></i><i></i><i></i><i></i></div>').join('') : ''}</div><div class="more" id="more"></div>`;
   main.onclick = browseClick;
   await loadBrowse();
@@ -319,6 +321,7 @@ async function browseClick(e) {
   if (f) {
     const key = f.dataset.filter;
     if (key === 'nobroker') { state.f.nobroker = !state.f.nobroker; store.set('filters', state.f); renderBrowse(); return; }
+    if (key === 'attached') { state.f.attached = !state.f.attached; store.set('filters', state.f); renderBrowse(); return; }
     const def = FILTERS.find(x => x[0] === key);
     const s = openSheet(`<div class="shead"><h2>${esc(def[1])}</h2><button class="btn quiet sm" type="button" data-close>Close</button></div><div class="pick-list">${def[2].map(([v, l]) => `<button class="pr btn quiet" type="button" data-v="${esc(v)}" aria-pressed="${state.f[key] === v}"><span class="nm">${esc(l)}</span>${state.f[key] === v ? I.check : ''}</button>`).join('')}</div>`, { label: def[1], center: true });
     s.addEventListener('click', ev => { if (ev.target.closest('[data-close]')) closeSheet(); const b = ev.target.closest('[data-v]'); if (b) { state.f[key] = b.dataset.v; store.set('filters', state.f); closeSheet(); renderBrowse(); } });
@@ -327,7 +330,7 @@ async function browseClick(e) {
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (act === 'more') { await loadBrowse(true); drawGrid(); }
   if (act === 'samples') importSamples();
-  if (act === 'clear-filters') { state.f = { bhk: '', maxRent: '', type: '', nobroker: false, furnishing: '', sort: 'new' }; store.set('filters', state.f); state.area = null; store.set('area', null); state.browse.key = ''; renderBrowse(); }
+  if (act === 'clear-filters') { state.f = { bhk: '', maxRent: '', type: '', nobroker: false, attached: false, furnishing: '', sort: 'new' }; store.set('filters', state.f); state.area = null; store.set('area', null); state.browse.key = ''; renderBrowse(); }
 }
 
 function cardAction(card, act) {
@@ -352,7 +355,7 @@ async function openListing(id) {
   catch (e) { closeSheet(); fail(e); return; }
   const s = $('.sheet'); if (!s) return;
   const facts = [['Rent', l.rent ? (l.rentEstimated ? `About ${inr(l.rent)} per room (estimated)` : inr(l.rent)) : 'Not stated'], ...(l.type === 'flatmate' && l.totalRent ? [['Whole flat rent', inr(l.totalRent)]] : []), ['Deposit', l.deposit ? inr(l.deposit) : l.depositMonths ? `${l.depositMonths} months` : '–'], ['Maintenance', l.maintenance != null ? inr(l.maintenance) : '–'], ['Brokerage', l.brokerage === 'no' ? 'None' : l.brokerage === 'yes' ? (l.brokerageAmount ? inr(l.brokerageAmount) : 'Yes') : '–'],
-    ['Type', typeName(l)], ['Furnishing', l.furnishing ? { fully: 'Furnished', semi: 'Semi-furnished', unfurnished: 'Unfurnished' }[l.furnishing] : '–'], ['For', l.gender ? { male: 'Men', female: 'Women', any: 'Anyone' }[l.gender] : '–'], ['Available', l.availableFrom || '–'],
+    ['Type', typeName(l)], ['Furnishing', l.furnishing ? { fully: 'Furnished', semi: 'Semi-furnished', unfurnished: 'Unfurnished' }[l.furnishing] : '–'], ...(l.type === 'flatmate' || l.type === 'pg' ? [['Bathroom', l.bath === 'attached' ? 'Attached to the room' : l.bath === 'separate' ? 'Not attached (common or outside)' : 'Not stated']] : []), ['For', l.gender ? { male: 'Men', female: 'Women', any: 'Anyone' }[l.gender] : '–'], ['Available', l.availableFrom || '–'],
     ['Area', (l.areas || []).map(areaName).filter(Boolean).join(', ') || '–'], ['First posted', when(l.firstPostedAt)]];
   if (signedIn() && l.society) facts.push(['Society', l.society]);
   if (l.locality) facts.push(['Locality', l.locality]);
