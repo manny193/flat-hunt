@@ -12,6 +12,12 @@ import { fingerprint } from './core/logic.js';
 export const MODELS = { primary: '@cf/google/gemma-4-26b-a4b-it', cfFallback: '@cf/openai/gpt-oss-20b', groq: 'openai/gpt-oss-20b' };
 export const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 export const BATCH = 5;
+// Both Workers AI models think before answering. With thinking on, they spent the whole max_tokens budget
+// in reasoning_content and returned content "" (finish_reason "length"), which showed up as "invalid JSON"
+// on every call (Nov 2026). Gemma's thinking is switched off; gpt-oss cannot switch it off, so it thinks briefly.
+export const MODEL_OPTIONS = { [MODELS.primary]: { chat_template_kwargs: { enable_thinking: false } }, [MODELS.cfFallback]: { reasoning_effort: 'low' } };
+// Bump to requeue, once, the posts that failed with a parse error before a fix (runEnrich, settings.ai.requeuedFix).
+export const AI_FIX = 1;
 export const MAX_ATTEMPTS = 5;
 export const AI_DEFAULTS = { enabled: true, neuronCap: 8000, maxPostsPerDay: 300 };
 // Neurons per million tokens, derived from list prices (US$0.011 per 1K neurons); re-check on the dashboard.
@@ -219,13 +225,21 @@ export async function callWorkersAi(env, model, items) {
   const messages = messagesFor(items);
   let r;
   try {
-    r = await env.AI.run(model, { messages, response_format: { type: 'json_schema', json_schema: SCHEMA }, max_tokens: 300 * items.length + 200, temperature: 0 });
+    r = await env.AI.run(model, { messages, response_format: { type: 'json_schema', json_schema: SCHEMA }, max_tokens: 300 * items.length + 200, temperature: 0, ...(MODEL_OPTIONS[model] || {}) });
   } catch (e) { throw classify(e); }
   const out = outputOf(r);
   const pin = r?.usage?.prompt_tokens ?? estTokens(messages.map(m => m.content).join('\n'));
   const pout = r?.usage?.completion_tokens ?? estTokens(typeof out === 'string' ? out : JSON.stringify(out));
   const [ni, no] = NEURONS[model] || NEURONS[MODELS.primary];
-  return { parsed: parseOutput(out), neurons: Math.ceil((pin * ni + pout * no) / 1e6), model };
+  const parsed = parseOutput(out);
+  return { parsed, why: parsed?.results ? null : whyUnparsed(r, out), neurons: Math.ceil((pin * ni + pout * no) / 1e6), model };
+}
+/** Why a reply could not be read, in words the admin AI page can show. */
+export function whyUnparsed(r, out) {
+  const c = r?.choices?.[0];
+  if (c?.finish_reason === 'length') return (out ? 'cut off at the token limit' : 'no answer: the model used the token limit thinking') + ' (invalid JSON)';
+  if (out == null || out === '') return 'empty answer (invalid JSON)';
+  return 'invalid JSON';
 }
 
 export async function callGroq(env, items, fetchFn = fetch) {
@@ -257,6 +271,8 @@ export async function runEnrich(repo, env, { maxCalls = 4, now = Date.now(), fet
   if (st.day !== dayOf(now)) Object.assign(st, { day: dayOf(now), neurons: 0, calls: 0, posts: 0, failed: 0, groqTokens: 0 });
   if (st.posts >= cfg.maxPostsPerDay) return { action: 'daily_cap' };
   await repo.aiEnqueue(now, now - 7 * DAY);
+  // After a fix to reading the model's replies, give posts that failed with a parse error one fresh try.
+  if (st.requeuedFix !== AI_FIX) { await repo.aiRequeueParseFailures(now); st.requeuedFix = AI_FIX; }
   const due = await repo.aiDue(now, BATCH * maxCalls);
   if (!due.length) { await repo.putSettings({ ai: { ...st, lastRunAt: now } }); return { action: 'idle' }; }
   const listings = await repo.loadListings([...new Set(due.map(d => d.listing_id))]);
@@ -321,8 +337,8 @@ export async function runEnrich(repo, env, { maxCalls = 4, now = Date.now(), fet
       if (res.parsed?.results) apply(batch, res.parsed);
       else if (batch.length > 1 && calls + batch.length <= maxCalls + 2) {
         // JSON mode not met for the batch: isolate the bad post by reading them one at a time.
-        for (const it of batch) { try { const r1 = await call([it]); if (r1.parsed?.results) apply([it], r1.parsed); else qUpdates.push(fail(it.d, 'invalid JSON')); } catch (e) { qUpdates.push(fail(it.d, String(e.message || e).slice(0, 200))); } }
-      } else batch.forEach(it => qUpdates.push(fail(it.d, 'invalid JSON')));
+        for (const it of batch) { try { const r1 = await call([it]); if (r1.parsed?.results) apply([it], r1.parsed); else qUpdates.push(fail(it.d, r1.why || 'invalid JSON')); } catch (e) { qUpdates.push(fail(it.d, String(e.message || e).slice(0, 200))); } }
+      } else batch.forEach(it => qUpdates.push(fail(it.d, res.why || 'invalid JSON')));
     } catch (e) {
       batch.forEach(it => qUpdates.push(fail(it.d, String(e.message || e).slice(0, 200))));
       if (e.kind === 'none') break;

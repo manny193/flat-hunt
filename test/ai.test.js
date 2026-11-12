@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { redact, validateResult, mergeAi, runEnrich, numbersIn, MODELS, GROQ_URL, parseOutput } from '../src/ai.js';
+import { redact, validateResult, mergeAi, runEnrich, numbersIn, MODELS, GROQ_URL, parseOutput, callWorkersAi, AI_FIX } from '../src/ai.js';
 import { ingestItems } from '../src/ingest.js';
 import { extract } from '../src/core/logic.js';
 import { scoreRegex } from '../scripts/ai-eval.js';
@@ -141,4 +141,50 @@ test('ai-eval offline: regex scores on the labelled set (baseline from the resea
   assert.ok(s.fields.rent >= 31 && s.fields.bhk >= 31, JSON.stringify(s.fields));
   assert.ok(s.fields.deposit >= 31, 'e08 regex fix: deposit now right on every post');
   assert.ok(s.critical >= 22, `critical rows ${s.critical}`);
+});
+
+// Production, Nov 2026: Workers AI now answers in the chat-completion shape, and both models think first. With
+// thinking on, the whole max_tokens went to reasoning_content and content was "" (finish_reason "length"):
+// every call failed as "invalid JSON". These replies mirror what the REST API returned.
+const chatReply = (content, finish = 'stop', reasoning = '') => ({ id: 'x', object: 'chat.completion', model: MODELS.primary, choices: [{ index: 0, finish_reason: finish, message: { role: 'assistant', content, reasoning_content: reasoning } }], usage: { prompt_tokens: 1359, completion_tokens: finish === 'length' ? 500 : 134 } });
+
+test('Workers AI: thinking is off for Gemma and low for gpt-oss; a thinking-only reply says why it failed', async () => {
+  const items = [{ text: '2BHK for rent in HSR, rent 32k', postedAt: Date.now() }];
+  const seen = [];
+  const ok = { run: async (model, input) => { seen.push({ model, input }); return chatReply(JSON.stringify({ results: [result('P1')] })); } };
+  const r = await callWorkersAi({ AI: ok }, MODELS.primary, items);
+  assert.equal(r.parsed.results[0].rent, 32000); assert.equal(r.why, null);
+  assert.deepEqual(seen[0].input.chat_template_kwargs, { enable_thinking: false });
+  await callWorkersAi({ AI: ok }, MODELS.cfFallback, items);
+  assert.equal(seen[1].input.reasoning_effort, 'low'); assert.equal(seen[1].input.chat_template_kwargs, undefined);
+
+  const thinking = { run: async () => chatReply('', 'length', '*   Post ID: P1\n    *   `isRental`: true ...') };
+  const bad = await callWorkersAi({ AI: thinking }, MODELS.primary, items);
+  assert.equal(bad.parsed, null);
+  assert.match(bad.why, /token limit thinking/);
+  assert.match(bad.why, /invalid JSON/, 'still matches the requeue filter');
+});
+
+test('after the fix, posts that failed with a parse error are retried once; other failures are left alone', async () => {
+  const t = await setup();
+  let now = Date.now();
+  const thinking = fakeAI(() => chatReply('', 'length', 'thinking...'));
+  // The bug: five runs of thinking-only replies take both followed posts to 'failed'.
+  await t.repo.putSettings({ ai: { requeuedFix: AI_FIX } });
+  for (let i = 0; i < 6; i++) { await runEnrich(t.repo, { AI: thinking }, { now, maxCalls: 4 }); now += 24 * 36e5; }
+  let st = await t.repo.aiStats(now);
+  assert.equal(st.byStatus.failed, 2);
+  assert.match(st.failures[0].error, /token limit thinking/, 'the admin page shows the real reason');
+  // A failure that is not a parse error stays failed.
+  await t.repo.db.run("UPDATE ai_queue SET error = 'listing or post gone' WHERE rowid = (SELECT min(rowid) FROM ai_queue WHERE status = 'failed')");
+  // Deploy of the fix: the next run requeues parse failures once and reads them.
+  await t.repo.putSettings({ ai: { ...(await t.repo.getSettings()).ai, requeuedFix: AI_FIX - 1 } });
+  const good = fakeAI((model, input) => chatReply(JSON.stringify({ results: idsIn(input).map(id => result(id, { rent: null, bhk: null, type: null })) })));
+  const r = await runEnrich(t.repo, { AI: good }, { now, maxCalls: 4 });
+  assert.equal(r.done, 1, 'the parse failure was retried and read');
+  st = await t.repo.aiStats(now);
+  assert.equal(st.byStatus.failed, 1, 'the other failure is untouched');
+  assert.equal((await t.repo.getSettings()).ai.requeuedFix, AI_FIX);
+  // Once only: a later parse failure is not requeued again by this fix.
+  assert.equal((await runEnrich(t.repo, { AI: good }, { now: now + 60e3 })).action, 'idle');
 });

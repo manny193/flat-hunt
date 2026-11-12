@@ -550,3 +550,15 @@ Verdict: signed off. Branch `claude/flat-hunt-listing-quality-qtlfcp`, head 1ff6
 - Picker row (390x844) says "Green Glen, 3 listings"; the area view shows 3 cards and "3 listings from 1 group". `/api/public/areas` `listings` is 3 and `/api/public/listings?area=1` returns 3.
 - Sale and seeking posts and the sample are in neither the count nor the list. No console errors.
 - F1: fixed, closed.
+
+## PR #46 AI extraction thinking off (2026-11-12)
+
+Verdict: signed off. Branch `claude/flat-hunt-listing-quality-qtlfcp`, head bbb746c.
+
+- `npm test`: 199 pass, 0 fail, 1 skipped.
+- Scratch script on `memoryDb()` with a fake AI (not committed), 2 tests, all pass:
+  - Thinking-only replies (empty content, finish `length`) go retry then failed. `aiStats().failures[].error` is "no answer: the model used the token limit thinking (invalid JSON)".
+  - With `requeuedFix` at 0, parse failures are retried and done. A "listing or post gone" failure stays failed. `requeuedFix` becomes 1 and a second run is idle.
+  - On a `daily_cap` day (`maxPostsPerDay` 0) nothing is requeued and `requeuedFix` stays 0. The next normal day requeues and reads the posts.
+  - Primary model input has `chat_template_kwargs {enable_thinking:false}`. `@cf/openai/gpt-oss-20b` input has `reasoning_effort:'low'` and no template kwargs. No phone digits in either.
+- Not run: real Workers AI (does the live model honour the flags), admin AI page in the browser, D1.
