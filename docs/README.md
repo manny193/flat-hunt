@@ -18,6 +18,7 @@ Two audiences, two folders. Everything else in `docs/` is a topic document that 
 | `docs/APIFY.md` | Engineer | Scraper actor, inputs, cost experiment |
 | `docs/AI-EXTRACTION.md` | Engineer | AI model choice, prompt, schema, merge rules |
 | `docs/DESIGN.md` (+ `docs/mockups/`) | Designer, engineer | Visual design spec and tokens |
+| `docs/AGENT-BROWSER.md` | AI agents, founder | Private per-session Chrome for Claude (setup, isolation design, rules) |
 | `docs/QA.md` | QA, chief of staff | Test rounds, bugs, open risks, verdicts |
 | `docs/OWNERS.md` | Everyone | Who owns which files |
 

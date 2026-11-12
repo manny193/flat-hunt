@@ -15,6 +15,8 @@ npm run ai-eval     # regex vs AI extraction eval; --online calls Workers AI (ne
 npm run migrate     # apply migrations to the local SQLite file
 ```
 
+Browser tasks: use the `agent-browser` MCP server (`.mcp.json`), which gives each session its own private Chrome, not Claude in Chrome. Setup and rules: `docs/AGENT-BROWSER.md`.
+
 ## Code map
 
 - `src/worker.js` Cloudflare entry (fetch + scheduled). `src/node-server.js` Node entry for local/Docker (`CRON_ENABLED=1` runs the cron in-process).
@@ -75,7 +77,7 @@ The founder's Claude plan is shared by every agent, so the chief of staff manage
 ## Docs and ownership
 
 - Index and update rules: `docs/README.md`. Who owns which files: `docs/OWNERS.md`.
-- Project history and decisions: `docs/HANDOFF.md`. Deploy/secrets: `docs/DEPLOY.md`. Scraper: `docs/APIFY.md`. Design: `docs/DESIGN.md`. AI: `docs/AI-EXTRACTION.md`.
+- Project history and decisions: `docs/HANDOFF.md`. Deploy/secrets: `docs/DEPLOY.md`. Scraper: `docs/APIFY.md`. Design: `docs/DESIGN.md`. Agent browser: `docs/AGENT-BROWSER.md`. AI: `docs/AI-EXTRACTION.md`.
 - If you change architecture, data flow, a table, a limit or a cost, update `docs/ai/ARCHITECTURE.md` or `docs/ai/COSTS.md` in the same change, and the matching `docs/human/` page if a user or admin would notice.
 
 ## Tracking work
