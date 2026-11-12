@@ -8,7 +8,8 @@ export const REPARSE_PAGE = 20;
 export const REPARSE_TEXT_BYTES = 60000;
 // The cron shares its invocation with the alert step, so its page is half the admin one.
 export const CRON_PAGE = 10, CRON_TEXT_BYTES = 30000;
-export const CRON_QUERIES = 6; // settings + areas + page + save batch + settings write (+1 spare)
+// settings + areas + page + save batch (>= 3 statements: upsert, delete match, insert match) + settings write, +1 spare
+export const CRON_QUERIES = 8;
 
 /** One page after rowid `after`. Returns {checked, changed, next, done}. 2 queries (+1 when something changed). */
 export async function reparsePage(repo, { after = 0, page = REPARSE_PAGE, textBytes = REPARSE_TEXT_BYTES, areas = null, now = Date.now() } = {}) {

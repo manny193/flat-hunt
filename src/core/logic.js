@@ -47,7 +47,7 @@ export const LOCALITIES = ['hsr', 'koramangala', 'indiranagar', 'indira nagar', 
   'cv raman nagar', 'kundalahalli', 'munnekollal', 'kaikondrahalli', 'harlur', 'haralur', 'hosa road', 'bommanahalli', 'iblur', 'kasavanahalli', 'carmelaram', 'doddanekundi',
   'aecs layout', 'itpl', 'frazer town', 'cox town', 'banaswadi', 'kalyan nagar', 'hennur', 'rt nagar', 'hbr layout', 'sahakar nagar', 'thanisandra', 'nagawara', 'manyata',
   'bilekahalli', 'arekere', 'hulimavu', 'begur', 'kudlu', 'singasandra', 'madiwala', 'wilson garden', 'shanti nagar', 'richmond town', 'vasanth nagar', 'sadashivanagar',
-  'yeshwanthpur', 'yeshwantpur', 'vijayanagar', 'kengeri', 'rr nagar', 'nagarbhavi', 'hoskote', 'bannerghatta', 'jakkur', 'kammanahalli', 'old airport road', 'hal '];
+  'yeshwanthpur', 'yeshwantpur', 'vijayanagar', 'kengeri', 'rr nagar', 'nagarbhavi', 'hoskote', 'bannerghatta', 'jakkur', 'kammanahalli', 'old airport road', 'hal airport', 'hal 2nd stage', 'hal 3rd stage'];
 const LOCALITY_RE = new RegExp('\\b(?:' + LOCALITIES.map(k => k.trim().replace(/ /g, '[\\s._-]?')).join('|') + ')');
 /** True when the text names a Bangalore locality. */
 export const namesPlace = text => LOCALITY_RE.test(String(text || '').toLowerCase());
@@ -213,8 +213,10 @@ const SEEK_FIRST = /\b(?:i am|i'm|im|we are|we're|me and my \w+ (?:are|am))\s+(?
 const NOT_SEEKER = /mate|tenant|someone|somebody|person|people|candidate|occupant|replacement|girl|guy|boy|lady|ladies|female|male|bachelor|family|couple/;
 // "...for anyone looking for a comfortable home" is an offer's closing line, not the poster seeking.
 const OTHERS_BEFORE = /\b(?:anyone|anybody|someone|somebody|those|who|whoever|you|people|friends?|colleagues?|candidates?)\s*(?:who\s+)?(?:is|are|'re|re)?\s*$/;
-const OFFERING = /available|vacant|vacating|for rent|to[\s-]let|rent is|rent:|move[\s-]?in|flat\s*-?\s*mates?\b|room\s*-?\s*mates?\b|replacement/;
-const OFFER_STRONG = /for rent|to[\s-]let|replacement|vacating|flat\s*-?\s*mates?\s+(?:wanted|needed|required)/;
+const RENT_OUT = 'rent(?:ing)?\\s+(?:it\\s+)?out|let(?:ting)?\\s+(?:it\\s+)?out|give\\s+(?:it\\s+)?on\\s+rent|giving\\s+(?:it\\s+)?on\\s+rent';
+const PERSON_BEFORE = /\b(?:tenants?|flat\s*-?\s*mates?|room\s*-?\s*mates?|famil(?:y|ies)|bachelors?|occupants?|girls?|boys?|ladies|gents)\s*(?:is|are)?\s*$/;
+const OFFERING = /available|vacant|vacating|for rent|to[\s-]let|rent(?:ing)?\s+(?:it\s+)?out|let(?:ting)?\s+(?:it\s+)?out|on\s+rent\b|rent is|rent:|move[\s-]?in|flat\s*-?\s*mates?\b|room\s*-?\s*mates?\b|replacement/;
+const OFFER_STRONG = new RegExp('for rent|to[\\s-]let|replacement|vacating|flat\\s*-?\\s*mates?\\s+(?:wanted|needed|required)|' + RENT_OUT);
 // "We are looking for a flatmate" offers a room; "...or are also looking for a flatmate to team up" addresses the reader.
 const SEEK_MATE = /(?:looking|searching)\s+for\s+(?:an?\s+)?(?:\w+\s+){0,2}?(?:flat|room)\s*-?\s*mates?/g;
 const TO_READER = /\b(?:you|you're|are\s+also|also)\s*$/;
@@ -224,16 +226,19 @@ const offersStrongly = lo => OFFER_STRONG.test(lo) || [...lo.matchAll(SEEK_MATE)
 const SALE_STRONG = /\bfor sale\b|\bresale\b|\bon sale\b|\bselling (?:my |our |a |an |the )?(?:\d(?:\.5)?\s*bhk|flat|apartment|house|villa|plot)|(?:₹|rs\.?|inr)?\s*\d+(?:\.\d+)?\s*(?:cr|crores?)\b|\bper\s*sq\.?\s*f(?:ee)?t\b|\bchannel partner\b|\bexpressions? of interest\b|\bpre[\s-]?launch\b|\bnew launch\b/;
 const SALE_WEAK = [/\binvest(?:ment|ors?)?\b/, /\bpossession\b/, /\brera\b/, /\beoi\b/, /\bbooking (?:amount|open)/, /\bstarting (?:at|from|price)\b/, /\bprice starts?\b/, /\bemi\b/, /\bappreciation\b/, /\broi\b/, /\bready to (?:occupy|register)\b/, /\bregistration\b/, /\bkhata\b/, /\bsuper\s*built[\s-]?up\b/, /\b(?:heirloom|legacy)\b/, /\bluxury (?:villas?|apartments?|homes?|residences?)\b/];
 const RENTAL_WORDS = /\bfor rent\b|\bto[\s-]?let\b|\brent(?:al)?\s*(?:is|of|:|-|=|₹|rs\b|\d)|\bper month\b|\/\s*month|\bmonthly rent\b|\bdeposit\b|\bflat\s*-?\s*mates?\b|\broom\s*-?\s*mates?\b|\btenants?\b|\bpg\b|\blease\b|\breplacement\b/;
+// Weaker rental hints ("rent negotiable", "available", "28k"): weak sale words alone cannot outvote them.
+const RENTAL_HINTS = /\brent(?:al|ed|ing)?\b|\bavailable\b|\b\d{1,3}(?:\.\d)?\s?k\b/;
 export function isSalePost(lo) {
   if (RENTAL_WORDS.test(lo)) return false;
-  const weak = SALE_WEAK.filter(r => r.test(lo)).length;
-  return SALE_STRONG.test(lo) ? true : weak >= 2;
+  if (SALE_STRONG.test(lo)) return true;
+  return !RENTAL_HINTS.test(lo) && SALE_WEAK.filter(r => r.test(lo)).length >= 2;
 }
 export function isSeekingPost(lo) {
   let seek = false;
   for (const m of lo.matchAll(SEEK_RE)) {
     if (NOT_SEEKER.test(m[1])) continue;
-    if (OTHERS_BEFORE.test(lo.slice(Math.max(0, m.index - 30), m.index))) continue;
+    const pre = lo.slice(Math.max(0, m.index - 30), m.index);
+    if (OTHERS_BEFORE.test(pre) || PERSON_BEFORE.test(pre)) continue;
     seek = true; break;
   }
   if (!seek) return false;
@@ -520,8 +525,9 @@ export function reparseListing(l, ctx = null) {
   const snap = () => JSON.stringify([l.type, l.rent, l.totalRent, l.rentEstimated, l.kind || 'offer', l.bath ?? null, [...(l.areas || [])].sort((a, b) => a - b)]);
   const before = snap();
   if (src.type !== 'user' && src.type !== 'ai' && ex.type) l.type = ex.type;
-  // Kind: never over a user or AI decision; "not a rental" (AI or rules) is never undone here.
-  if (src.kind !== 'user' && src.kind !== 'ai' && l.kind !== 'not_rental' && ex.kind && (l.kind || 'offer') !== ex.kind) l.kind = ex.kind;
+  // Kind: never over a user or AI decision; the AI's "not a rental" is never undone here (the rules' own can be).
+  const aiNotRental = l.kind === 'not_rental' && l.ai?.fields?.isRental === false;
+  if (src.kind !== 'user' && src.kind !== 'ai' && !aiNotRental && ex.kind && (l.kind || 'offer') !== ex.kind) l.kind = ex.kind;
   if (src.bath !== 'user' && src.bath !== 'ai') { const b = l.type === 'flatmate' || l.type === 'pg' ? bathOf(typeText(text.toLowerCase())) : null; if (b) l.bath = b; else delete l.bath; }
   // Rent: never over a user edit or a rent the AI set or agreed with (set() leaves agreed fields unmarked).
   const rentLocked = src.rent === 'user' || src.rent === 'ai' || (l.ai?.fields?.rent != null && l.ai.fields.rent === l.rent);

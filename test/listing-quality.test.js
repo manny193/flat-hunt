@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 import { extract, postAreas, namesPlace, bathOf, reparseListing, makeContext, RULES_VERSION } from '../src/core/logic.js';
 import { ingestItems } from '../src/ingest.js';
 import { publicListing } from '../src/serialize.js';
-import { reparseStep, reparsePage } from '../src/reparse.js';
+import { reparseStep, reparsePage, CRON_QUERIES } from '../src/reparse.js';
+import { budgeted } from '../src/apify.js';
 import { startBackfill } from '../src/backfill.js';
 import { memoryDb, GREEN_GLEN } from './helpers.js';
 
@@ -173,4 +174,35 @@ test('re-check keeps tags of paused areas; area backfill reads post text, not gr
   await startBackfill(t.repo, gg, Date.now());
   const tagged = await t.repo.publicListings({ area: gg.id });
   assert.deepEqual(tagged.map(x => x.rent), [21300], 'the HSR post is not tagged because its group name says Green Glen');
+});
+
+test('senior review: offers that the new sale/seeking/area rules must not hide', () => {
+  const ctx = makeContext([{ id: 1, ...GREEN_GLEN }], {});
+  assert.equal(namesPlace('2bhk with big hall and kitchen'), false, '"hall" is not HAL');
+  assert.equal(namesPlace('near HAL airport road'), true);
+  assert.deepEqual(postAreas('2BHK with spacious hall, 30k', GROUP, ctx.areas), [1], 'a hall does not cancel the group fallback');
+  assert.equal(extract('We are looking to rent out our 2BHK flat in HSR. Rent 35k, deposit 1L.').kind, 'offer');
+  assert.equal(extract('Looking to give our 1BHK on rent, Koramangala, 22k').kind, 'offer');
+  assert.equal(extract('2BHK semi furnished available in Bellandur, immediate possession, registration not needed, 28k').kind, 'offer');
+  assert.equal(extract('3BHK flat, ready to occupy, khata done. Rent negotiable. Owner').kind, 'offer');
+  assert.equal(extract('Tenants required for 2BHK flat in HSR, rent 30k').kind, 'offer');
+  assert.equal(extract('3BHK villa, 2.5 Cr, ready to occupy, available now').kind, 'not_rental', 'strong sale wording still wins over "available"');
+});
+
+test('re-check: the rules’ own not_rental can be undone, the AI’s cannot; a cron tick fits CRON_QUERIES', async () => {
+  const text = '3BHK flat, ready to occupy, khata done. Rent negotiable. Owner';
+  const rules = { kind: 'not_rental', type: 'flat', posts: [{ text }] };
+  assert.equal(reparseListing(rules), true); assert.equal(rules.kind, 'offer');
+  const ai = { kind: 'not_rental', type: 'flat', ai: { fields: { isRental: false } }, posts: [{ text }] };
+  assert.equal(reparseListing(ai), false); assert.equal(ai.kind, 'not_rental');
+
+  const t = await memoryDb();
+  await t.repo.createArea(GREEN_GLEN, Date.now());
+  const now = Date.now();
+  const stale = Array.from({ length: 12 }, (_, i) => ({ id: 'l_q' + i, kind: 'offer', type: 'flatmate', bhk: 3, rent: 71000, areas: [1], createdAt: now, lastPostedAt: now, posts: [{ id: 'p' + i, text: ROOM_71K, th: 'h' + i }] }));
+  await t.repo.saveIngest({ listings: stale, keys: [], run: null, now });
+  const br = budgeted(t.repo);
+  const st = await reparseStep(br);
+  assert.equal(st.changed, 10, 'one full cron page changed');
+  assert.ok(br.used() <= CRON_QUERIES, `cron tick used ${br.used()} queries (guard ${CRON_QUERIES})`);
 });
