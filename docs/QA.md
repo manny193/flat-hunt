@@ -540,3 +540,13 @@ Findings:
 - F1 (Low) The area picker count ("Green Glen, 10 listings") includes hidden sale and seeking posts, while the list shows 9.
 - F2 (Info) "1 room in 3BHK, Rent 71000" with no breakdown shows an estimate of about 23,700 per room, as designed (test 6b). The 22,000 case needs the post to state it.
 - Not run: logged-out browser view (dev server has auth off, so I checked the public API only), a real D1 or workerd run.
+
+## PR #45 area picker count (2026-11-12)
+
+Verdict: signed off. Branch `claude/flat-hunt-listing-quality-qtlfcp`, head 1ff656b. Closes F1 from PR #43.
+
+- `npm test`: 197 pass, 0 fail, 1 skipped.
+- Repro on a fresh dev DB: Green Glen area; imported a sale post, a seeking post, 3 rental offers (scraper) and 1 rental offer with source `sample`.
+- Picker row (390x844) says "Green Glen, 3 listings"; the area view shows 3 cards and "3 listings from 1 group". `/api/public/areas` `listings` is 3 and `/api/public/listings?area=1` returns 3.
+- Sale and seeking posts and the sample are in neither the count nor the list. No console errors.
+- F1: fixed, closed.

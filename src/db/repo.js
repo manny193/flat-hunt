@@ -283,10 +283,15 @@ export function createRepo(db) {
       ]);
       return this.getArea(to);
     },
-    /** Admin view: per area, listings matched (all time / last 7 days) and users following it. */
+    /**
+     * Per area: listings shown on the homepage (all time / last 7 days) and users following it. Counts the same
+     * rows browse shows (offers, no samples), so the area picker never says 10 when the list has 9: sale
+     * ('not_rental') and seeking posts are stored but hidden.
+     */
     async areaStats(now) {
-      const rows = await db.all(`SELECT a.*, (SELECT count(*) FROM listing_match m WHERE m.area_id = a.id) AS listings,
-          (SELECT count(*) FROM listing_match m WHERE m.area_id = a.id AND m.last_posted_at >= ?) AS recent,
+      const shown = `FROM listing_match m JOIN listings l ON l.id = m.listing_id WHERE m.area_id = a.id AND m.kind = 'offer' AND l.is_sample = 0`;
+      const rows = await db.all(`SELECT a.*, (SELECT count(*) ${shown}) AS listings,
+          (SELECT count(*) ${shown} AND m.last_posted_at >= ?) AS recent,
           (SELECT count(*) FROM user_areas u WHERE u.area_id = a.id) AS users
         FROM areas a ORDER BY a.created_at, a.id`, [now - 7 * 864e5]);
       return rows.map(r => ({ ...rowToArea(r), listings: r.listings, listings7d: r.recent, users: r.users }));
