@@ -89,8 +89,10 @@ async function nominatim(path, params, { fetchFn, env, geo }) {
   geo.used++;
   const qs = new URLSearchParams({ format: 'jsonv2', addressdetails: '1', 'accept-language': 'en', ...params });
   const r = await fetchFn(`${NOMINATIM}${path}?${qs}`, { signal: AbortSignal.timeout(10000), headers: { 'user-agent': userAgent(env), accept: 'application/json' } });
-  if (r.status === 429 || r.status >= 500) throw new Error('geocoder HTTP ' + r.status);
-  if (!r.ok) return null;
+  // Only a clean answer counts. A block (403), a bad request or an outage is an error: the listing is retried
+  // later and nothing is cached, so a blocked geocoder can never mark societies "not found".
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error('geocoder HTTP ' + r.status);
   return r.json();
 }
 /** Find a society in the city. The hit's name must have the same identifying words as the society. {text, lat, lon} or null. */

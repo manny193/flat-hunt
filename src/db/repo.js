@@ -167,6 +167,7 @@ export function createRepo(db) {
         { sql: 'DELETE FROM listings WHERE id IN (SELECT value FROM json_each(?))', params: [arr] },
         { sql: 'DELETE FROM user_listing WHERE listing_id IN (SELECT value FROM json_each(?))', params: [arr] },
         { sql: 'DELETE FROM ai_queue WHERE listing_id IN (SELECT value FROM json_each(?))', params: [arr] },
+        { sql: 'DELETE FROM loc_queue WHERE listing_id IN (SELECT value FROM json_each(?))', params: [arr] },
       ]);
       return res[2].changes;
     },

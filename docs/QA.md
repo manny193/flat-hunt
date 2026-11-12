@@ -618,3 +618,10 @@ F4: accepted as a documented limit (Low). The listing self-corrects at the next 
 Observations, not blocking (Low): `redact()` leaves scheme-less Waze, Apple Maps and OpenStreetMap links with coordinates (`src/ai.js:106`); `coordinates alone` such as `12.93456, 77.72345` are not masked. Neither is a link to a person, and posters rarely write them; add to the pattern if cheap. A real society named with extra words that Nominatim shortens ("Puravankara Purva Atmosphere" vs "Purva Atmosphere") is skipped, which is the safe direction.
 
 Not run: live Nominatim, Google, the real model, real D1, e2e.
+
+Engineer note 2 (2026-11-12, after senior review of 6ec48d3; change is small, for QA's information):
+
+- Senior finding (Medium, required): `nominatim()` treated any non-2xx except 429/5xx as "not found", so a blocked geocoder (403) would cache every society as not found for 30 days. Fixed: only 404 is "not found"; any other non-2xx throws, the listing retries with backoff and nothing is cached. Test: "senior review: a blocked geocoder (403) ...".
+- Also: `deleteListings` now removes the listing's `loc_queue` row. The daily purge does not (it would add a statement to a cron run that is already at the 48-statement budget); orphan `loc_queue` rows are harmless (`runLocate` closes a row whose listing is gone) and are a follow-up.
+- Senior follow-ups not done here: pass the run's remaining subrequest budget into `runLocate`; lookup can be starved on busy cron runs.
+- `npm test`: 208 pass, 0 fail.

@@ -202,3 +202,17 @@ test('QA F1-F5: only Google hosts, no map link reaches the model, a brand name i
   const r = await runLocate(t.repo, {}, { now, sleep: noSleep, fetchFn: async () => redirect('https://maps.app.goo.gl/loop' + (++n)) });
   assert.ok(n <= MAX_FETCHES + 8, `one run made ${n} requests`); assert.ok(r.waiting > 0, 'the rest wait for the next run');
 });
+
+test('senior review: a blocked geocoder (403) is an error, not "not found": nothing is cached and the listing is retried', async () => {
+  const t = await world();
+  await runEnrich(t.repo, { AI: t.AI }, { now: t.now });
+  const blocked = async u => new URL(u).hostname === 'maps.app.goo.gl' ? redirect('https://www.google.com/maps/@12.9116,77.6389,17z') : new Response('Access blocked', { status: 403 });
+  const r = await runLocate(t.repo, {}, { now: t.now, fetchFn: blocked, sleep: noSleep });
+  assert.match(r.error, /403/); assert.equal(r.found, 0);
+  assert.deepEqual(await t.repo.locStats(), { retry: 2 });
+  assert.equal((await t.repo.db.all('SELECT * FROM places')).length, 0, 'no society cached as not found');
+  // deleting a listing also removes its lookup row
+  const soc = await t.byText(/Sobha/);
+  await t.repo.deleteListings([soc.id]);
+  assert.deepEqual(await t.repo.locStats(), { retry: 1 });
+});
