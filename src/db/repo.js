@@ -535,6 +535,14 @@ export function createRepo(db) {
       const median = await db.first("SELECT confidence AS c FROM ai_queue WHERE status = 'done' AND confidence IS NOT NULL ORDER BY confidence LIMIT 1 OFFSET (SELECT count(*) / 2 FROM ai_queue WHERE status = 'done' AND confidence IS NOT NULL)");
       return { byStatus: Object.fromEntries(byStatus.map(r => [r.status, r.n])), byListing: Object.fromEntries(byListing.map(r => [r.s || 'none', r.n])), histogram: Array.from({ length: 10 }, (_, i) => hist.find(h => h.bin === i)?.n || 0), failures, processedToday: today?.n || 0, medianConfidence: median?.c ?? null };
     },
+    /** Posts that failed because a model reply could not be read go back to pending (attempts reset); their listings lose ai_status 'failed'. */
+    async aiRequeueParseFailures(now) {
+      const res = await db.batch([
+        { sql: "UPDATE listings SET ai_status = '' WHERE ai_status = 'failed' AND id IN (SELECT listing_id FROM ai_queue WHERE status IN ('failed','retry') AND error LIKE '%invalid JSON%')", params: [] },
+        { sql: "UPDATE ai_queue SET status = 'pending', attempts = 0, next_at = ?, error = NULL, updated_at = ? WHERE status IN ('failed','retry') AND error LIKE '%invalid JSON%'", params: [now, now] },
+      ]);
+      return res[1]?.changes ?? 0;
+    },
     async aiRetry(postId, now) { return (await db.run("UPDATE ai_queue SET status = 'pending', attempts = 0, next_at = ?, error = NULL, updated_at = ? WHERE post_id = ?", [now, now, postId])).changes > 0; },
     async listSuggestions(status = 'open', limit = 50) {
       return db.all(`SELECT s.*, a.rent AS a_rent, a.bhk AS a_bhk, b.rent AS b_rent, b.bhk AS b_bhk, substr(json_extract(a.data, '$.posts[0].text'), 1, 140) AS a_text, substr(json_extract(b.data, '$.posts[0].text'), 1, 140) AS b_text

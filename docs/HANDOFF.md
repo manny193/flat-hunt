@@ -258,11 +258,10 @@ Root cause confirmed live: the actor rejects milliseconds, so the cutoff fell ba
   - Switch to the official actor if it supports finer cutoffs.
   - Keep Reddit as the free source.
 
-### 9.2 HIGH: AI extraction is failing in production
-- Both queued posts ended `failed` after 5 attempts with error **"invalid JSON"**.
-- 0 listings have been read by AI; regex extraction still works.
-- Likely causes: the model's response shape (Workers AI wraps output, e.g. `response` vs `result`, or JSON-mode isn't honoured by Gemma 4), or Gemma 4 isn't available on Free and the fallback isn't triggered by this error type.
-- **Next:** log one raw response (redacted), make the parser handle the Workers AI envelope and fenced JSON, treat "invalid JSON" twice as a reason to switch model, and run `ai-eval --online` (needs the Workers AI Read token).
+### 9.2 FIXED (12 Nov 2026): AI extraction was failing in production
+- Every call failed with **"invalid JSON"** (29 posts `failed`, 0 read by AI).
+- Cause, found with one live REST call: both Workers AI models think before answering. With thinking on, Gemma 4 spent the whole `max_tokens` (500 for one post) in `reasoning_content` and returned `content: ""` with `finish_reason: "length"`. gpt-oss-20b did the same.
+- Fix: `MODEL_OPTIONS` in `src/ai.js`. Gemma gets `chat_template_kwargs: { enable_thinking: false }` and returns clean JSON (134 tokens for one post, 574 for five, and about a third fewer neurons). gpt-oss gets `reasoning_effort: 'low'`. A reply that can't be read now records why (e.g. "no answer: the model used the token limit thinking"). Posts that failed with a parse error are requeued once (`AI_FIX`, `settings.ai.requeuedFix`).
 
 ### 9.3 HIGH (founder decision): open sign-ups expose third-party phone numbers
 - Any Google account becomes a user who sees every number.

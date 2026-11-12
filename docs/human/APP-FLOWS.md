@@ -108,7 +108,7 @@ Public JSON tested 9 Nov 2026; Reddit requires login (403 from Cloudflare, login
 1. Admin → **AI** shows how many posts the AI read today, its confidence, any failures and the share of the free daily allowance used.
 2. Turn the AI reader on or off, set its daily cap, retry failed posts.
 3. When the AI thinks two listings are the same flat but is not sure, it suggests a merge. The admin chooses **Merge** or **Dismiss**.
-4. Note: AI extraction currently fails in production with an "invalid JSON" error. The simple text rules still fill in the details.
+4. If a post fails, the AI page says why (for example "cut off at the token limit"). The simple text rules still fill in the details for any post the AI could not read.
 
 ### 10a. Alerts
 
