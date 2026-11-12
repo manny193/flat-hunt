@@ -16,7 +16,9 @@ export const LOC_MAX_ATTEMPTS = 4;
 export const LOC_QUERIES = 12; // 5 reads (due, listings, areas, places cache, settings) + a save batch of up to 6 statements, +1 spare
 const NEGATIVE_TTL = 30 * 864e5; // a society that was not found is asked for again after a month
 const SHORT_HOST = /^(?:maps\.app\.goo\.gl|goo\.gl|g\.co)$/i;
-const MAP_HOST = /^(?:maps\.app\.goo\.gl|goo\.gl|g\.co|(?:www\.|maps\.)?google\.[a-z.]{2,8})$/i;
+// Google's own hosts only: google.com, google.co.in, google.com.au, google.de ... never google.<anything>.com.
+const MAP_HOST = /^(?:maps\.app\.goo\.gl|goo\.gl|g\.co|(?:www\.|maps\.)?google\.(?:com|[a-z]{2}|com?\.[a-z]{2}))$/i;
+export const MAX_FETCHES = 16; // requests one run may start a new listing with (Workers Free: 50 subrequests per invocation, shared)
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const userAgent = env => `FlatHunt/1.0 (${env?.PUBLIC_BASE_URL || 'rental listings app'})`;
 const inCity = p => p && p.lat >= CITY.south && p.lat <= CITY.north && p.lon >= CITY.west && p.lon <= CITY.east;
@@ -51,8 +53,8 @@ export function parseMapUrl(u) {
 }
 
 /**
- * Resolve a map link from a post. Short links (maps.app.goo.gl) are followed by hand, at most 4 hops and
- * only across Google hosts. Returns {name, lat, lon} or null; throws on a network error (retried later).
+ * Resolve a map link from a post. Only short links (maps.app.goo.gl, goo.gl, g.co) are ever requested; they are
+ * followed by hand, at most 4 hops, and a redirect to any host that is not Google's ends the lookup. Returns {name, lat, lon} or null; throws on a network error (retried later).
  */
 export async function resolveMapLink(link, fetchFn = fetch, env = null) {
   let u = String(link || '');
@@ -62,8 +64,7 @@ export async function resolveMapLink(link, fetchFn = fetch, env = null) {
     if (url.hostname === 'consent.google.com' && url.searchParams.get('continue')) { u = url.searchParams.get('continue'); continue; }
     if (!MAP_HOST.test(url.hostname)) return null;
     const parsed = parseMapUrl(u);
-    if (parsed && !SHORT_HOST.test(url.hostname)) return parsed;
-    if (!SHORT_HOST.test(url.hostname) && hop > 0) return null;
+    if (!SHORT_HOST.test(url.hostname)) return parsed; // a full Maps URL is read, never fetched
     const r = await fetchFn(u, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(8000), headers: { 'user-agent': userAgent(env) } });
     const next = r.headers?.get?.('location');
     if (r.status >= 500 || r.status === 429) throw new Error('map link HTTP ' + r.status);
@@ -92,7 +93,7 @@ async function nominatim(path, params, { fetchFn, env, geo }) {
   if (!r.ok) return null;
   return r.json();
 }
-/** Find a society in the city. The result must carry every identifying word of the name. {text, lat, lon} or null. */
+/** Find a society in the city. The hit's name must have the same identifying words as the society. {text, lat, lon} or null. */
 export async function findSociety(society, opt) {
   const core = coreTokens(society);
   if (!core.length || core.join('').length < 4) return null; // "Sai Nest": too generic to trust a search hit
@@ -101,6 +102,9 @@ export async function findSociety(society, opt) {
     const pos = num2(r.lat, r.lon); if (!inCity(pos)) continue;
     const label = ' ' + normText(`${r.name || ''} ${String(r.display_name || '').split(',').slice(0, 2).join(' ')}`) + ' ';
     if (!core.every(w => label.includes(' ' + w + ' '))) continue;
+    // ...and the hit must not be a different, longer-named place ("Prestige Apartments" is not "Prestige Falcon City").
+    const theirs = coreTokens(r.name || String(r.display_name || '').split(',')[0]);
+    if (!theirs.length || !theirs.every(w => core.includes(w))) continue;
     const text = addressText(r); if (text) return { text, ...pos };
   }
   return null;
@@ -124,16 +128,18 @@ export async function runLocate(repo, env, { now = Date.now(), fetchFn = fetch, 
   const ctx = makeContext(areas, {});
   const keyOf = l => l.society ? normText(l.society).slice(0, 120) : '';
   const cache = await repo.placesGet([...new Set([...listings.values()].map(keyOf).filter(Boolean))]);
-  const geo = { used: 0, sleep }; const opt = { fetchFn, env, geo };
+  let fetches = 0; const counted = (...a) => { fetches++; return fetchFn(...a); };
+  const geo = { used: 0, sleep }; const opt = { fetchFn: counted, env, geo };
   const q = []; const save = []; const newPlaces = []; const placed = [];
   let found = 0, lastError = null;
   for (const d of due) {
     const l = listings.get(d.listing_id);
     if (!l || !needsLookup(l, ctx)) { q.push({ id: d.listing_id, status: 'done', attempts: d.attempts, next_at: now, error: null }); continue; }
+    if (fetches >= MAX_FETCHES) continue; // request cap for this run: stays pending for the next one
     let place = null, deferred = false;
     try {
       for (const link of (l.mapLinks || []).slice(0, 2)) {
-        const m = await resolveMapLink(link, fetchFn, env);
+        const m = await resolveMapLink(link, counted, env);
         if (!m) continue;
         const pos = num2(m.lat, m.lon); let text = m.name || '';
         if (inCity(pos) && !(text && matchAreas(text, ctx.areas).length)) {

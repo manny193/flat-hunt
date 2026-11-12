@@ -4,8 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { listingAreas, retagAreas, makeContext, reparseListing } from '../src/core/logic.js';
-import { validateResult, mergeAi, runEnrich, SCHEMA, FEW_SHOT } from '../src/ai.js';
-import { parseMapUrl, resolveMapLink, findSociety, addressText, coreTokens, needsLookup, runLocate, NOMINATIM, LOC_MAX_ATTEMPTS, LOC_QUERIES } from '../src/locate.js';
+import { validateResult, mergeAi, runEnrich, redact, SCHEMA, FEW_SHOT } from '../src/ai.js';
+import { parseMapUrl, resolveMapLink, findSociety, addressText, coreTokens, needsLookup, runLocate, NOMINATIM, LOC_MAX_ATTEMPTS, LOC_QUERIES, MAX_FETCHES } from '../src/locate.js';
 import { ingestItems } from '../src/ingest.js';
 import { startBackfill } from '../src/backfill.js';
 import { budgeted } from '../src/apify.js';
@@ -173,4 +173,32 @@ test('lookup failures: outage retries with backoff then fails; nothing found is 
   const none = await runLocate(t2.repo, {}, { now: t2.now, fetchFn: async u => new URL(u).hostname === 'maps.app.goo.gl' ? new Response('', { status: 404 }) : Response.json([]), sleep: noSleep });
   assert.equal(none.found, 0); assert.deepEqual(await t2.repo.locStats(), { none: 2 });
   assert.equal(needsLookup({ society: 'X Residency', posts: [{ text: 'flat in Bellandur' }] }, ctx), false, 'a post that names an area needs no lookup');
+});
+
+test('QA F1-F5: only Google hosts, no map link reaches the model, a brand name is not a society, requests per run are capped', async () => {
+  // F1: look-alike hosts are neither parsed nor fetched; a full Maps URL is never fetched at all
+  let hits = 0; const spy = async () => { hits++; return new Response('', { status: 200 }); };
+  for (const u of ['https://google.evil.com/x', 'https://google.attack.io/maps/place/X/@12.9,77.6', 'https://google.com.evil.com/maps?q=12.9,77.6', 'https://www.google.com/maps/unknown-shape']) {
+    assert.equal(await resolveMapLink(u, spy), null, u);
+  }
+  assert.equal(hits, 0); assert.equal(parseMapUrl('https://google.evil.com/maps/place/X/@12.9,77.6'), null);
+  for (const u of ['https://www.google.co.in/maps/@12.97,77.59,15z', 'https://maps.google.com/?q=12.9,77.6', 'https://google.com.au/maps/@12.97,77.59,15z']) assert.ok(parseMapUrl(u), u);
+  // F2: scheme-less map links and their coordinates are redacted
+  for (const t of ['see google.com/maps/place/Sobha+Dream/@12.93,77.72,17z', 'maps.google.com/?q=12.9116,77.6389', 'g.co/kgs/abc', 'www.google.co.in/maps?q=12.9116,77.6389', 'pin @12.9352,77.7260 here']) {
+    assert.doesNotMatch(redact(t), /google|g\.co|12\.9|77\.[67]/, t); assert.match(redact(t), /\[LINK\]/);
+  }
+  // F3: a one-word brand does not match a longer-named place
+  const opt = () => ({ fetchFn: async () => Response.json([{ ...NOM, name: 'Prestige Falcon City', display_name: 'Prestige Falcon City, Kanakapura Road' }]), env: {}, geo: { used: 0, sleep: noSleep } });
+  assert.equal(await findSociety('Prestige Apartments', opt()), null);
+  assert.equal(await findSociety('Brigade Residency', { ...opt(), fetchFn: async () => Response.json([{ ...NOM, name: 'Brigade Gateway', display_name: 'Brigade Gateway, Malleswaram' }]) }), null);
+  assert.ok(await findSociety('Prestige Falcon City Apartments', opt()), 'the same place under its full name still matches');
+  // F5: endless redirects cannot push one run past the request cap
+  const t = await memoryDb(); const now = Date.now();
+  await t.repo.createArea(AREAS[0], now);
+  await ingestItems(t.repo, Array.from({ length: 6 }, (_, i) => ({ text: `${['1BHK', '2BHK', '3BHK', '4BHK', '1RK', 'PG room'][i]} for rent ${15 + i * 9}k, ${['fully furnished', 'semi furnished', 'unfurnished', 'with parking', 'top floor', 'food included'][i]}, location https://maps.app.goo.gl/a${i} and https://maps.app.goo.gl/b${i} call 90000${10000 + i * 7919}`, url: `https://www.facebook.com/groups/1/posts/${i + 1}/`, createdAt: now - 36e5 })), { source: 'apify', storeAll: true });
+  const ids = (await t.repo.listListings()).map(l => l.id); assert.ok(ids.length >= 4);
+  await t.repo.db.batch([t.repo.locEnqueueStatement(ids, now)]);
+  let n = 0;
+  const r = await runLocate(t.repo, {}, { now, sleep: noSleep, fetchFn: async () => redirect('https://maps.app.goo.gl/loop' + (++n)) });
+  assert.ok(n <= MAX_FETCHES + 8, `one run made ${n} requests`); assert.ok(r.waiting > 0, 'the rest wait for the next run');
 });

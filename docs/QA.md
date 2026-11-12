@@ -591,3 +591,12 @@ Findings:
 Not run (disclosed): live Nominatim, Google and the real model; real D1; browser or e2e (no UI change in this PR).
 
 To re-test after fixes: `npm test`; rerun the F1 to F5 repros above (each is a three-line script on `memoryDb()`/mocked `fetchFn`).
+
+Engineer note (2026-11-12, after the findings above; for QA to re-test):
+
+- F1 fixed: `MAP_HOST` now lists Google's own hosts only (`google.com`, `google.<cc>`, `google.co.<cc>`, `google.com.<cc>`), and only short links (`maps.app.goo.gl`, `goo.gl`, `g.co`) are ever requested; a full Maps URL is parsed, never fetched.
+- F2 fixed: `redact()` masks scheme-less `google.*/maps`, `maps.google.*`, `g.co`, WhatsApp and `fb.me`/`m.me` links, and leftover `@lat,lon` coordinates.
+- F3 fixed: the hit's own name must not carry identifying words the society name lacks, so "Prestige Apartments" no longer matches "Prestige Falcon City".
+- F5 fixed: `runLocate` counts every request and starts no new listing once `MAX_FETCHES` (16) is reached; the rest stay queued.
+- F4 not fixed, by choice: the backfill runs as one SQL text scan and cannot apply the AI's "nearby" list. It is a documented limit (ARCHITECTURE §4.4); the listing is corrected at the next re-check.
+- Tests: `test/locate.test.js` "QA F1-F5". `npm test` 207 pass. The ingest timing test (`median < 10 ms`) fails intermittently on this sandbox today on `main` as well (10.8 to 15.1 ms in six runs on `origin/main`), so it is machine noise, not this PR.

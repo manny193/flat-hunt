@@ -103,7 +103,8 @@ export const SCHEMA = {
 export function redact(text, max = 1500) {
   return maskPhones(String(text || ''), '[PHONE]')
     .replace(/\b(?:https?:\/\/|www\.)[^\s<>"']+/gi, '[LINK]')
-    .replace(/\b(?:wa\.me|maps\.app\.goo\.gl|goo\.gl|(?:[a-z0-9-]+\.)?facebook\.com)(?:\/[^\s<>"']*)?/gi, '[LINK]')
+    .replace(/\b(?:wa\.me|api\.whatsapp\.com|chat\.whatsapp\.com|maps\.app\.goo\.gl|goo\.gl|g\.co|m\.me|fb\.me|fb\.com|(?:[a-z0-9-]+\.)?facebook\.com|(?:www\.)?google\.[a-z.]{2,8}\/maps|maps\.google\.[a-z.]{2,8})(?:[\/?][^\s<>"']*)?/gi, '[LINK]')
+    .replace(/@-?\d{1,2}\.\d{3,},-?\d{1,3}\.\d{3,}[^\s<>"']*/g, '[LINK]') // coordinates left over from a broken map link
     .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '[EMAIL]')
     .replace(/[<>]/g, ' ')
     .slice(0, max);
