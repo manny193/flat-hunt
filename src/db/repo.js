@@ -167,6 +167,7 @@ export function createRepo(db) {
         { sql: 'DELETE FROM listings WHERE id IN (SELECT value FROM json_each(?))', params: [arr] },
         { sql: 'DELETE FROM user_listing WHERE listing_id IN (SELECT value FROM json_each(?))', params: [arr] },
         { sql: 'DELETE FROM ai_queue WHERE listing_id IN (SELECT value FROM json_each(?))', params: [arr] },
+        { sql: 'DELETE FROM loc_queue WHERE listing_id IN (SELECT value FROM json_each(?))', params: [arr] },
       ]);
       return res[2].changes;
     },
@@ -304,9 +305,13 @@ export function createRepo(db) {
      */
     async backfillChunk(areaId, patterns, from, to, now) {
       if (!patterns.length) return 0;
-      // Post text only: group names ("Flat And Flatmate Bellandur Green Glen") and authors in data must not tag a post.
+      // Post text, plus the place the AI read or a lookup found for it (data.place). Never group names
+      // ("Flat And Flatmate Bellandur Green Glen") or authors.
       const like = patterns.map(() => "json_extract(p.value, '$.text') LIKE ? ESCAPE '\\'").join(' OR ');
-      const sel = `SELECT DISTINCT l.id FROM listings l, json_each(l.data, '$.posts') p WHERE l.rowid > ? AND l.rowid <= ? AND (${like})`;
+      const place = patterns.map(() => "pl LIKE ? ESCAPE '\\'").join(' OR ');
+      const sel = `SELECT x.id FROM (SELECT l.id, l.data, coalesce(json_extract(l.data, '$.place.area'), '') || ' | ' || coalesce(json_extract(l.data, '$.place.text'), '') AS pl FROM listings l WHERE l.rowid > ? AND l.rowid <= ?) x
+        WHERE EXISTS (SELECT 1 FROM json_each(x.data, '$.posts') p WHERE ${like}) OR ${place}`;
+      patterns = [...patterns, ...patterns];
       const res = await db.batch([
         { sql: `INSERT OR IGNORE INTO listing_match (listing_id, area_id, kind, bhk, rent, last_posted_at) SELECT id, ?, kind, bhk, rent, last_posted_at FROM listings WHERE id IN (${sel})`, params: [areaId, from, to, ...patterns] },
         { sql: `UPDATE listings SET areas = json_insert(areas, '$[#]', ?), updated_at = ? WHERE id IN (${sel}) AND NOT EXISTS (SELECT 1 FROM json_each(listings.areas) WHERE value = ?)`, params: [areaId, now, from, to, ...patterns, areaId] },
@@ -512,12 +517,11 @@ export function createRepo(db) {
     },
 
     // ---------- AI extraction queue ----------
-    /** Queue newest posts of listings that nobody has had read yet, only in areas someone follows. */
+    /** Queue the newest post of every recent listing the model has not read yet (the homepage shows them all). */
     async aiEnqueue(now, sinceMs, limit = 50) {
       return (await db.run(`INSERT OR IGNORE INTO ai_queue (post_id, listing_id, status, attempts, next_at, created_at, updated_at)
         SELECT json_extract(l.data, '$.posts[0].id'), l.id, 'pending', 0, ?, ?, ? FROM listings l
         WHERE l.ai_status = '' AND l.is_sample = 0 AND l.last_posted_at >= ? AND json_extract(l.data, '$.posts[0].id') IS NOT NULL
-          AND l.id IN (SELECT m.listing_id FROM listing_match m JOIN user_areas ua ON ua.area_id = m.area_id)
         ORDER BY l.last_posted_at DESC LIMIT ?`, [now, now, now, sinceMs, limit])).changes;
     },
     async aiDue(now, limit) {
@@ -543,6 +547,27 @@ export function createRepo(db) {
       ]);
       return res[1]?.changes ?? 0;
     },
+    // ---------- place lookup queue + society cache (src/locate.js) ----------
+    locEnqueueStatement(ids, now) {
+      return { sql: "INSERT OR IGNORE INTO loc_queue (listing_id, status, attempts, next_at, created_at, updated_at) SELECT value, 'pending', 0, ?, ?, ? FROM json_each(?)", params: [now, now, now, JSON.stringify(ids)] };
+    },
+    async locDue(now, limit) {
+      return db.all("SELECT listing_id, attempts FROM loc_queue WHERE status IN ('pending','retry') AND next_at <= ? ORDER BY created_at LIMIT ?", [now, limit]);
+    },
+    locUpdateStatement(rows, now) {
+      return { sql: `UPDATE loc_queue SET status = j.s, attempts = j.a, next_at = j.n, error = j.e, updated_at = ?
+        FROM (SELECT ${je('id')} AS id, ${je('status')} AS s, ${je('attempts')} AS a, ${je('next_at')} AS n, ${je('error')} AS e FROM json_each(?)) AS j WHERE loc_queue.listing_id = j.id`, params: [now, JSON.stringify(rows)] };
+    },
+    async placesGet(keys) {
+      const m = new Map(); if (!keys.length) return m;
+      for (const r of await db.all('SELECT * FROM places WHERE key IN (SELECT value FROM json_each(?))', [JSON.stringify(keys)])) m.set(r.key, r);
+      return m;
+    },
+    placesUpsertStatement(rows) {
+      return { sql: `INSERT INTO places (key, text, lat, lon, at) SELECT ${je('key')}, ${je('text')}, ${je('lat')}, ${je('lon')}, ${je('at')} FROM json_each(?) WHERE true
+        ON CONFLICT(key) DO UPDATE SET text = excluded.text, lat = excluded.lat, lon = excluded.lon, at = excluded.at`, params: [JSON.stringify(rows)] };
+    },
+    async locStats() { return Object.fromEntries((await db.all('SELECT status, count(*) AS n FROM loc_queue GROUP BY status')).map(r => [r.status, r.n])); },
     async aiRetry(postId, now) { return (await db.run("UPDATE ai_queue SET status = 'pending', attempts = 0, next_at = ?, error = NULL, updated_at = ? WHERE post_id = ?", [now, now, postId])).changes > 0; },
     async listSuggestions(status = 'open', limit = 50) {
       return db.all(`SELECT s.*, a.rent AS a_rent, a.bhk AS a_bhk, b.rent AS b_rent, b.bhk AS b_bhk, substr(json_extract(a.data, '$.posts[0].text'), 1, 140) AS a_text, substr(json_extract(b.data, '$.posts[0].text'), 1, 140) AS b_text
@@ -566,6 +591,7 @@ export function createRepo(db) {
         { sql: 'DELETE FROM listing_match WHERE listing_id = ?', params: [fromId] },
         { sql: 'DELETE FROM post_keys WHERE listing_id = ?', params: [fromId] },
         { sql: 'DELETE FROM ai_queue WHERE listing_id = ?', params: [fromId] },
+        { sql: 'DELETE FROM loc_queue WHERE listing_id = ?', params: [fromId] },
         { sql: 'DELETE FROM listings WHERE id = ?', params: [fromId] },
       ];
     },

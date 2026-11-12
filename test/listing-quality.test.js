@@ -95,13 +95,14 @@ test('3. bathroom of a room: attached or not, shown and filterable; whole flats 
   assert.equal(publicListing({ id: 'l_x', kind: 'offer', type: 'flatmate', bath: 'attached', posts: [] }).bath, 'attached', 'public: bath is not personal data');
 });
 
-test('4/5. the post text decides the area; the group name only fills in when the text names no place', () => {
+test('4/5. only the post text decides the area; the group name never does', () => {
   const ctx = makeContext([{ id: 1, ...GREEN_GLEN }], {});
-  assert.deepEqual(postAreas(HSR, GROUP, ctx.areas), [], 'HSR Layout post in the Bellandur Green Glen group');
-  assert.deepEqual(postAreas(JB_NAGAR, GROUP, ctx.areas), [], 'Jeevan Bhima Nagar / Indiranagar post');
-  assert.deepEqual(postAreas(SEPARATE_BATH, GROUP, ctx.areas), [1], 'names Green Glen');
-  assert.deepEqual(postAreas('1 room available in 2BHK, rent 15k, call 9000000005', GROUP, ctx.areas), [1], 'names no place: the group says where');
-  assert.deepEqual(postAreas('1BHK for rent, 20k', 'Flats and Flatmates Bangalore', ctx.areas), []);
+  assert.deepEqual(postAreas(HSR, ctx.areas), [], 'HSR Layout post in the Bellandur Green Glen group');
+  assert.deepEqual(postAreas(JB_NAGAR, ctx.areas), [], 'Jeevan Bhima Nagar / Indiranagar post');
+  assert.deepEqual(postAreas(SEPARATE_BATH, ctx.areas), [1], 'names Green Glen');
+  const noPlace = { areas: [1], posts: [{ text: '1 room available in 2BHK, rent 15k, call 9000000005', group: GROUP }] };
+  reparseListing(noPlace, ctx);
+  assert.deepEqual(noPlace.areas, [], 'names no place: a tag that came from the group name is removed on re-check');
   assert.ok(namesPlace('Flat in INDRANAGAR') && namesPlace('#HSRLayout') && namesPlace('Koramangala 5th block') && !namesPlace('Room available in 3BHK'));
   // Hashtag spam ("#flatmates") does not make a whole 1BHK a shared room.
   assert.equal(extract(HSR).type, 'flat');
@@ -180,7 +181,6 @@ test('senior review: offers that the new sale/seeking/area rules must not hide',
   const ctx = makeContext([{ id: 1, ...GREEN_GLEN }], {});
   assert.equal(namesPlace('2bhk with big hall and kitchen'), false, '"hall" is not HAL');
   assert.equal(namesPlace('near HAL airport road'), true);
-  assert.deepEqual(postAreas('2BHK with spacious hall, 30k', GROUP, ctx.areas), [1], 'a hall does not cancel the group fallback');
   assert.equal(extract('We are looking to rent out our 2BHK flat in HSR. Rent 35k, deposit 1L.').kind, 'offer');
   assert.equal(extract('Looking to give our 1BHK on rent, Koramangala, 22k').kind, 'offer');
   assert.equal(extract('2BHK semi furnished available in Bellandur, immediate possession, registration not needed, 28k').kind, 'offer');

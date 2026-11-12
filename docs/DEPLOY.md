@@ -132,7 +132,7 @@ finds the database id and URL during each run.
 
 ## AI extraction
 
-Posts in areas someone follows are read by a model after the regex pass (docs/AI-EXTRACTION.md):
+Every stored post is read by a model after the regex pass (docs/AI-EXTRACTION.md). Society names and map links the post text cannot place are then looked up on OpenStreetMap's free Nominatim service and by following the Maps link (no key or secret; set `PUBLIC_BASE_URL` so the lookup identifies the app). The model step uses:
 Workers AI `@cf/google/gemma-4-26b-a4b-it` through the `AI` binding (free 10,000 neurons/day; the app stops
 at 8,000, an admin setting), `@cf/openai/gpt-oss-20b` if Gemma is unavailable on the account, and Groq
 (`GROQ_API_KEY`, optional) when the Workers AI daily allocation is used up. Phones, emails and links are
