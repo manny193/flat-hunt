@@ -446,7 +446,7 @@ async function extras(repo, env, settings, sch, status, { fetchFn, now }) {
   if (aiConfigured(env) && repo.left() >= 20) {
     try { status.ai = await runEnrich(repo, env, { maxCalls: 6, now, fetchFn }); } catch (e) { status.detail += ' AI failed: ' + e.message + '.'; }
   }
-  // Societies and map links the post text could not place (src/locate.js): a few look-ups per tick.
+  // Societies and map links the post text could not place (src/locate.js): a few look-ups per hourly run.
   if (repo.left() >= LOC_QUERIES + 12) { // leaves room for the daily purge and the final status write
     try { const r = await runLocate(repo, env, { now, fetchFn }); if (r.action !== 'idle') status.locate = r; } catch (e) { status.detail += ' Place lookup failed: ' + e.message + '.'; }
   }

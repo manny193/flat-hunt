@@ -6,7 +6,7 @@
 //   society  -> search OpenStreetMap (Nominatim) inside Bangalore; the result must carry the society's name.
 // Free and keyless. Nominatim's usage policy: at most 1 request a second, an identifying User-Agent, results
 // cached (table `places`). No phone, author or post text is sent: only the society name or coordinates.
-// Queue: loc_queue, filled by the AI enrich pass (src/ai.js), drained here by the cron, a few per tick.
+// Queue: loc_queue, filled by the AI enrich pass (src/ai.js), drained here by the hourly cron, a few per run.
 import { normText, matchAreas, listingAreas, retagAreas, makeContext } from './core/logic.js';
 import { enqueueStatement, alertsConfig } from './alerts.js';
 
