@@ -98,7 +98,10 @@ test('paged ingest resumes from the saved offset after a failure, without double
   assert.equal((await repo.listListings()).length, 24);
 });
 
-test('scheduled: budget check, input from watched groups, exact cutoff = last successful start minus 15 min, caps, per-run webhook', async () => {
+test('scheduled: budget check, input from watched groups, exact cutoff = last successful start minus 15 min, caps, per-run webhook', async (t) => {
+  // Freeze the clock near the fixture dates: the 3-day cutoff cap uses the real time, so these tests
+  // started failing once the real date moved 3+ days past 7 Nov 2026.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 10, 7, 4) });
   const api = fakeApify({ usage: 1.2 });
   const { app, env, repo } = await harness(api);
   await repo.putSettings({ groups: [{ name: 'A', url: 'https://www.facebook.com/groups/111', active: true }, { name: 'B', url: 'https://www.facebook.com/groups/222', active: false }] });
@@ -286,7 +289,10 @@ test('group details refresh even when unchanged, so they stop being stale (QA)',
   assert.equal((await repo.listListings())[0].posts[0].group, 'Bellandur', "the admin's name for a watched group wins");
 });
 
-test('a run cut short by its limits is re-read once with the largest posts-per-group (QA)', async () => {
+test('a run cut short by its limits is re-read once with the largest posts-per-group (QA)', async (t) => {
+  // Freeze the clock near the fixture dates: the 3-day cutoff cap uses the real time, so these tests
+  // started failing once the real date moved 3+ days past 7 Nov 2026.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 10, 7, 4) });
   const api = fakeApify({ usage: 1 });
   const { app, env, repo, hook } = await harness(api, { INGEST_PAGE_SIZE: '50' });
   await repo.putSettings({ groups: [{ name: 'A', url: 'https://www.facebook.com/groups/111', active: true }], resultsPerGroup: 10, groupInfo: { at: Date.now(), urls: ['https://www.facebook.com/groups/111'], groups: [] } });
