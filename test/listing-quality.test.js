@@ -206,3 +206,15 @@ test('re-check: the rules’ own not_rental can be undone, the AI’s cannot; a 
   assert.equal(st.changed, 10, 'one full cron page changed');
   assert.ok(br.used() <= CRON_QUERIES, `cron tick used ${br.used()} queries (guard ${CRON_QUERIES})`);
 });
+
+test('area counts match what the homepage shows: hidden sale/seeking posts and samples are not counted', async () => {
+  const t = await memoryDb();
+  const gg = await t.repo.createArea(GREEN_GLEN, Date.now());
+  const at = new Date(Date.now() - 6e4).toISOString();
+  await ingestItems(t.repo, [SALE, SEEKING, ROOM_71K, SEPARATE_BATH].map((text, i) => ({ text: text + ' Green Glen', url: `https://www.facebook.com/groups/1/posts/${i + 80}/`, createdAt: at })), { source: 'apify', storeAll: true });
+  await ingestItems(t.repo, [{ text: '2BHK for rent in Green Glen Layout, rent 30000, deposit 1 lakh', url: 'https://www.facebook.com/groups/1/posts/99/', createdAt: at }], { source: 'sample', storeAll: true, sample: true });
+  const shown = (await t.repo.publicListings({ area: gg.id })).length;
+  const [st] = await t.repo.areaStats(Date.now());
+  assert.equal(shown, 2, 'two offers on the homepage');
+  assert.deepEqual([st.listings, st.listings7d], [shown, shown], 'picker count = homepage count');
+});
