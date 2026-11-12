@@ -188,3 +188,13 @@ test('after the fix, posts that failed with a parse error are retried once; othe
   // Once only: a later parse failure is not requeued again by this fix.
   assert.equal((await runEnrich(t.repo, { AI: good }, { now: now + 60e3 })).action, 'idle');
 });
+
+test('a sale our rules found is not turned back into an offer by a low-confidence AI result', () => {
+  const fields = { ...result('P1'), isRental: true, kind: 'offer', type: 'flat', bhk: '3', rent: null };
+  const l = { id: 'l_s', kind: 'not_rental', type: 'flatmate', posts: [] };
+  mergeAi(l, { fields: { ...fields, confidence: 0.61 }, confidence: 0.61, bad: 0 }, { postId: 'p', model: 'm', now: 1 });
+  assert.equal(l.kind, 'not_rental', 'production case: AI said offer at 0.61');
+  const sure = { id: 'l_t', kind: 'not_rental', type: 'flat', posts: [] };
+  mergeAi(sure, { fields: { ...fields, confidence: 0.95 }, confidence: 0.95, bad: 0 }, { postId: 'p', model: 'm', now: 1 });
+  assert.equal(sure.kind, 'offer', 'a confident AI may still correct the rules');
+});

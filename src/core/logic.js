@@ -513,7 +513,7 @@ export function applyPost(l, p, ex, now) {
   return l;
 }
 // Bump when extraction rules change: the 10-minute cron then re-checks every stored listing once (src/reparse.js).
-export const RULES_VERSION = 2;
+export const RULES_VERSION = 3;
 /**
  * Re-run the extraction rules on a stored listing's latest post (after a rule change): type, kind (offer /
  * seeking / not a rental), room bathroom, rent split and, when ctx (makeContext) is given, areas.
@@ -527,7 +527,9 @@ export function reparseListing(l, ctx = null) {
   if (src.type !== 'user' && src.type !== 'ai' && ex.type) l.type = ex.type;
   // Kind: never over a user or AI decision; the AI's "not a rental" is never undone here (the rules' own can be).
   const aiNotRental = l.kind === 'not_rental' && l.ai?.fields?.isRental === false;
-  if (src.kind !== 'user' && src.kind !== 'ai' && !aiNotRental && ex.kind && (l.kind || 'offer') !== ex.kind) l.kind = ex.kind;
+  // A sale our rules see wins over an AI "offer" set below 0.8 confidence (the bar the AI needs to say not_rental).
+  const weakAiKind = src.kind === 'ai' && ex.kind === 'not_rental' && !((l.ai?.confidence ?? 0) >= 0.8);
+  if (src.kind !== 'user' && (src.kind !== 'ai' || weakAiKind) && !aiNotRental && ex.kind && (l.kind || 'offer') !== ex.kind) { l.kind = ex.kind; if (weakAiKind) l.fieldSource = { ...src, kind: 'rules' }; }
   if (src.bath !== 'user' && src.bath !== 'ai') { const b = l.type === 'flatmate' || l.type === 'pg' ? bathOf(typeText(text.toLowerCase())) : null; if (b) l.bath = b; else delete l.bath; }
   // Rent: never over a user edit or a rent the AI set or agreed with (set() leaves agreed fields unmarked).
   const rentLocked = src.rent === 'user' || src.rent === 'ai' || (l.ai?.fields?.rent != null && l.ai.fields.rent === l.rent);

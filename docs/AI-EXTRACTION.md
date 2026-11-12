@@ -178,7 +178,7 @@ whichever source scores higher on each field.
 | `depositMonths`, `bhk` | AI if grounded (the digit appears in the text), else regex |
 | `totalRent`, `rentEstimated` (regex only, Nov 2026) | Room posts: the whole flat's rent goes to `totalRent`; the room's `rent` is the stated share ("per person 24k", "your share 30k"), else total / BHK rounded to ₹100 with `rentEstimated: true`. A room rent ≥ ₹35,000 with a 2+ BHK named is read as the flat total. An AI rent equal to `totalRent` is ignored. Admin → Data → **Re-check all listings** re-runs these rules on stored posts (50 per call, user/AI-set fields kept). |
 | `bath` (regex only, Nov 2026) | Rooms in a shared flat or PG: `attached` ("attached bathroom", "en-suite") or `separate` ("common bathroom", "not attached"); first one written wins. Whole flats carry none. Public field (not personal data). |
-| `kind`, `type`, `gender`, `furnishing`, `brokerage` | AI wins when confidence ≥ 0.5 (regex is weakest here: Hinglish, "Looking for flatmate?", "service charge") |
+| `kind`, `type`, `gender`, `furnishing`, `brokerage` | AI wins when confidence ≥ 0.5 (regex is weakest here: Hinglish, "Looking for flatmate?", "service charge"). Exception: a listing the rules marked `not_rental` (sale/investment) stays so unless the AI is ≥ 0.8 sure, the same bar it needs to mark one `not_rental` itself; the AI's `kind` has no `not_rental` value. |
 | `availableFrom` | AI (normalised date) when valid. Keep regex's raw phrase in `data.regex` for display |
 | `society`, `locality`, `summary`, `otherUnits`, `isRental` | AI only (regex has no equivalent, or only a weak one for society) |
 | anything the user edited | **user wins**, always |
