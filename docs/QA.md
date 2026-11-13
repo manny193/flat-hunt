@@ -625,3 +625,15 @@ Engineer note 2 (2026-11-12, after senior review of 6ec48d3; change is small, fo
 - Also: `deleteListings` now removes the listing's `loc_queue` row. The daily purge does not (it would add a statement to a cron run that is already at the 48-statement budget); orphan `loc_queue` rows are harmless (`runLocate` closes a row whose listing is gone) and are a follow-up.
 - Senior follow-ups not done here: pass the run's remaining subrequest budget into `runLocate`; lookup can be starved on busy cron runs.
 - `npm test`: 208 pass, 0 fail.
+
+## PR #49 sale post kept not_rental (2026-11-13)
+
+Verdict: signed off. Branch `claude/flat-hunt-listing-quality-qtlfcp`, head 57bf91b.
+
+- `npm test`: 210 pass, 0 fail, 1 skipped.
+- Scratch scripts on `memoryDb()` with a fake AI (not committed), all pass:
+  - SALE post ingests as `not_rental` and is not in `publicListings({kind:'offer'})`. `runEnrich` with AI offer at 0.61 keeps `not_rental` and hidden. At 0.95 it becomes `offer`.
+  - Production state (kind offer, fieldSource ai, confidence 0.61) with `reparse` at version 3: `reparseStep` gives version 4, kind `not_rental`, `fieldSource.kind` 'rules', hidden. A second `reparseStep` returns null.
+  - A listing with `fieldSource.kind` 'user' stays `offer` after the re-check.
+  - An ordinary HSR rental (22000) stays `offer` with rent intact on both paths.
+- Not run: real Workers AI, D1, e2e.
