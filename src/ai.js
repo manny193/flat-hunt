@@ -201,7 +201,10 @@ export function mergeAi(l, v, { postId, model, now }) {
   const final = Math.round(v.confidence * Math.pow(0.85, v.bad) * (conflict ? 0.9 : 1) * 100) / 100;
   const set = (k, val) => { if (src[k] === 'user' || val == null || l[k] === val) return; if (!(k in regex)) regex[k] = l[k] ?? null; l[k] = val; src[k] = 'ai'; changed.push(k); };
   const before = { bhk: l.bhk, rent: l.rent };
-  if (final >= 0.5) for (const k of MEANING) set(k, f[k]);
+  // The AI's kind is only offer/seeking: it may not turn a post our rules found to be a sale ('not_rental') back
+  // into an offer unless it is as sure as it must be to mark one not_rental itself (Basavanagudi '₹8 Crore' post, 0.61).
+  const keepNotRental = l.kind === 'not_rental' && final < 0.8;
+  if (final >= 0.5) for (const k of MEANING) if (!(k === 'kind' && keepNotRental)) set(k, f[k]);
   for (const k of MONEY) {
     if (f[k] == null) continue;
     if (k === 'rent' && l.type === 'flatmate' && l.totalRent && f[k] === l.totalRent) continue; // the whole flat's rent, not the room's

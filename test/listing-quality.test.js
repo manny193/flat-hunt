@@ -218,3 +218,13 @@ test('area counts match what the homepage shows: hidden sale/seeking posts and s
   assert.equal(shown, 2, 'two offers on the homepage');
   assert.deepEqual([st.listings, st.listings7d], [shown, shown], 'picker count = homepage count');
 });
+
+test('re-check restores not_rental over a weak AI "offer" (RULES_VERSION 4), not over a confident one', () => {
+  const weak = { kind: 'offer', type: 'flat', fieldSource: { kind: 'ai', type: 'ai' }, ai: { confidence: 0.61, fields: { isRental: true, kind: 'offer' } }, posts: [{ text: SALE }] };
+  assert.equal(reparseListing(weak), true);
+  assert.equal(weak.kind, 'not_rental'); assert.equal(weak.fieldSource.kind, 'rules'); assert.equal(weak.fieldSource.type, 'ai', 'other AI fields untouched');
+  const sure = { kind: 'offer', type: 'flat', fieldSource: { kind: 'ai' }, ai: { confidence: 0.9, fields: { isRental: true, kind: 'offer' } }, posts: [{ text: SALE }] };
+  reparseListing(sure); assert.equal(sure.kind, 'offer');
+  const user = { kind: 'offer', type: 'flat', fieldSource: { kind: 'user' }, ai: { confidence: 0.5 }, posts: [{ text: SALE }] };
+  reparseListing(user); assert.equal(user.kind, 'offer', 'a user decision always wins');
+});
