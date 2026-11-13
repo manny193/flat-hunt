@@ -562,3 +562,66 @@ Verdict: signed off. Branch `claude/flat-hunt-listing-quality-qtlfcp`, head bbb7
   - On a `daily_cap` day (`maxPostsPerDay` 0) nothing is requeued and `requeuedFix` stays 0. The next normal day requeues and reads the posts.
   - Primary model input has `chat_template_kwargs {enable_thinking:false}`. `@cf/openai/gpt-oss-20b` input has `reasoning_effort:'low'` and no template kwargs. No phone digits in either.
 - Not run: real Workers AI (does the live model honour the flags), admin AI page in the browser, D1.
+
+## PR #48 location from post text (2026-11-12)
+
+Verdict: not signed off yet. Three Medium findings (F1 to F3) and two Low (F4, F5) for the engineer. Branch `claude/location-extraction-post-text-pbjthl`, head 1e297f3 on main a076fba.
+
+What I ran:
+
+| Area | How | Result |
+|---|---|---|
+| Suite | `npm test` | 207 tests, 206 pass, 0 fail, 1 skipped |
+| Hard constraints | Diff review | No dependencies added; no CSP change; migration 0005 is two new tables plus an index (add-only, no BEGIN/COMMIT, no FTS); `loc_queue` rows are deleted on merge; tests inject every `fetchFn` |
+| D1 budget | Throwaway script, 8 listings (6 due) on `budgeted()` | `runLocate` used 7 to 9 statements (LOC_QUERIES 12); cron gate `left() >= 24` is enough |
+| Public output | `serializeListing(l, 'public')` with `place` set | No `place`, society, coordinates or map link; `publicListing` is an allowlist |
+| Geocoder input | Read `nominatim()`, `findSociety`, `addressAt` | Only `"<society>, Bengaluru"` or lat/lon is sent, plus the User-Agent with `PUBLIC_BASE_URL` |
+| `backfillChunk` | 20 keywords (16 patterns after `likePatterns`) | Batch binds 35, 37 and 1 parameters, far below 100; `UPDATE ... FROM` for `loc_queue` runs on node:sqlite (D1 uses SQLite 3.4x) |
+| Edge cases | `parseMapUrl`, `resolveMapLink`, `findSociety`, `listingAreas` scripts | See findings |
+
+Findings:
+
+- F1 (Medium) Outbound request to any attacker-chosen host. `src/locate.js:19` `MAP_HOST` allows `google\.[a-z.]{2,8}`, so `google.evil.com`, `google.attack.io` and `google.com.evil.com` pass. Repro: `resolveMapLink('https://google.evil.com/x', fetch)` calls `fetch` on that URL (hop 0 is not a short host, so it is fetched). A poster can make the Worker request their server (leaks the Worker IP and `PUBLIC_BASE_URL` in the User-Agent, and a redirect can keep it going). It cannot reach private networks on Workers, but the allowlist is not an allowlist. Fix: anchor on real Google TLDs (`google.com`, `google.co.in`, a short list) or only fetch the three short hosts and parse full URLs without fetching. `serialize.js:26` uses the same loose pattern but only for masking, so it is harmless there.
+- F2 (Medium) Map links reach the model. `src/ai.js:105-106` `redact()` only masks `http(s)://`, `www.`, `maps.app.goo.gl`, `goo.gl`, `wa.me`, `facebook.com`. Repro: `redact('see google.com/maps/place/Sobha+Dream/@12.93,77.72,17z')`, `redact('maps.google.com/?q=12.9,77.7')`, `redact('g.co/kgs/abc')` come back unchanged, with coordinates. Breaks "map links are not sent to the model" and the CLAUDE.md redaction rule. Fix: add `g.co`, `google.<tld>/maps`, `maps.google.<tld>` (the `BARE_LINK` pattern in `src/serialize.js:26` already has them). Add a test.
+- F3 (Medium) Wrong place for one-word society names. `src/locate.js:96-103` `findSociety` accepts a hit when every core word is in the label, and `GENERIC` removes "Apartments", "Residency". Repro: `findSociety('Prestige Apartments', ...)` with a Nominatim row "Prestige Falcon City, Kanakapura Road" returns it (`coreTokens('Brigade Residency')` is just `['brigade']`). The address is cached under the society key for 30 days (negative) or forever (positive), tags the listing in the wrong area, and can alert that area's followers. Fix: require two core tokens or a city-wide unique name, or skip brand-only names; keep the "Sai Nest" rule.
+- F4 (Low) Backfill ignores "nearby". `src/db/repo.js:309` matches the keyword against raw post text. Repro: listing "2BHK in Bellandur ... 10 min from HSR Layout" with `place.nearby` set; add area HSR Layout and run `startBackfill`: listing gets areas `[1, 2]`, while `listingAreas` gives `[1]`. It stays wrong until the next re-check.
+- F5 (Low) Subrequests per run. `src/locate.js:59,135` `maxGeo` caps geocoder calls only; `resolveMapLink` follows up to 4 hops for each of 2 links per listing, 6 listings. Repro with a mock that always redirects to another short link: 53 fetches in one `runLocate` (50 is the Workers Free limit, before AI and Apify calls in the same cron). Normal links use 1 or 2 fetches per listing (12 in my second run), so this only bites with chains. The error is caught and retried, so it is not an outage. Fix: count hops against a per-run fetch budget (for example 20).
+- Also noted, not findings: `loc_queue` uses `INSERT OR IGNORE`, so a listing already `done` or `none` is never looked up again if a later post adds a society; `place.guess` is not used by backfill.
+
+Not run (disclosed): live Nominatim, Google and the real model; real D1; browser or e2e (no UI change in this PR).
+
+To re-test after fixes: `npm test`; rerun the F1 to F5 repros above (each is a three-line script on `memoryDb()`/mocked `fetchFn`).
+
+Engineer note (2026-11-12, after the findings above; for QA to re-test):
+
+- F1 fixed: `MAP_HOST` now lists Google's own hosts only (`google.com`, `google.<cc>`, `google.co.<cc>`, `google.com.<cc>`), and only short links (`maps.app.goo.gl`, `goo.gl`, `g.co`) are ever requested; a full Maps URL is parsed, never fetched.
+- F2 fixed: `redact()` masks scheme-less `google.*/maps`, `maps.google.*`, `g.co`, WhatsApp and `fb.me`/`m.me` links, and leftover `@lat,lon` coordinates.
+- F3 fixed: the hit's own name must not carry identifying words the society name lacks, so "Prestige Apartments" no longer matches "Prestige Falcon City".
+- F5 fixed: `runLocate` counts every request and starts no new listing once `MAX_FETCHES` (16) is reached; the rest stay queued.
+- F4 not fixed, by choice: the backfill runs as one SQL text scan and cannot apply the AI's "nearby" list. It is a documented limit (ARCHITECTURE §4.4); the listing is corrected at the next re-check.
+- Tests: `test/locate.test.js` "QA F1-F5". `npm test` 207 pass. The ingest timing test (`median < 10 ms`) fails intermittently on this sandbox today on `main` as well (10.8 to 15.1 ms in six runs on `origin/main`), so it is machine noise, not this PR.
+
+Re-test (2026-11-12, head 83187b2): signed off. No remaining Medium or High findings.
+
+What I ran:
+
+| Area | How | Result |
+|---|---|---|
+| Suite | `npm test` | 208 tests, 206 pass, 1 skipped, 1 fail: only the ingest timing test (`median < 10 ms`, known sandbox noise, not counted) |
+| F1 | `resolveMapLink` with `google.evil.com`, `google.com.evil.co`, `www.google.com@evil.com`, `google.com@evil.com`, `goo.gl@evil.com`, `goo.gl.evil.com`, `g.co.evil.com`, `google.co.evil.com`, a full `google.com:8080` Maps URL, `?u=g.co` | No fetch for any of them; the full Maps URL is parsed, not fetched. Only `http(s)://g.co`, `goo.gl`, `maps.app.goo.gl` are requested. A redirect to a non-Google host stops after 1 fetch; a goo.gl redirect loop stops at 4 fetches |
+| F2 | `redact()` with scheme-less `google.com/maps/...@lat,lon`, `maps.google.com/?q=`, `maps.google.co.in`, upper case `GOOGLE.CO.IN/maps`, `g.co/kgs`, `goo.gl/maps`, `maps.app.goo.gl`, bare `@lat,lon` | All become `[LINK]` |
+| F3 | `findSociety` with mocked Nominatim rows | "Prestige Apartments" vs "Prestige Falcon City" no match. "Sobha Dream Acres" matches itself and "... Phase 2" (generic word), not "Sobha Dream Gardens" or "... Road". "Brigade Meadows" does not match "Brigade Meadows Clubhouse". "Sai Nest" still skipped |
+| F5 | Read `runLocate`: `MAX_FETCHES` 16 checked before each new listing | Worst case is 16 plus one listing's own calls (2 links x 4 hops, a few geocoder calls), about 30, under 50. Rest stay queued |
+
+F4: accepted as a documented limit (Low). The listing self-corrects at the next re-check, and the cost of fixing it (per-listing JS in backfill) is not worth it.
+
+Observations, not blocking (Low): `redact()` leaves scheme-less Waze, Apple Maps and OpenStreetMap links with coordinates (`src/ai.js:106`); `coordinates alone` such as `12.93456, 77.72345` are not masked. Neither is a link to a person, and posters rarely write them; add to the pattern if cheap. A real society named with extra words that Nominatim shortens ("Puravankara Purva Atmosphere" vs "Purva Atmosphere") is skipped, which is the safe direction.
+
+Not run: live Nominatim, Google, the real model, real D1, e2e.
+
+Engineer note 2 (2026-11-12, after senior review of 6ec48d3; change is small, for QA's information):
+
+- Senior finding (Medium, required): `nominatim()` treated any non-2xx except 429/5xx as "not found", so a blocked geocoder (403) would cache every society as not found for 30 days. Fixed: only 404 is "not found"; any other non-2xx throws, the listing retries with backoff and nothing is cached. Test: "senior review: a blocked geocoder (403) ...".
+- Also: `deleteListings` now removes the listing's `loc_queue` row. The daily purge does not (it would add a statement to a cron run that is already at the 48-statement budget); orphan `loc_queue` rows are harmless (`runLocate` closes a row whose listing is gone) and are a follow-up.
+- Senior follow-ups not done here: pass the run's remaining subrequest budget into `runLocate`; lookup can be starved on busy cron runs.
+- `npm test`: 208 pass, 0 fail.

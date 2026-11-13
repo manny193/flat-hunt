@@ -16,7 +16,7 @@ The eval set is `test/fixtures/ai-eval-posts.json`.
 - **Not recommended:** Gemini free tier. Its limits are fine, but Google uses free-tier prompts for
   training and human review, and its terms say not to send personal information.
 - **Run a separate enrich pass.** Ingest stays exactly as it is (regex, dedupe, save) and marks new
-  posts `ai: pending`. An enrich step then sends 5 posts per model call. It starts with `ctx.waitUntil` right
+  posts `ai: pending` (since 2026-11-12 every stored post, not only followed areas; see §4a for areas). An enrich step then sends 5 posts per model call. It starts with `ctx.waitUntil` right
   after each ingest and also runs on its own cron as a safety net. The model's JSON is checked against a schema,
   every number it returns must appear in the post text, and the result is merged field by field with the
   regex output. The regex output is always kept.
@@ -348,6 +348,31 @@ const out = await env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
 
 Gemma 4 can produce a thinking trace on some hosts. If the response contains reasoning text, keep it off or
 strip it before `JSON.parse`, and recheck neurons per call.
+
+## 4a. Where is the flat (added 2026-11-12, shipped with the code)
+
+Founder's rule: the area comes only from what the post says, never from the group it was posted in, and
+nobody should have to fix an area by hand.
+
+| What the post gives | How the area is found |
+|---|---|
+| An area name our keywords know ("Green Glen Layout") | keyword match on the post text, at ingest (rules) |
+| An area written another way ("kormangla 4th blk", "behind Forum mall") | AI field `area`: the locality with its usual spelling, then keyword match |
+| Several places, some only for distance ("in Bellandur, 10 min from HSR") | AI field `nearby` (must be written in the post): those areas are removed, unless nothing else is left |
+| Only a society ("Sobha Dream Acres") | lookup on OpenStreetMap (Nominatim), bounded to Bangalore; the hit must carry the society's name. Until it answers, AI field `societyArea` (the model's own knowledge, "never guess") is used |
+| Only a Google Maps link | the short link is followed to the full Maps URL (place name + coordinates); coordinates are reverse-geocoded when the name names no area |
+| Nothing | no area; the post stays in the city-wide list |
+
+Details: `listingAreas()` in `src/core/logic.js`, `src/locate.js`, ARCHITECTURE §4.4. Map links are never sent
+to the model (redacted as `[LINK]`); the lookup sends only the society name or coordinates to OpenStreetMap.
+
+Limits to know:
+- Not verified against the live services from the build sandbox (network blocked there); all tests mock them.
+  First production day: check `scheduler.locate` in the admin scraper status and `places` on `#admin-ai`'s API.
+- OpenStreetMap does not know every small building. Not found = the post keeps the AI guess, or no area.
+- Posts the AI read before this change (`ai_status = 'done'`) keep their rule-based areas; they are not re-read.
+- Why not Google's Geocoding/Places API: it needs a billing account and a key; Nominatim is free and enough
+  at our volume (tens of look-ups a day, cached).
 
 ## 5. Measuring accuracy
 

@@ -68,20 +68,20 @@ function fakeAI(handler) {
 }
 const idsIn = input => [...input.messages.at(-1).content.matchAll(/<post id="(P\d+)"/g)].map(m => m[1]);
 
-test('enrich pass: only followed areas are queued, Workers AI results merged, neurons counted, phones never sent', async () => {
+test('enrich pass: every stored post is queued, followed area or not; Workers AI results merged, neurons counted, phones never sent', async () => {
   const t = await setup();
   const AI = fakeAI((model, input) => ({ response: { results: idsIn(input).map(id => result(id, { rent: input.messages.at(-1).content.includes('14k') && id === 'P1' ? 14000 : null, type: null, bhk: null, gender: 'female', confidence: 0.9 })) }, usage: { prompt_tokens: 2000, completion_tokens: 400 } }));
   const r = await runEnrich(t.repo, { AI }, { maxCalls: 4 });
-  assert.equal(r.done, 2, 'the HSR listing is in no followed area'); assert.equal(AI.calls.length, 1);
+  assert.equal(r.done, 3, 'the HSR listing nobody follows is read too'); assert.equal(AI.calls.length, 1);
   assert.equal(AI.calls[0].model, MODELS.primary);
   assert.deepEqual(AI.calls[0].input.response_format.type, 'json_schema');
   assert.doesNotMatch(JSON.stringify(AI.calls[0].input), /9000\d{6}/, 'no phone digits sent');
   const all = await t.repo.listListings();
   const gg = all.filter(l => l.areas.includes(t.gg.id));
   assert.ok(gg.every(l => l.aiStatus === 'done' && l.gender === 'female' && l.phones.length === 1));
-  assert.equal(all.find(l => l.areas.includes(t.hsr.id)).aiStatus, '');
+  assert.equal(all.find(l => l.areas.includes(t.hsr.id)).aiStatus, 'done');
   const s = (await t.repo.getSettings()).ai;
-  assert.equal(s.neurons, Math.ceil((2000 * 9091 + 400 * 27273) / 1e6)); assert.equal(s.posts, 2);
+  assert.equal(s.neurons, Math.ceil((2000 * 9091 + 400 * 27273) / 1e6)); assert.equal(s.posts, 3);
   assert.equal((await runEnrich(t.repo, { AI })).action, 'idle', 'nothing left');
 });
 
@@ -93,7 +93,7 @@ test('provider fallbacks: unavailable Gemma -> gpt-oss on Workers AI; daily allo
     return Response.json({ choices: [{ message: { content: JSON.stringify({ results: [...b.messages.at(-1).content.matchAll(/<post id="(P\d+)"/g)].map(m => result(m[1], { rent: null, bhk: null, type: null })) }) } }], usage: { total_tokens: 900 } }); };
   const r = await runEnrich(t.repo, { AI, GROQ_API_KEY: 'gk' }, { fetchFn });
   assert.deepEqual(AI.calls.map(c => c.model), [MODELS.primary, MODELS.cfFallback]);
-  assert.equal(groq.length, 1); assert.equal(r.done, 2); assert.equal(r.provider, 'groq');
+  assert.equal(groq.length, 1); assert.equal(r.done, 3); assert.equal(r.provider, 'groq');
   const s = (await t.repo.getSettings()).ai;
   assert.equal(s.cfModel, MODELS.cfFallback); assert.ok(s.cfPausedUntil > Date.now());
 
@@ -101,12 +101,12 @@ test('provider fallbacks: unavailable Gemma -> gpt-oss on Workers AI; daily allo
   const bad = fakeAI(() => ({ response: 'not json at all' }));
   let now = Date.now();
   const r2 = await runEnrich(t2.repo, { AI: bad }, { now, maxCalls: 4 });
-  assert.equal(r2.retry, 2, 'invalid JSON -> retry'); assert.equal(bad.calls.length, 3, 'batch, then one post at a time');
+  assert.equal(r2.retry, 3, 'invalid JSON -> retry'); assert.equal(bad.calls.length, 4, 'batch, then one post at a time');
   assert.equal((await runEnrich(t2.repo, { AI: bad }, { now: now + 60e3 })).action, 'idle', 'backoff: not due yet');
   for (let i = 0; i < 5; i++) { now += 24 * 36e5; await runEnrich(t2.repo, { AI: bad }, { now, maxCalls: 4 }); }
   const st = await t2.repo.aiStats(now);
-  assert.equal(st.byStatus.failed, 2); assert.equal(st.failures.length, 2);
-  assert.ok((await t2.repo.listListings()).filter(l => l.aiStatus === 'failed').length === 2, 'regex values stay, listing marked failed');
+  assert.equal(st.byStatus.failed, 3); assert.equal(st.failures.length, 3);
+  assert.ok((await t2.repo.listListings()).filter(l => l.aiStatus === 'failed').length === 3, 'regex values stay, listing marked failed');
 });
 
 test('re-dedupe after AI: same phone + BHK + rent within 2 % auto-merges; otherwise a merge suggestion', async () => {
@@ -169,11 +169,11 @@ test('after the fix, posts that failed with a parse error are retried once; othe
   const t = await setup();
   let now = Date.now();
   const thinking = fakeAI(() => chatReply('', 'length', 'thinking...'));
-  // The bug: five runs of thinking-only replies take both followed posts to 'failed'.
+  // The bug: five runs of thinking-only replies take every post to 'failed'.
   await t.repo.putSettings({ ai: { requeuedFix: AI_FIX } });
   for (let i = 0; i < 6; i++) { await runEnrich(t.repo, { AI: thinking }, { now, maxCalls: 4 }); now += 24 * 36e5; }
   let st = await t.repo.aiStats(now);
-  assert.equal(st.byStatus.failed, 2);
+  assert.equal(st.byStatus.failed, 3);
   assert.match(st.failures[0].error, /token limit thinking/, 'the admin page shows the real reason');
   // A failure that is not a parse error stays failed.
   await t.repo.db.run("UPDATE ai_queue SET error = 'listing or post gone' WHERE rowid = (SELECT min(rowid) FROM ai_queue WHERE status = 'failed')");
@@ -181,7 +181,7 @@ test('after the fix, posts that failed with a parse error are retried once; othe
   await t.repo.putSettings({ ai: { ...(await t.repo.getSettings()).ai, requeuedFix: AI_FIX - 1 } });
   const good = fakeAI((model, input) => chatReply(JSON.stringify({ results: idsIn(input).map(id => result(id, { rent: null, bhk: null, type: null })) })));
   const r = await runEnrich(t.repo, { AI: good }, { now, maxCalls: 4 });
-  assert.equal(r.done, 1, 'the parse failure was retried and read');
+  assert.equal(r.done, 2, 'the parse failures were retried and read');
   st = await t.repo.aiStats(now);
   assert.equal(st.byStatus.failed, 1, 'the other failure is untouched');
   assert.equal((await t.repo.getSettings()).ai.requeuedFix, AI_FIX);
